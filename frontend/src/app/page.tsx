@@ -577,7 +577,9 @@ function supplierShowsScrapeLoginBadge(supplierName: string): boolean {
     c.includes("haspl") ||
     c.includes("inoxmare") ||
     c.includes("bmkco") ||
-    c.includes("bmco")
+    c.includes("bmco") ||
+    c.includes("halfmann") ||
+    c.includes("argip")
   );
 }
 
@@ -697,6 +699,8 @@ type PackagingVariantRow = {
   price_unit?: string | null;
   /** Mekrs: „Skladem N balení“ z modálu / API, len ak je k dispozícii */
   mekrs_package_stock_text?: string | null;
+  /** Argip HTTP: SKU pre GraphQL košík (vybraný variant / konfigurácia). */
+  argip_sku?: string | null;
 };
 
 type SupplierScrapeState = {
@@ -845,6 +849,10 @@ function supplierNameIsHalfmann(name: string | null | undefined): boolean {
   return supplierNameCompactLower(name).includes("halfmann");
 }
 
+function supplierNameIsArgip(name: string | null | undefined): boolean {
+  return supplierNameCompactLower(name).includes("argip");
+}
+
 /** Pod logo: len krátky názov produktu — bez balenia, zátvoriek „(… ks)“ a „… ks“ na konci riadku. */
 function faboryUiProductTitleOnly(raw: string): string {
   const first = (raw || "").replace(/\r/g, "").split("\n")[0]?.trim() ?? "";
@@ -890,6 +898,21 @@ function formatScrapePriceAmount(value: number): string {
 
 /** Jednotná prípona pri jednotkových/katalógových cenách v UI (nezmení uložené `price_unit` v histórii). */
 const SCRAPE_PRICE_DISPLAY_SUFFIX = " / 100";
+
+/** Suffix za sumou: Argip = za 1 ks, Mekrs a pod. = / 100. */
+function scrapePriceUnitSuffix(
+  supplierName: string | null | undefined,
+  unit: string | null | undefined,
+): string {
+  const u = (unit || "").trim();
+  if (u === "per_1_ks") {
+    return " / 1 ks";
+  }
+  if (supplierNameIsArgip(supplierName)) {
+    return " / 1 ks";
+  }
+  return SCRAPE_PRICE_DISPLAY_SUFFIX;
+}
 
 /** Celé číslo s medzerami po trojiciach zprava (ako na mekrs.cz: „2 411 998“). */
 function formatIntegerCsThousands(value: number): string {
@@ -1403,11 +1426,27 @@ function ProductSupplierExpandedTableRow({
                                                 ),
                                             ),
                                         );
+                                      const argipHttpVariants =
+                                        Boolean(
+                                          scrape &&
+                                            !scrape.loading &&
+                                            supplierNameIsArgip(
+                                              offer.supplier,
+                                            ) &&
+                                            Array.isArray(pvars) &&
+                                            pvars.length >= 1 &&
+                                            pvars.some((pv) =>
+                                              Boolean(
+                                                (pv.argip_sku || "").trim(),
+                                              ),
+                                            ),
+                                        );
                                       const usesHttpCartVariants =
                                         mekrsHttpVariants ||
                                         hopefixHttpVariants ||
                                         hasplHttpVariants ||
-                                        inoxmareHttpVariants;
+                                        inoxmareHttpVariants ||
+                                        argipHttpVariants;
                                       /** Hopefix: HTTP môže vrátiť variant bez product_id — stále treba riadok pre živú cenu/sklad. */
                                       const hopefixHasPackagingFromScrape =
                                         supplierNameIsHopefix(
@@ -1460,6 +1499,10 @@ function ProductSupplierExpandedTableRow({
                                         activePv?.price_unit?.trim() ||
                                         scrape?.price_unit?.trim() ||
                                         null;
+                                      const rowPriceSuffix = scrapePriceUnitSuffix(
+                                        offer.supplier,
+                                        rowPriceUnit,
+                                      );
                                       const rowStockText =
                                         mekrsStockSummaryOnly
                                           ? stockDisplayText
@@ -1857,6 +1900,9 @@ function ProductSupplierExpandedTableRow({
                                                                 ) ||
                                                                   supplierUsesHasplStylePackLabel(
                                                                     offer.supplier,
+                                                                  ) ||
+                                                                  supplierNameIsArgip(
+                                                                    offer.supplier,
                                                                   )
                                                                   ? "text-left"
                                                                   : "font-medium leading-snug text-slate-900",
@@ -1891,6 +1937,22 @@ function ProductSupplierExpandedTableRow({
                                                                     pv.raw_pack_quantity
                                                                   }
                                                                 />
+                                                              ) : supplierNameIsArgip(
+                                                                  offer.supplier,
+                                                                ) ? (
+                                                                <div className="leading-snug">
+                                                                  <div className="font-medium text-slate-900">
+                                                                    {pv.label?.trim() ||
+                                                                      `Variant ${vi + 1}`}
+                                                                  </div>
+                                                                  <div className="mt-0.5 text-[9px] font-normal text-slate-600 sm:text-[10px]">
+                                                                    {(pv.raw_pack_quantity || "").trim() ||
+                                                                      (pv.pack_quantity != null &&
+                                                                      pv.pack_quantity >= 1
+                                                                        ? `od ${pv.pack_quantity} ks`
+                                                                        : "")}
+                                                                  </div>
+                                                                </div>
                                                               ) : (
                                                                 pv.label?.trim() ||
                                                                 `Variant ${vi + 1}`
@@ -1906,9 +1968,11 @@ function ProductSupplierExpandedTableRow({
                                                                   {pv.currency_symbol?.trim() ||
                                                                     "€"}
                                                                   <span className="text-[9px] font-normal text-slate-500 sm:text-[11px]">
-                                                                    {
-                                                                      SCRAPE_PRICE_DISPLAY_SUFFIX
-                                                                    }
+                                                                    {scrapePriceUnitSuffix(
+                                                                      offer.supplier,
+                                                                      pv.price_unit ??
+                                                                        scrape?.price_unit,
+                                                                    )}
                                                                   </span>
                                                                 </>
                                                               ) : (
@@ -2036,6 +2100,9 @@ function ProductSupplierExpandedTableRow({
                                                               ) ||
                                                                 supplierUsesHasplStylePackLabel(
                                                                   offer.supplier,
+                                                                ) ||
+                                                                supplierNameIsArgip(
+                                                                  offer.supplier,
                                                                 )
                                                                 ? ""
                                                                 : "text-sm font-semibold text-slate-900",
@@ -2070,6 +2137,53 @@ function ProductSupplierExpandedTableRow({
                                                                   pv.raw_pack_quantity
                                                                 }
                                                               />
+                                                            ) : supplierNameIsArgip(
+                                                                offer.supplier,
+                                                              ) ? (
+                                                              <div className="space-y-0.5">
+                                                                <div className="text-sm font-semibold text-slate-900">
+                                                                  {pv.label?.trim() ||
+                                                                    `Variant ${vi + 1}`}
+                                                                </div>
+                                                                <div className="text-[10px] font-normal text-slate-600 sm:text-[11px]">
+                                                                  {pv.price_eur != null &&
+                                                                  Number.isFinite(
+                                                                    pv.price_eur,
+                                                                  ) ? (
+                                                                    <>
+                                                                      {formatScrapePriceAmount(
+                                                                        pv.price_eur,
+                                                                      )}{" "}
+                                                                      {pv.currency_symbol?.trim() ||
+                                                                        "€"}
+                                                                      <span className="text-slate-500">
+                                                                        {scrapePriceUnitSuffix(
+                                                                          offer.supplier,
+                                                                          pv.price_unit ??
+                                                                            scrape?.price_unit,
+                                                                        )}
+                                                                      </span>
+                                                                    </>
+                                                                  ) : (
+                                                                    <span className="text-slate-500">
+                                                                      Cena —
+                                                                    </span>
+                                                                  )}
+                                                                  <span className="text-slate-400">
+                                                                    {" "}
+                                                                    ·{" "}
+                                                                  </span>
+                                                                  <span>
+                                                                    {(pv.raw_pack_quantity || "")
+                                                                      .trim() ||
+                                                                      (pv.pack_quantity !=
+                                                                        null &&
+                                                                      pv.pack_quantity >= 1
+                                                                        ? `od ${pv.pack_quantity} ks`
+                                                                        : "—")}
+                                                                  </span>
+                                                                </div>
+                                                              </div>
                                                             ) : (
                                                               pv.label?.trim() ||
                                                               `Variant ${vi + 1}`
@@ -2100,9 +2214,7 @@ function ProductSupplierExpandedTableRow({
                                                             )}{" "}
                                                             {rowPriceSymbol}
                                                             <span className="text-[9px] font-normal text-slate-500 sm:text-[11px]">
-                                                              {
-                                                                SCRAPE_PRICE_DISPLAY_SUFFIX
-                                                              }
+                                                              {rowPriceSuffix}
                                                             </span>
                                                           </>
                                                         ) : (
@@ -2121,9 +2233,7 @@ function ProductSupplierExpandedTableRow({
                                                         )}{" "}
                                                         {rowPriceSymbol}
                                                         <span className="text-[9px] font-normal text-slate-500 sm:text-[11px]">
-                                                          {
-                                                            SCRAPE_PRICE_DISPLAY_SUFFIX
-                                                          }
+                                                          {rowPriceSuffix}
                                                         </span>
                                                       </>
                                                     ) : (
@@ -3190,7 +3300,8 @@ export default function Home() {
                   Boolean((row.mekrs_variant_id || "").trim()) ||
                   Boolean((row.hopefix_product_id || "").trim()) ||
                   Boolean((row.haspl_variant_code || "").trim()) ||
-                  Boolean((row.inoxmare_product_id || "").trim()),
+                  Boolean((row.inoxmare_product_id || "").trim()) ||
+                  Boolean((row.argip_sku || "").trim()),
               ));
           if (pvarsNeedVariantPick) {
             const baseCk = cartStorageKey(sid, code, null);

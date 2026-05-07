@@ -2302,6 +2302,7 @@ async def _argip_get_supplier_data_via_http(
         "raw_stock": f"{best_stock} ks",
         "pack_quantity": min_qty,
         "raw_pack_quantity": f"min. {min_qty} ks",
+        "price_unit": "per_1_ks",
         "packaging_variants": pvars,
         "logged_in": True,
         "argip_via_http": True,
@@ -6614,6 +6615,29 @@ class ScraperService:
                         _remote_mekrs_cart_snapshot, uid, sid, cart
                     )
                 return result
+            if _supplier_is_halfmann(supplier):
+                base_hf = halfmann_base_url(supplier.shop_url or "")
+                async with HalfmannHttpClient(base_hf) as client:
+                    await client.ensure_login(supplier.username, supplier.password)
+                return {
+                    **base,
+                    "remote_supported": True,
+                    "logged_in": True,
+                    "total_eur": None,
+                    "line_count": 0,
+                    "message": None,
+                }
+            if _supplier_is_argip(supplier):
+                async with ArgipHttpClient(shop_url=supplier.shop_url or "") as client:
+                    await client.ensure_login(supplier.username, supplier.password)
+                return {
+                    **base,
+                    "remote_supported": True,
+                    "logged_in": True,
+                    "total_eur": None,
+                    "line_count": 0,
+                    "message": None,
+                }
         except Exception as exc:
             return {
                 **base,
@@ -6726,6 +6750,33 @@ class ScraperService:
                         _remote_cart_detail_cache, uid, sid, result
                     )
                 return result
+            if _supplier_is_halfmann(supplier):
+                base_hf = halfmann_base_url(supplier.shop_url or "")
+                async with HalfmannHttpClient(base_hf) as client:
+                    await client.ensure_login(supplier.username, supplier.password)
+                return {
+                    **out,
+                    "remote_supported": True,
+                    "logged_in": True,
+                    "total_eur": None,
+                    "lines": [],
+                    "message": (
+                        "Prihlásenie funguje; zoznam položiek košíka cez API zatiaľ nečítame."
+                    ),
+                }
+            if _supplier_is_argip(supplier):
+                async with ArgipHttpClient(shop_url=supplier.shop_url or "") as client:
+                    await client.ensure_login(supplier.username, supplier.password)
+                return {
+                    **out,
+                    "remote_supported": True,
+                    "logged_in": True,
+                    "total_eur": None,
+                    "lines": [],
+                    "message": (
+                        "Prihlásenie funguje; zoznam položiek košíka cez API zatiaľ nečítame."
+                    ),
+                }
         except Exception as exc:
             return {
                 **out,
