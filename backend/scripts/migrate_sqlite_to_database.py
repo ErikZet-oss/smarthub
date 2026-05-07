@@ -110,7 +110,7 @@ def _copy_table(src: Session, dst: Session, model: type[SQLModel]) -> int:
 
 def _sync_postgres_sequences(session: Session) -> None:
     for table in TABLES_IN_DELETE_ORDER:
-        session.exec(
+        session.execute(
             text(
                 "SELECT setval("
                 "pg_get_serial_sequence(:table_name, 'id'), "
