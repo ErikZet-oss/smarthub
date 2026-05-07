@@ -1,4 +1,6 @@
 import asyncio
+import json
+from urllib.parse import quote
 
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
@@ -50,6 +52,33 @@ from app.services.user_credentials import (
 
 router = APIRouter()
 automation = AutomationEngine()
+
+
+def _supplier_product_url(supplier: Supplier, supplier_code: str | None) -> str | None:
+    code = (supplier_code or "").strip()
+    if not code:
+        return None
+    raw_cfg = (supplier.cart_config_json or "").strip()
+    if raw_cfg:
+        try:
+            cfg = json.loads(raw_cfg)
+        except Exception:
+            cfg = {}
+        if isinstance(cfg, dict):
+            template = cfg.get("search_via_url_template")
+            if isinstance(template, str):
+                tmpl = template.strip()
+                if tmpl:
+                    if "{code}" in tmpl:
+                        return tmpl.replace("{code}", quote(code, safe=""))
+                    sep = "&" if "?" in tmpl else "?"
+                    return f"{tmpl}{sep}q={quote(code, safe='')}"
+    base = (supplier.shop_url or "").strip()
+    if not base:
+        return None
+    root = base.rstrip("/")
+    sep = "&" if "?" in root else "?"
+    return f"{root}{sep}q={quote(code, safe='')}"
 
 
 def _next_supplier_sort_order(session: Session) -> int:
@@ -366,6 +395,9 @@ async def search_products(
                         supplier=supplier.name,
                         supplier_id=supplier.id,
                         supplier_code=mapping.supplier_code,
+                        supplier_product_url=_supplier_product_url(
+                            supplier, mapping.supplier_code
+                        ),
                         price_eur=price_eur,
                         stock=stock,
                         logo_url=supplier_logo_public_url(supplier.logo_path),
@@ -382,6 +414,9 @@ async def search_products(
                             supplier=auto.supplier,
                             supplier_id=supplier.id,
                             supplier_code=auto.supplier_code,
+                            supplier_product_url=_supplier_product_url(
+                                supplier, auto.supplier_code
+                            ),
                             price_eur=auto.price_eur,
                             stock=auto.stock,
                             logo_url=supplier_logo_public_url(supplier.logo_path),

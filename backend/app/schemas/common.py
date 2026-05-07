@@ -23,6 +23,7 @@ class SupplierOffer(BaseModel):
     supplier_code: Optional[str] = None
     logo_url: Optional[str] = None
     supplier_id: Optional[int] = None
+    supplier_product_url: Optional[str] = None
 
 
 class ProductComparison(BaseModel):
