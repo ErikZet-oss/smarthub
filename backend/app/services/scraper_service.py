@@ -2030,6 +2030,26 @@ async def _argip_get_supplier_data_via_http(
         return 2
 
     def _price_of(it: dict[str, Any]) -> Optional[float]:
+        def _to_float(value: Any) -> Optional[float]:
+            if value is None:
+                return None
+            if isinstance(value, (int, float)):
+                return round(float(value), 4)
+            txt = str(value).strip().replace("\xa0", " ").replace("€", "").strip()
+            txt = txt.replace(" ", "")
+            if "," in txt and "." not in txt:
+                txt = txt.replace(",", ".")
+            try:
+                return round(float(txt), 4)
+            except (TypeError, ValueError):
+                return None
+
+        # Priame polia (niektoré Argip endpointy vracajú cenu takto).
+        for key in ("price", "price_without_tax", "final_price", "regular_price"):
+            direct = _to_float(it.get(key))
+            if direct is not None:
+                return direct
+
         pr = (it.get("price_range") or {}) if isinstance(it, dict) else {}
         mp = (pr.get("minimum_price") or {}) if isinstance(pr, dict) else {}
         for key in (
@@ -2041,10 +2061,30 @@ async def _argip_get_supplier_data_via_http(
             "default_price",
         ):
             fp = (mp.get(key) or {}) if isinstance(mp, dict) else {}
-            try:
-                return round(float(fp.get("value")), 4)
-            except (TypeError, ValueError):
-                continue
+            nested = _to_float(fp.get("value") if isinstance(fp, dict) else None)
+            if nested is not None:
+                return nested
+
+        # Fallback: ceny môžu byť v zozname attributes (Magento custom schema).
+        attrs = it.get("attributes")
+        if isinstance(attrs, list):
+            preferred_codes = (
+                "price",
+                "price_without_tax",
+                "catalog_price",
+                "basic_price",
+                "net_price",
+            )
+            for code in preferred_codes:
+                for row in attrs:
+                    if not isinstance(row, dict):
+                        continue
+                    if str(row.get("attribute_code") or "").strip().lower() != code:
+                        continue
+                    attr_price = _to_float(row.get("attribute_value"))
+                    if attr_price is not None:
+                        return attr_price
+
         return None
 
     def _stock_of(it: dict[str, Any]) -> int:
@@ -2058,24 +2098,31 @@ async def _argip_get_supplier_data_via_http(
 
     def _tiers_of(it: dict[str, Any]) -> list[tuple[int, Optional[float]]]:
         out: list[tuple[int, Optional[float]]] = []
-        raw = it.get("price_tiers")
-        if not isinstance(raw, list):
-            return out
-        for row in raw:
-            if not isinstance(row, dict):
+        for key in ("price_tiers", "tier_prices"):
+            raw = it.get(key)
+            if not isinstance(raw, list):
                 continue
-            try:
-                qty = int(float(row.get("quantity")))
-            except (TypeError, ValueError):
-                continue
-            if qty < 1:
-                continue
-            fp = row.get("final_price")
-            try:
-                val = round(float((fp or {}).get("value")), 4) if isinstance(fp, dict) else None
-            except (TypeError, ValueError):
-                val = None
-            out.append((qty, val))
+            for row in raw:
+                if not isinstance(row, dict):
+                    continue
+                try:
+                    qty = int(float(row.get("quantity") or row.get("qty")))
+                except (TypeError, ValueError):
+                    continue
+                if qty < 1:
+                    continue
+                fp = row.get("final_price") or row.get("price")
+                if isinstance(fp, dict):
+                    try:
+                        val = round(float(fp.get("value")), 4)
+                    except (TypeError, ValueError):
+                        val = None
+                else:
+                    try:
+                        val = round(float(fp), 4) if fp is not None else None
+                    except (TypeError, ValueError):
+                        val = None
+                out.append((qty, val))
         out.sort(key=lambda x: x[0])
         return out
 
