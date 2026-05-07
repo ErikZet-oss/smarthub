@@ -88,6 +88,23 @@ def _next_supplier_sort_order(session: Session) -> int:
     return max((s.sort_order or 0) for s in suppliers) + 10
 
 
+def _normalize_supplier_cart_config_json(name: str, raw_cfg: str | None) -> str | None:
+    cfg_text = (raw_cfg or "").strip()
+    if not cfg_text:
+        return None
+    # Fabory na Render beží bez X servera; browser_channel=chrome spôsobí pád headed browsera.
+    # Ak sa hodnota niekde obnoví zo šablóny, pri uložení ju tu odstránime.
+    if "fabory" in (name or "").strip().lower():
+        try:
+            cfg = json.loads(cfg_text)
+            if isinstance(cfg, dict) and "browser_channel" in cfg:
+                cfg.pop("browser_channel", None)
+                return json.dumps(cfg, ensure_ascii=False, indent=2)
+        except Exception:
+            return cfg_text
+    return cfg_text
+
+
 class SupplierUpsertPayload(BaseModel):
     id: int | None = None
     name: str
@@ -967,6 +984,10 @@ def upsert_supplier(
     if not payload.shop_url.startswith("http://") and not payload.shop_url.startswith("https://"):
         raise HTTPException(status_code=400, detail="shop_url must start with http:// or https://")
 
+    normalized_cart_cfg = _normalize_supplier_cart_config_json(
+        payload.name, payload.cart_config_json
+    )
+
     supplier = None
     if payload.id is not None:
         supplier = session.get(Supplier, payload.id)
@@ -983,7 +1004,7 @@ def upsert_supplier(
             password=payload.password,
             is_connected=True,
             code_column=payload.code_column or None,
-            cart_config_json=payload.cart_config_json or None,
+            cart_config_json=normalized_cart_cfg,
             free_shipping_threshold_eur=payload.free_shipping_threshold_eur,
             sort_order=_next_supplier_sort_order(session),
         )
@@ -995,7 +1016,7 @@ def upsert_supplier(
         supplier.password = payload.password
         supplier.is_connected = True
         supplier.code_column = payload.code_column or None
-        supplier.cart_config_json = payload.cart_config_json or None
+        supplier.cart_config_json = normalized_cart_cfg
         supplier.free_shipping_threshold_eur = payload.free_shipping_threshold_eur
 
     session.commit()
