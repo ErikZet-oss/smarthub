@@ -21,3 +21,45 @@ body {
   color: var(--foreground);
   font-family: var(--font-inter), Arial, Helvetica, sans-serif;
 }
+
+/* App-level dark mode override for current Tailwind utility palette. */
+.smarthub-dark {
+  background: #020617 !important;
+  color: #e2e8f0 !important;
+}
+
+.smarthub-dark [class*="bg-white"],
+.smarthub-dark [class*="bg-slate-50"],
+.smarthub-dark [class*="bg-slate-100"] {
+  background-color: #0f172a !important;
+}
+
+.smarthub-dark [class*="from-slate-50"],
+.smarthub-dark [class*="to-sky-50"],
+.smarthub-dark [class*="via-white"] {
+  --tw-gradient-from: #0f172a !important;
+  --tw-gradient-to: #111827 !important;
+  --tw-gradient-stops: var(--tw-gradient-from), #111827, var(--tw-gradient-to) !important;
+}
+
+.smarthub-dark [class*="text-slate-9"],
+.smarthub-dark [class*="text-slate-8"],
+.smarthub-dark [class*="text-slate-7"],
+.smarthub-dark [class*="text-slate-6"],
+.smarthub-dark [class*="text-slate-5"] {
+  color: #e2e8f0 !important;
+}
+
+.smarthub-dark [class*="border-slate-1"],
+.smarthub-dark [class*="border-slate-2"],
+.smarthub-dark [class*="border-slate-3"] {
+  border-color: #334155 !important;
+}
+
+.smarthub-dark input,
+.smarthub-dark textarea,
+.smarthub-dark select {
+  background-color: #111827 !important;
+  color: #e2e8f0 !important;
+  border-color: #334155 !important;
+}

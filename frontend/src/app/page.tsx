@@ -31,6 +31,7 @@ import {
   Loader2,
   LogOut,
   Menu,
+  Moon,
   PackageSearch,
   Plus,
   ShieldCheck,
@@ -38,6 +39,7 @@ import {
   Terminal,
   Truck,
   Trash2,
+  Sun,
   X,
 } from "lucide-react";
 
@@ -2506,6 +2508,7 @@ export default function Home() {
   const [activeView, setActiveView] = useState<View>("vyhladavanie");
   const [navCollapsed, setNavCollapsed] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [themeMode, setThemeMode] = useState<"light" | "dark">("light");
   const [openProduct, setOpenProduct] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [saveState, setSaveState] = useState<Record<number, string>>({});
@@ -2517,6 +2520,29 @@ export default function Home() {
   const [suppliersExcelPanelOpen, setSuppliersExcelPanelOpen] = useState(true);
   const [suppliersShippingHintOpen, setSuppliersShippingHintOpen] = useState(false);
   const [supplierReorderBusy, setSupplierReorderBusy] = useState(false);
+  useEffect(() => {
+    const stored =
+      typeof window !== "undefined" ?
+        window.localStorage.getItem("smarthub_theme_mode")
+      : null;
+    if (stored === "dark" || stored === "light") {
+      setThemeMode(stored);
+      return;
+    }
+    if (
+      typeof window !== "undefined" &&
+      window.matchMedia &&
+      window.matchMedia("(prefers-color-scheme: dark)").matches
+    ) {
+      setThemeMode("dark");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("smarthub_theme_mode", themeMode);
+  }, [themeMode]);
+
   const [excelFilePath, setExcelFilePath] = useState(
     "C:\\Users\\zahor\\OneDrive\\Počítač\\Projekty AI\\Smart\\data\\Smart_data_Gamechanger.xlsx",
   );
@@ -4560,7 +4586,12 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen w-full bg-slate-50 text-slate-900">
+    <div
+      className={cn(
+        "min-h-screen w-full bg-slate-50 text-slate-900",
+        themeMode === "dark" && "smarthub-dark",
+      )}
+    >
       {toastMessage ? (
         <div
           className="fixed left-2 right-2 top-3 z-[100] max-w-sm rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 shadow-lg sm:left-auto sm:right-4 sm:top-4"
@@ -4688,6 +4719,28 @@ export default function Home() {
               navCollapsed ? "md:pt-2" : "md:pt-3",
             )}
           >
+            <button
+              type="button"
+              title={navCollapsed ? "Prepnúť tému" : undefined}
+              onClick={() =>
+                setThemeMode((prev) => (prev === "dark" ? "light" : "dark"))
+              }
+              className={cn(
+                "mb-1 flex w-full items-center rounded-lg text-sm text-slate-300 transition-colors hover:bg-slate-800 hover:text-slate-100",
+                navCollapsed
+                  ? "justify-center px-2 py-2 md:px-2 md:py-2.5"
+                  : "gap-2 px-2.5 py-2 md:gap-3 md:px-3 md:py-2",
+              )}
+            >
+              {themeMode === "dark" ? (
+                <Sun className="h-4 w-4 shrink-0" aria-hidden />
+              ) : (
+                <Moon className="h-4 w-4 shrink-0" aria-hidden />
+              )}
+              <span className={cn(navCollapsed ? "md:hidden" : "")}>
+                {themeMode === "dark" ? "Svetlý mód" : "Tmavý mód"}
+              </span>
+            </button>
             <button
               type="button"
               title={navCollapsed ? "Odhlásiť" : undefined}
@@ -7106,6 +7159,18 @@ export default function Home() {
                 );
               })}
             </div>
+            <button
+              type="button"
+              onClick={() => setThemeMode((prev) => (prev === "dark" ? "light" : "dark"))}
+              className="mt-2 flex w-full items-center justify-center gap-2 rounded-md border border-slate-200 px-2.5 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              {themeMode === "dark" ? (
+                <Sun className="h-4 w-4" />
+              ) : (
+                <Moon className="h-4 w-4" />
+              )}
+              {themeMode === "dark" ? "Svetlý mód" : "Tmavý mód"}
+            </button>
             <button
               type="button"
               onClick={() => {
