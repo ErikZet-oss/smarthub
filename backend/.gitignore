@@ -1,0 +1,4 @@
+# Zálohy dodávateľov obsahujú heslá a údaje z DB — necommitovať.
+data/backups/
+
+.env

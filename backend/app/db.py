@@ -1,0 +1,81 @@
+from pathlib import Path
+
+from sqlalchemy import text
+from sqlmodel import Session, SQLModel, create_engine
+
+# Vždy backend/procurement.db — relatívna cesta ./procurement.db závisela od cwd pri štarte
+# uvicornu (iný priečinok = nová prázdna DB = „zmizli dáta“).
+_BACKEND_ROOT = Path(__file__).resolve().parent.parent
+DATABASE_FILE = _BACKEND_ROOT / "procurement.db"
+DATABASE_URL = f"sqlite:///{DATABASE_FILE.as_posix()}"
+engine = create_engine(DATABASE_URL, echo=False, connect_args={"check_same_thread": False})
+
+
+def create_db_and_tables() -> None:
+    SQLModel.metadata.create_all(engine)
+
+
+def migrate_sqlite_schema() -> None:
+    """Pridá chýbajúce stĺpce do existujúcej SQLite DB (create_all ich nepridá)."""
+    with engine.connect() as conn:
+        result = conn.execute(text("PRAGMA table_info(supplier)"))
+        columns = {row[1] for row in result}
+        if "code_column" not in columns:
+            conn.execute(text("ALTER TABLE supplier ADD COLUMN code_column VARCHAR"))
+            conn.commit()
+        result2 = conn.execute(text("PRAGMA table_info(supplier)"))
+        columns2 = {row[1] for row in result2}
+        if "cart_config_json" not in columns2:
+            conn.execute(text("ALTER TABLE supplier ADD COLUMN cart_config_json VARCHAR"))
+            conn.commit()
+        result3 = conn.execute(text("PRAGMA table_info(supplier)"))
+        columns3 = {row[1] for row in result3}
+        if "logo_path" not in columns3:
+            conn.execute(text("ALTER TABLE supplier ADD COLUMN logo_path VARCHAR"))
+            conn.commit()
+        result4 = conn.execute(text("PRAGMA table_info(supplier)"))
+        columns4 = {row[1] for row in result4}
+        if "free_shipping_threshold_eur" not in columns4:
+            conn.execute(
+                text("ALTER TABLE supplier ADD COLUMN free_shipping_threshold_eur REAL")
+            )
+            conn.commit()
+        result_so = conn.execute(text("PRAGMA table_info(supplier)"))
+        cols_so = {row[1] for row in result_so}
+        if "sort_order" not in cols_so:
+            conn.execute(text("ALTER TABLE supplier ADD COLUMN sort_order INTEGER DEFAULT 0"))
+            conn.commit()
+        prod_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(product)"))}
+        if "v_class" not in prod_cols:
+            conn.execute(text("ALTER TABLE product ADD COLUMN v_class VARCHAR"))
+            conn.commit()
+        prod_cols2 = {row[1] for row in conn.execute(text("PRAGMA table_info(product)"))}
+        if "y_money_name" not in prod_cols2:
+            conn.execute(text("ALTER TABLE product ADD COLUMN y_money_name VARCHAR"))
+            conn.commit()
+        prod_cols3 = {row[1] for row in conn.execute(text("PRAGMA table_info(product)"))}
+        if "image_filename" not in prod_cols3:
+            conn.execute(text("ALTER TABLE product ADD COLUMN image_filename VARCHAR"))
+            conn.commit()
+
+        fm_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(fieldmapping)"))}
+        if "v_class_column" not in fm_cols:
+            conn.execute(text("ALTER TABLE fieldmapping ADD COLUMN v_class_column VARCHAR"))
+            conn.commit()
+        fm_cols2 = {row[1] for row in conn.execute(text("PRAGMA table_info(fieldmapping)"))}
+        if "y_money_name_column" not in fm_cols2:
+            conn.execute(
+                text("ALTER TABLE fieldmapping ADD COLUMN y_money_name_column VARCHAR")
+            )
+            conn.commit()
+        fm_cols3 = {row[1] for row in conn.execute(text("PRAGMA table_info(fieldmapping)"))}
+        if "image_filename_column" not in fm_cols3:
+            conn.execute(
+                text("ALTER TABLE fieldmapping ADD COLUMN image_filename_column VARCHAR")
+            )
+            conn.commit()
+
+
+def get_session():
+    with Session(engine) as session:
+        yield session

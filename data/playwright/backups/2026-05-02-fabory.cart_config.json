@@ -1,0 +1,21 @@
+{
+  "login_form_selector": "#faboryLoginForm",
+  "optional_cookie_dismiss_selector": "button#deny.uc-deny-button",
+  "username_selector": "#j_username",
+  "password_selector": "#j_password",
+  "login_button_selector": "form#faboryLoginForm button.btn.btn-green.btn-block.btn-round[type=\"submit\"]",
+  "search_input_selector": "#search",
+  "search_submit_selector": "button.btn.btn-default.form-control.basic-search[type=\"submit\"]",
+  "post_search_wait_ms": 1000,
+  "price_stock_timeout_ms": 5000,
+  "price_selector": "b.price[data-product-price-net-adp]",
+  "stock_selector": "span.stock-txt[data-product-stock-status]",
+  "pack_quantity_selector": "input.js-alp-add-to-cart.alp-add-to-cart",
+  "quantity_input_selector": "input.js-alp-add-to-cart.alp-add-to-cart",
+  "add_to_cart_selector": "button[data-add-to-cart-trigger].adp-btn",
+  "post_modal_open_wait_ms": 400,
+  "post_add_wait_ms": 1800,
+  "post_login_wait_ms": 2200,
+  "headless": false,
+  "browser_channel": "chrome"
+}

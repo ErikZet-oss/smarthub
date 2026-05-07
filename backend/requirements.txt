@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+sqlmodel
+playwright
+playwright-stealth>=2.0,<3
+httpx
+python-multipart
+openpyxl
+bcrypt
+PyJWT
