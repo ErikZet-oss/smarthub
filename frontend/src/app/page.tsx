@@ -1605,12 +1605,12 @@ function ProductSupplierExpandedTableRow({
                                       const supplierHeader = (
                                         <div
                                           className={cn(
-                                            "flex min-w-0 flex-1 flex-wrap items-start gap-1 rounded-md border p-1.5 shadow-sm ring-1 sm:gap-1.5 sm:flex-nowrap sm:items-center",
+                                            "flex min-w-0 flex-1 flex-wrap items-start gap-0.5 rounded-md border p-1 shadow-sm ring-1 sm:gap-1.5 sm:p-1.5 sm:flex-nowrap sm:items-center",
                                             supplierDetailHeaderBarClass(offerIndex),
                                           )}
                                         >
                                           <div
-                                            className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-md border border-slate-200/90 bg-white shadow-sm ring-1 ring-slate-100/60 sm:h-9 sm:w-9"
+                                            className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-md border border-slate-200/90 bg-white shadow-sm ring-1 ring-slate-100/60 sm:h-9 sm:w-9"
                                             title="Logo dodávateľa"
                                           >
                                             {publicApiAssetUrl(offer.logo_url) ? (
@@ -1632,7 +1632,7 @@ function ProductSupplierExpandedTableRow({
                                           </div>
                                           <div className="min-w-0 flex-1">
                                             <div className="flex flex-wrap items-center gap-x-1 gap-y-0.5">
-                                              <p className="min-w-0 max-w-[9rem] truncate text-[11px] font-semibold leading-snug text-slate-900 sm:max-w-[13rem] sm:text-[13px]">
+                                              <p className="min-w-0 max-w-[7.4rem] truncate text-[10px] font-semibold leading-tight text-slate-900 sm:max-w-[13rem] sm:text-[13px]">
                                                 {offer.supplier}
                                               </p>
                                               {supplierShowsScrapeLoginBadge(
@@ -1656,7 +1656,7 @@ function ProductSupplierExpandedTableRow({
                                                 </span>
                                               ) : null}
                                             </div>
-                                            <p className="truncate text-[10px] leading-tight text-slate-500 sm:text-[11px]">
+                                            <p className="truncate text-[9px] leading-tight text-slate-500 sm:text-[11px]">
                                               Kód:{" "}
                                               {offer.supplier_code?.trim()
                                                 ? offer.supplier_code
@@ -1701,7 +1701,7 @@ function ProductSupplierExpandedTableRow({
                                                 spellCheck={true}
                                                 placeholder="Poznámka"
                                                 title="Uloží sa v prehliadači; pri Košíku sa skopíruje do záznamu."
-                                                className="h-6 w-[7.1rem] rounded border border-slate-200/90 bg-white px-1.5 text-[10px] leading-tight text-slate-800 shadow-sm placeholder:text-slate-400 focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-300/55 sm:h-6 sm:w-[9rem] sm:px-1.5 sm:text-[11px]"
+                                                className="h-5 w-[5.8rem] rounded border border-slate-200/90 bg-white px-1 text-[9px] leading-tight text-slate-800 shadow-sm placeholder:text-slate-400 focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-300/55 sm:h-6 sm:w-[9rem] sm:px-1.5 sm:text-[11px]"
                                               />
                                             </div>
                                           ) : null}
@@ -1711,16 +1711,16 @@ function ProductSupplierExpandedTableRow({
                                         <div
                                           key={`${product.internal_code}-${offer.supplier}-${offer.supplier_code ?? offerIndex}`}
                                           className={cn(
-                                            "min-w-0 rounded-lg border border-slate-200/80 bg-gradient-to-b from-white via-slate-50/25 to-slate-100/35 p-1.5 shadow-sm ring-1 sm:p-2",
+                                            "min-w-0 rounded-md border border-slate-200/80 bg-gradient-to-b from-white via-slate-50/25 to-slate-100/35 p-1 shadow-sm ring-1 sm:rounded-lg sm:p-2",
                                             supplierDetailCardRingClass(offerIndex),
                                           )}
                                         >
-                                          <div className="flex flex-col gap-1.5 lg:flex-row lg:items-start lg:gap-3">
-                                            <div className="flex min-w-0 flex-1 flex-col gap-1">
+                                          <div className="flex flex-col gap-1 lg:flex-row lg:items-start lg:gap-3">
+                                            <div className="flex min-w-0 flex-1 flex-col gap-0.5 sm:gap-1">
                                               {supplierHeader}
                                               {halfmannProductTitle ? (
                                                 <p
-                                                  className="min-w-0 break-words text-[10px] font-normal leading-snug text-slate-600 sm:text-[11px]"
+                                                  className="min-w-0 break-words text-[9px] font-normal leading-snug text-slate-600 sm:text-[11px]"
                                                   title={halfmannProductTitle}
                                                 >
                                                   {halfmannProductTitle}
@@ -1729,7 +1729,7 @@ function ProductSupplierExpandedTableRow({
                                               {faboryLineLabel &&
                                               !showPackSelector ? (
                                                 <p
-                                                  className="min-w-0 break-words text-[10px] font-normal leading-snug text-slate-600 sm:text-[11px]"
+                                                  className="min-w-0 break-words text-[9px] font-normal leading-snug text-slate-600 sm:text-[11px]"
                                                   title={faboryLineLabel}
                                                 >
                                                   {faboryLineLabel}
@@ -1834,7 +1834,7 @@ function ProductSupplierExpandedTableRow({
                                                           >
                                                             <td
                                                               className={cn(
-                                                                "max-w-[16rem] px-1.5 py-1 align-middle text-xs leading-tight sm:max-w-[18rem] sm:px-2 sm:py-1.5 sm:text-[13px]",
+                                                                "max-w-[13rem] px-1 py-0.5 align-middle text-[10px] leading-tight sm:max-w-[18rem] sm:px-2 sm:py-1.5 sm:text-[13px]",
                                                                 supplierNameIsMekrs(
                                                                   offer.supplier,
                                                                 ) ||
@@ -1879,7 +1879,7 @@ function ProductSupplierExpandedTableRow({
                                                                 `Variant ${vi + 1}`
                                                               )}
                                                             </td>
-                                                            <td className="px-1.5 py-1 align-middle tabular-nums text-xs text-slate-900 sm:px-2 sm:py-1.5 sm:text-[13px]">
+                                                            <td className="px-1 py-0.5 align-middle tabular-nums text-[10px] text-slate-900 sm:px-2 sm:py-1.5 sm:text-[13px]">
                                                               {pv.price_eur !=
                                                               null ? (
                                                                 <>
@@ -1888,7 +1888,7 @@ function ProductSupplierExpandedTableRow({
                                                                   )}{" "}
                                                                   {pv.currency_symbol?.trim() ||
                                                                     "€"}
-                                                                  <span className="text-[10px] font-normal text-slate-500 sm:text-[11px]">
+                                                                  <span className="text-[9px] font-normal text-slate-500 sm:text-[11px]">
                                                                     {
                                                                       SCRAPE_PRICE_DISPLAY_SUFFIX
                                                                     }
@@ -1901,7 +1901,7 @@ function ProductSupplierExpandedTableRow({
                                                             {!hideRowStock ? (
                                                               <td
                                                                 className={cn(
-                                                                  "px-1.5 py-1 align-middle text-xs text-slate-800 sm:px-2 sm:py-1.5 sm:text-[13px]",
+                                                                  "px-1 py-0.5 align-middle text-[10px] text-slate-800 sm:px-2 sm:py-1.5 sm:text-[13px]",
                                                                   supplierNameIsFabory(
                                                                     offer.supplier,
                                                                   ) &&
@@ -1913,7 +1913,7 @@ function ProductSupplierExpandedTableRow({
                                                                 {stockCell}
                                                               </td>
                                                             ) : null}
-                                                            <td className="px-1 py-1 align-middle sm:px-1.5 sm:py-1.5">
+                                                            <td className="px-0.5 py-0.5 align-middle sm:px-1.5 sm:py-1.5">
                                                               <input
                                                                 id={inputId}
                                                                 type="radio"
@@ -2066,10 +2066,10 @@ function ProductSupplierExpandedTableRow({
                                               ) : null}
                                             </div>
                                             <div className="flex w-full flex-col gap-1 lg:max-w-[min(100%,20rem)] lg:shrink-0 lg:items-stretch">
-                                              <div className="rounded-md border border-slate-200/80 bg-white/95 p-1 shadow-sm ring-1 ring-slate-100/60 sm:p-2">
-                                              <div className="flex flex-wrap items-center justify-between gap-x-1.5 gap-y-0.5 text-[11px] sm:flex-nowrap sm:gap-x-2 sm:text-[13px]">
+                                              <div className="rounded-md border border-slate-200/80 bg-white/95 p-0.5 shadow-sm ring-1 ring-slate-100/60 sm:p-2">
+                                              <div className="flex flex-wrap items-center justify-between gap-x-1 gap-y-0.5 text-[10px] sm:flex-nowrap sm:gap-x-2 sm:text-[13px]">
                                                 <div className="min-w-0 flex-1 basis-[48%] overflow-hidden text-ellipsis whitespace-nowrap pr-0.5 text-left sm:basis-0">
-                                                  <span className="mr-0.5 text-[9px] font-semibold uppercase tracking-wider text-slate-500 sm:mr-1 sm:text-[10px]">
+                                                  <span className="mr-0.5 text-[8px] font-semibold uppercase tracking-wider text-slate-500 sm:mr-1 sm:text-[10px]">
                                                     Cena
                                                   </span>
                                                   <span className="tabular-nums text-slate-900">
@@ -2082,7 +2082,7 @@ function ProductSupplierExpandedTableRow({
                                                               rowPrice,
                                                             )}{" "}
                                                             {rowPriceSymbol}
-                                                            <span className="text-[10px] font-normal text-slate-500 sm:text-[11px]">
+                                                            <span className="text-[9px] font-normal text-slate-500 sm:text-[11px]">
                                                               {
                                                                 SCRAPE_PRICE_DISPLAY_SUFFIX
                                                               }
@@ -2103,7 +2103,7 @@ function ProductSupplierExpandedTableRow({
                                                           "—"
                                                         )}{" "}
                                                         {rowPriceSymbol}
-                                                        <span className="text-[10px] font-normal text-slate-500 sm:text-[11px]">
+                                                        <span className="text-[9px] font-normal text-slate-500 sm:text-[11px]">
                                                           {
                                                             SCRAPE_PRICE_DISPLAY_SUFFIX
                                                           }
@@ -2114,7 +2114,7 @@ function ProductSupplierExpandedTableRow({
                                                     )}
                                                   </span>
                                                   {!scraperApplicable ? null : priceUiLoading ? (
-                                                    <span className="ml-0.5 text-[10px] text-slate-400 sm:ml-1 sm:text-xs">
+                                                    <span className="ml-0.5 text-[9px] text-slate-400 sm:ml-1 sm:text-xs">
                                                       načítavam…
                                                     </span>
                                                   ) : rowPriceLive ? (
@@ -2136,7 +2136,7 @@ function ProductSupplierExpandedTableRow({
                                                   )}
                                                 </div>
                                                 <div className="min-w-0 flex-1 basis-[48%] overflow-hidden text-ellipsis whitespace-nowrap pl-0.5 text-right sm:basis-0">
-                                                  <span className="mr-0.5 text-[9px] font-semibold uppercase tracking-wider text-slate-500 sm:mr-1 sm:text-[10px]">
+                                                    <span className="mr-0.5 text-[8px] font-semibold uppercase tracking-wider text-slate-500 sm:mr-1 sm:text-[10px]">
                                                     Sklad
                                                   </span>
                                                   <span className="text-slate-900">
@@ -2172,7 +2172,7 @@ function ProductSupplierExpandedTableRow({
                                                     )}
                                                   </span>
                                                   {!scraperApplicable ? null : stockUiLoading ? (
-                                                    <span className="ml-0.5 text-[10px] text-slate-400 sm:ml-1 sm:text-xs">
+                                                    <span className="ml-0.5 text-[9px] text-slate-400 sm:ml-1 sm:text-xs">
                                                       načítavam…
                                                     </span>
                                                   ) : rowStockLive &&
@@ -2190,7 +2190,7 @@ function ProductSupplierExpandedTableRow({
                                                     </span>
                                                   ) : !rowStockLive &&
                                                     !liveScrapeMissingOffer ? (
-                                                    <span className="ml-0.5 text-[10px] text-slate-400 sm:ml-1 sm:text-xs">
+                                                    <span className="ml-0.5 text-[9px] text-slate-400 sm:ml-1 sm:text-xs">
                                                       demo
                                                     </span>
                                                   ) : null}
@@ -2199,7 +2199,7 @@ function ProductSupplierExpandedTableRow({
                                               </div>
                                               <div
                                                 className={cn(
-                                                  "flex flex-wrap items-center justify-end gap-1",
+                                                  "flex flex-wrap items-center justify-end gap-0.5 sm:gap-1",
                                                   canCart &&
                                                     offerStockUiBlocked &&
                                                     "rounded-md bg-slate-200/80 px-1.5 py-1 ring-1 ring-slate-300/60",
@@ -2216,7 +2216,7 @@ function ProductSupplierExpandedTableRow({
                                                   <>
                                                     <div
                                                       className={cn(
-                                                        "flex items-center gap-1 rounded-md border px-2 py-1 shadow-sm ring-1 sm:gap-1 sm:px-2 sm:py-1",
+                                                        "flex items-center gap-0.5 rounded-md border px-1 py-0.5 shadow-sm ring-1 sm:gap-1 sm:px-2 sm:py-1",
                                                         offerStockUiBlocked
                                                           ? "border-slate-300/80 bg-slate-100/90 ring-slate-200/60"
                                                           : "border-slate-200/90 bg-gradient-to-b from-slate-50 to-white ring-slate-100/50",
@@ -2241,7 +2241,7 @@ function ProductSupplierExpandedTableRow({
                                                         }
                                                         disabled={offerStockUiBlocked}
                                                         className={cn(
-                                                          "h-8 w-[4.25rem] rounded border px-1 text-center text-xs tabular-nums shadow-sm focus:outline-none focus:ring-1 sm:h-7 sm:w-[4.1rem] sm:px-1 sm:text-xs",
+                                                          "h-6 w-[3.45rem] rounded border px-0.5 text-center text-[10px] tabular-nums shadow-sm focus:outline-none focus:ring-1 sm:h-7 sm:w-[4.1rem] sm:px-1 sm:text-xs",
                                                           offerStockUiBlocked
                                                             ? "cursor-not-allowed border-slate-300 bg-slate-200/80 text-slate-500 focus:border-slate-300 focus:ring-0"
                                                             : "border-slate-200 bg-white text-slate-800 focus:border-sky-400 focus:ring-sky-300/40",
@@ -2271,7 +2271,7 @@ function ProductSupplierExpandedTableRow({
                                                           );
                                                         }}
                                                       />
-                                                      <span className="text-xs font-medium text-slate-600 sm:text-xs">
+                                                      <span className="text-[10px] font-medium text-slate-600 sm:text-xs">
                                                         ks
                                                       </span>
                                                       {rowPack != null ? (
@@ -2292,7 +2292,7 @@ function ProductSupplierExpandedTableRow({
                                                           offerStockUiBlocked,
                                                       )}
                                                       className={cn(
-                                                        "h-8 shrink-0 gap-1.5 px-2 text-xs shadow-sm shadow-sky-600/15 sm:h-9 sm:px-3 sm:text-sm",
+                                                        "h-6 shrink-0 gap-1 px-1.5 text-[10px] shadow-sm shadow-sky-600/15 sm:h-9 sm:px-3 sm:text-sm",
                                                         offerStockUiBlocked &&
                                                           "opacity-60",
                                                         cartAddSuccessByKey[cartKey] &&
@@ -2426,7 +2426,7 @@ function ProductSupplierExpandedTableRow({
                                                     </Button>
                                                   </>
                                                 ) : (
-                                                  <p className="rounded-md border border-amber-200/80 bg-amber-50/80 px-2 py-1 text-right text-[10px] font-medium text-amber-950 sm:text-[11px]">
+                                                  <p className="rounded-md border border-amber-200/80 bg-amber-50/80 px-1.5 py-0.5 text-right text-[9px] font-medium text-amber-950 sm:text-[11px]">
                                                     Košík nedostupný
                                                   </p>
                                                 )}
@@ -2434,18 +2434,18 @@ function ProductSupplierExpandedTableRow({
                                             </div>
                                           </div>
                                           {scrape?.loading ? (
-                                            <p className="mt-1.5 flex items-center gap-1 rounded-md border border-sky-200/70 bg-sky-50/60 px-2 py-1 text-[10px] font-medium text-sky-900 sm:text-[11px]">
+                                            <p className="mt-1 flex items-center gap-1 rounded-md border border-sky-200/70 bg-sky-50/60 px-1.5 py-0.5 text-[9px] font-medium text-sky-900 sm:mt-1.5 sm:px-2 sm:py-1 sm:text-[11px]">
                                               <Loader2 className="h-3 w-3 shrink-0 animate-spin text-sky-600" />
                                               Načítavam cenu a sklad…
                                             </p>
                                           ) : null}
                                           {scrape?.error ? (
-                                            <p className="mt-1.5 rounded-md border border-rose-200/80 bg-rose-50/70 px-2 py-1 text-[10px] leading-snug text-rose-900 sm:text-[11px]">
+                                            <p className="mt-1 rounded-md border border-rose-200/80 bg-rose-50/70 px-1.5 py-0.5 text-[9px] leading-snug text-rose-900 sm:mt-1.5 sm:px-2 sm:py-1 sm:text-[11px]">
                                               {scrape.error}
                                             </p>
                                           ) : null}
                                           {scrape?.hint && !scrape?.error ? (
-                                            <p className="mt-1.5 rounded-md border border-amber-200/80 bg-amber-50/60 px-2 py-1 text-[10px] leading-snug text-amber-950 sm:text-[11px]">
+                                            <p className="mt-1 rounded-md border border-amber-200/80 bg-amber-50/60 px-1.5 py-0.5 text-[9px] leading-snug text-amber-950 sm:mt-1.5 sm:px-2 sm:py-1 sm:text-[11px]">
                                               {scrape.hint}
                                             </p>
                                           ) : null}
@@ -2455,7 +2455,7 @@ function ProductSupplierExpandedTableRow({
                                           scrape?.login_hint &&
                                           !scrape?.loading &&
                                           scrape?.logged_in === false ? (
-                                            <p className="mt-1.5 rounded-md border border-slate-200/90 bg-slate-50/80 px-2 py-1 text-[10px] leading-snug text-slate-700 sm:text-[11px]">
+                                            <p className="mt-1 rounded-md border border-slate-200/90 bg-slate-50/80 px-1.5 py-0.5 text-[9px] leading-snug text-slate-700 sm:mt-1.5 sm:px-2 sm:py-1 sm:text-[11px]">
                                               {scrape.login_hint}
                                             </p>
                                           ) : null}
@@ -2465,7 +2465,7 @@ function ProductSupplierExpandedTableRow({
                                           cartFeedback[
                                             cartStorageKey(sid, scode, null)
                                           ] ? (
-                                            <p className="mt-1.5 rounded-md border border-slate-200/90 bg-slate-50/80 px-2 py-1 text-[10px] text-slate-700 sm:text-[11px]">
+                                            <p className="mt-1 rounded-md border border-slate-200/90 bg-slate-50/80 px-1.5 py-0.5 text-[9px] text-slate-700 sm:mt-1.5 sm:px-2 sm:py-1 sm:text-[11px]">
                                               {
                                                 cartFeedback[
                                                   cartStorageKey(
