@@ -109,8 +109,10 @@ class ArgipHttpClient:
             "products(search:$search,pageSize:$pageSize,currentPage:$currentPage,"
             'filter:{type_id:{eq:"simple"}}'
             "){"
-            "items{sku name stock_status salable_qty "
-            "price_range{minimum_price{final_price{value currency}}} "
+            "items{sku name stock_status salable_qty package "
+            "stock_item{min_sale_qty qty_increments} "
+            "price_range{minimum_price{final_price{value currency} "
+            "regular_price{value currency} default_price{value currency} default_final_price{value currency}}} "
             "price_tiers{quantity final_price{value currency}}}}}"
         )
         data = await self._gql(
@@ -134,8 +136,10 @@ class ArgipHttpClient:
         q_sku = (
             "query($sku:String!){"
             'products(filter:{sku:{eq:$sku},type_id:{eq:"simple"}},pageSize:24,currentPage:1){'
-            "items{sku name stock_status salable_qty "
-            "price_range{minimum_price{final_price{value currency}}} "
+            "items{sku name stock_status salable_qty package "
+            "stock_item{min_sale_qty qty_increments} "
+            "price_range{minimum_price{final_price{value currency} "
+            "regular_price{value currency} default_price{value currency} default_final_price{value currency}}} "
             "price_tiers{quantity final_price{value currency}}}}}"
         )
         data3 = await self._gql(q_sku, {"sku": code}, auth_required=True)

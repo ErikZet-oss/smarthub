@@ -2032,11 +2032,20 @@ async def _argip_get_supplier_data_via_http(
     def _price_of(it: dict[str, Any]) -> Optional[float]:
         pr = (it.get("price_range") or {}) if isinstance(it, dict) else {}
         mp = (pr.get("minimum_price") or {}) if isinstance(pr, dict) else {}
-        fp = (mp.get("final_price") or {}) if isinstance(mp, dict) else {}
-        try:
-            return round(float(fp.get("value")), 4)
-        except (TypeError, ValueError):
-            return None
+        for key in (
+            "final_price",
+            "default_final_price",
+            "final_price_excl_tax",
+            "default_final_price_excl_tax",
+            "regular_price",
+            "default_price",
+        ):
+            fp = (mp.get(key) or {}) if isinstance(mp, dict) else {}
+            try:
+                return round(float(fp.get("value")), 4)
+            except (TypeError, ValueError):
+                continue
+        return None
 
     def _stock_of(it: dict[str, Any]) -> int:
         sq = it.get("salable_qty")
@@ -2070,38 +2079,85 @@ async def _argip_get_supplier_data_via_http(
         out.sort(key=lambda x: x[0])
         return out
 
+    def _catalog_price_of(it: dict[str, Any]) -> Optional[float]:
+        pr = (it.get("price_range") or {}) if isinstance(it, dict) else {}
+        mp = (pr.get("minimum_price") or {}) if isinstance(pr, dict) else {}
+        for key in ("regular_price", "default_price"):
+            fp = (mp.get(key) or {}) if isinstance(mp, dict) else {}
+            try:
+                return round(float(fp.get("value")), 4)
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    def _min_sale_qty_of(it: dict[str, Any]) -> int:
+        si = (it.get("stock_item") or {}) if isinstance(it, dict) else {}
+        try:
+            q = int(float(si.get("min_sale_qty")))
+            if q >= 1:
+                return q
+        except (TypeError, ValueError):
+            pass
+        return 1
+
+    def _pack_qty_of(it: dict[str, Any]) -> int:
+        try:
+            q = int(float(it.get("package")))
+            if q >= 1:
+                return q
+        except (TypeError, ValueError):
+            pass
+        return 1
+
     ordered = sorted(items, key=_score)
     best = ordered[0]
+    # Preferuj zhodný SKU, ale ak nemá cenu, zober najlepší riadok s cenou.
+    best_with_price = next((it for it in ordered if _price_of(it) is not None), None)
+    if best_with_price is not None:
+        best = best_with_price
     best_price = _price_of(best)
+    best_catalog_price = _catalog_price_of(best)
     best_stock = _stock_of(best)
     best_sku = str(best.get("sku") or "").strip() or code
+    min_qty = _min_sale_qty_of(best)
+    pack_qty = _pack_qty_of(best)
 
     pvars: list[dict[str, Any]] = []
     tiers = _tiers_of(best)
     if tiers:
-        base_added = False
+        if best_catalog_price is not None:
+            pvars.append(
+                {
+                    "label": f"{best_sku} (katalógová cena)",
+                    "pack": f"{pack_qty} ks",
+                    "pack_quantity": min_qty,
+                    "raw_pack_quantity": f"min. {min_qty} ks",
+                    "price_eur": best_catalog_price,
+                    "stock": best_stock,
+                    "argip_sku": best_sku,
+                }
+            )
         if best_price is not None:
             pvars.append(
                 {
-                    "label": f"{best_sku} (od 1 ks)",
-                    "pack": "1 ks",
-                    "pack_quantity": 1,
-                    "raw_pack_quantity": "od 1 ks",
+                    "label": f"{best_sku} (základná cena)",
+                    "pack": f"{pack_qty} ks",
+                    "pack_quantity": min_qty,
+                    "raw_pack_quantity": f"min. {min_qty} ks",
                     "price_eur": best_price,
                     "stock": best_stock,
                     "argip_sku": best_sku,
                 }
             )
-            base_added = True
         for qty, tier_price in tiers:
-            if qty == 1 and base_added:
+            if qty <= min_qty:
                 continue
             pvars.append(
                 {
-                    "label": f"{best_sku} (od {qty} ks)",
-                    "pack": "1 ks",
+                    "label": f"{best_sku} (objemová cena)",
+                    "pack": f"{pack_qty} ks",
                     "pack_quantity": qty,
-                    "raw_pack_quantity": f"od {qty} ks",
+                    "raw_pack_quantity": f"min. {qty} ks",
                     "price_eur": tier_price,
                     "stock": best_stock,
                     "argip_sku": best_sku,
@@ -2117,8 +2173,9 @@ async def _argip_get_supplier_data_via_http(
             pvars.append(
                 {
                     "label": str(it.get("name") or sku),
-                    "pack": "1 ks",
-                    "pack_quantity": 1,
+                    "pack": f"{_pack_qty_of(it)} ks",
+                    "pack_quantity": _min_sale_qty_of(it),
+                    "raw_pack_quantity": f"min. {_min_sale_qty_of(it)} ks",
                     "price_eur": pe,
                     "stock": stq,
                     "argip_sku": sku,
@@ -2132,8 +2189,8 @@ async def _argip_get_supplier_data_via_http(
         if isinstance(best_price, (int, float))
         else None,
         "raw_stock": f"{best_stock} ks",
-        "pack_quantity": 1,
-        "raw_pack_quantity": "1 ks",
+        "pack_quantity": min_qty,
+        "raw_pack_quantity": f"min. {min_qty} ks",
         "packaging_variants": pvars,
         "logged_in": True,
         "argip_via_http": True,
