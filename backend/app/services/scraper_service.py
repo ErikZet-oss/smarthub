@@ -5386,9 +5386,10 @@ class ScraperService:
                     run_label,
                     supplier,
                     run_id,
-                    f"Argip HTTP zlyhalo, pokračujem Playwright: {exc}",
-                    "warn",
+                    f"Argip HTTP zlyhalo: {exc}",
+                    "error",
                 )
+                raise RuntimeError(f"Argip HTTP zlyhalo: {exc}") from exc
 
         if _supplier_is_mekrs(supplier):
             try:
