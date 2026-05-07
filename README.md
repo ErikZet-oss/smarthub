@@ -43,6 +43,17 @@ uvicorn app.main:app --reload --port 8001
 
 `NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8001`
 
+## Render: aby sa nestrácali dáta po reštarte
+
+Backend používa SQLite súbor. Na Renderi musí byť uložený na persistent disku:
+
+1. V backend službe vytvor **Persistent Disk** (napr. mount path `/var/data`).
+2. Do backend Environment Variables nastav:
+   - `SMARTHUB_DB_PATH=/var/data/procurement.db`
+3. Redeploy backend.
+
+Bez tohto nastavenia sa po reštarte služby vrátia staré/čisté dáta.
+
 ## Co je pripravene
 
 - Dashboard layout so sidebarom

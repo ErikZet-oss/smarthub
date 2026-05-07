@@ -1,12 +1,21 @@
+import os
 from pathlib import Path
 
 from sqlalchemy import text
 from sqlmodel import Session, SQLModel, create_engine
 
-# Vždy backend/procurement.db — relatívna cesta ./procurement.db závisela od cwd pri štarte
-# uvicornu (iný priečinok = nová prázdna DB = „zmizli dáta“).
+# Predvolená lokálna DB (backend/procurement.db). V produkcii nastav SMARTHUB_DB_PATH
+# na persistent disk (napr. /var/data/procurement.db), aby sa dáta po reštarte nestratili.
 _BACKEND_ROOT = Path(__file__).resolve().parent.parent
-DATABASE_FILE = _BACKEND_ROOT / "procurement.db"
+_db_path_raw = (os.environ.get("SMARTHUB_DB_PATH") or "").strip()
+if _db_path_raw:
+    _candidate = Path(_db_path_raw).expanduser()
+    if not _candidate.is_absolute():
+        _candidate = (_BACKEND_ROOT / _candidate).resolve()
+    DATABASE_FILE = _candidate
+else:
+    DATABASE_FILE = _BACKEND_ROOT / "procurement.db"
+DATABASE_FILE.parent.mkdir(parents=True, exist_ok=True)
 DATABASE_URL = f"sqlite:///{DATABASE_FILE.as_posix()}"
 engine = create_engine(DATABASE_URL, echo=False, connect_args={"check_same_thread": False})
 
