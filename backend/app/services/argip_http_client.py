@@ -107,9 +107,8 @@ class ArgipHttpClient:
         q_search = (
             "query($search:String!,$pageSize:Int!,$currentPage:Int!){"
             "products(search:$search,pageSize:$pageSize,currentPage:$currentPage,"
-            'filter:{type_id:{eq:"simple"}}'
             "){"
-            "items{sku name stock_status salable_qty package "
+            "items{sku name type_id index stock_status salable_qty package "
             "stock_item{min_sale_qty qty_increments} "
             "price_range{minimum_price{final_price{value currency} "
             "regular_price{value currency} default_price{value currency} default_final_price{value currency}}} "
@@ -135,8 +134,8 @@ class ArgipHttpClient:
         # Priamy SKU filter (Magento GraphQL štýl) ako ďalší fallback.
         q_sku = (
             "query($sku:String!){"
-            'products(filter:{sku:{eq:$sku},type_id:{eq:"simple"}},pageSize:24,currentPage:1){'
-            "items{sku name stock_status salable_qty package "
+            'products(filter:{sku:{eq:$sku}},pageSize:24,currentPage:1){'
+            "items{sku name type_id index stock_status salable_qty package "
             "stock_item{min_sale_qty qty_increments} "
             "price_range{minimum_price{final_price{value currency} "
             "regular_price{value currency} default_price{value currency} default_final_price{value currency}}} "

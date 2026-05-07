@@ -2019,6 +2019,13 @@ async def _argip_get_supplier_data_via_http(
         )
 
     code_norm = re.sub(r"\s+", "", code).upper()
+    def _index_base(it: dict[str, Any]) -> str:
+        raw = str(it.get("index") or "").strip()
+        if not raw:
+            return ""
+        compact = re.sub(r"\s+", " ", raw).strip()
+        compact = re.sub(r"\s+[op]\d+$", "", compact, flags=re.IGNORECASE)
+        return compact.upper()
 
     def _score(item: dict[str, Any]) -> int:
         sku = str(item.get("sku") or "").strip()
@@ -2157,20 +2164,27 @@ async def _argip_get_supplier_data_via_http(
         return 1
 
     ordered = sorted(items, key=_score)
-    best = ordered[0]
-    # Preferuj zhodný SKU, ale ak nemá cenu, zober najlepší riadok s cenou.
-    best_with_price = next((it for it in ordered if _price_of(it) is not None), None)
-    if best_with_price is not None:
-        best = best_with_price
-    best_price = _price_of(best)
-    best_catalog_price = _catalog_price_of(best)
-    best_stock = _stock_of(best)
-    best_sku = str(best.get("sku") or "").strip() or code
-    min_qty = _min_sale_qty_of(best)
-    pack_qty = _pack_qty_of(best)
+    stock_item = ordered[0]
+    stock_sku = str(stock_item.get("sku") or "").strip() or code
+    stock_base = _index_base(stock_item)
+    same_family = [
+        it
+        for it in ordered
+        if _index_base(it) and stock_base and _index_base(it) == stock_base
+    ] or ordered
+    price_item = next((it for it in same_family if _price_of(it) is not None), None)
+    if price_item is None:
+        price_item = next((it for it in ordered if _price_of(it) is not None), stock_item)
+
+    best_price = _price_of(price_item)
+    best_catalog_price = _catalog_price_of(price_item)
+    best_stock = _stock_of(stock_item)
+    best_sku = stock_sku
+    min_qty = _min_sale_qty_of(price_item)
+    pack_qty = _pack_qty_of(price_item)
 
     pvars: list[dict[str, Any]] = []
-    tiers = _tiers_of(best)
+    tiers = _tiers_of(price_item)
     if tiers:
         if best_catalog_price is not None:
             pvars.append(
@@ -2248,7 +2262,8 @@ async def _argip_get_supplier_data_via_http(
         run_label,
         supplier,
         run_id,
-        f"get_supplier_data Argip HTTP: code={code!r} sku={best_sku!r} stock={best_stock}",
+        f"get_supplier_data Argip HTTP: code={code!r} stock_sku={stock_sku!r} "
+        f"price_sku={str(price_item.get('sku') or '')!r} stock={best_stock} price={best_price}",
     )
     return data
 
