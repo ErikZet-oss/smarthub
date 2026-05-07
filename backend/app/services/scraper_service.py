@@ -2047,6 +2047,29 @@ async def _argip_get_supplier_data_via_http(
             st = str(it.get("stock_status") or "").strip().upper()
             return 1 if st == "IN_STOCK" else 0
 
+    def _tiers_of(it: dict[str, Any]) -> list[tuple[int, Optional[float]]]:
+        out: list[tuple[int, Optional[float]]] = []
+        raw = it.get("price_tiers")
+        if not isinstance(raw, list):
+            return out
+        for row in raw:
+            if not isinstance(row, dict):
+                continue
+            try:
+                qty = int(float(row.get("quantity")))
+            except (TypeError, ValueError):
+                continue
+            if qty < 1:
+                continue
+            fp = row.get("final_price")
+            try:
+                val = round(float((fp or {}).get("value")), 4) if isinstance(fp, dict) else None
+            except (TypeError, ValueError):
+                val = None
+            out.append((qty, val))
+        out.sort(key=lambda x: x[0])
+        return out
+
     ordered = sorted(items, key=_score)
     best = ordered[0]
     best_price = _price_of(best)
@@ -2054,22 +2077,53 @@ async def _argip_get_supplier_data_via_http(
     best_sku = str(best.get("sku") or "").strip() or code
 
     pvars: list[dict[str, Any]] = []
-    for it in ordered[:8]:
-        sku = str(it.get("sku") or "").strip()
-        if not sku:
-            continue
-        pe = _price_of(it)
-        stq = _stock_of(it)
-        pvars.append(
-            {
-                "label": str(it.get("name") or sku),
-                "pack": "1 ks",
-                "pack_quantity": 1,
-                "price_eur": pe,
-                "stock": stq,
-                "argip_sku": sku,
-            }
-        )
+    tiers = _tiers_of(best)
+    if tiers:
+        base_added = False
+        if best_price is not None:
+            pvars.append(
+                {
+                    "label": f"{best_sku} (od 1 ks)",
+                    "pack": "1 ks",
+                    "pack_quantity": 1,
+                    "raw_pack_quantity": "od 1 ks",
+                    "price_eur": best_price,
+                    "stock": best_stock,
+                    "argip_sku": best_sku,
+                }
+            )
+            base_added = True
+        for qty, tier_price in tiers:
+            if qty == 1 and base_added:
+                continue
+            pvars.append(
+                {
+                    "label": f"{best_sku} (od {qty} ks)",
+                    "pack": "1 ks",
+                    "pack_quantity": qty,
+                    "raw_pack_quantity": f"od {qty} ks",
+                    "price_eur": tier_price,
+                    "stock": best_stock,
+                    "argip_sku": best_sku,
+                }
+            )
+    else:
+        for it in ordered[:8]:
+            sku = str(it.get("sku") or "").strip()
+            if not sku:
+                continue
+            pe = _price_of(it)
+            stq = _stock_of(it)
+            pvars.append(
+                {
+                    "label": str(it.get("name") or sku),
+                    "pack": "1 ks",
+                    "pack_quantity": 1,
+                    "price_eur": pe,
+                    "stock": stq,
+                    "argip_sku": sku,
+                }
+            )
 
     data: dict[str, Any] = {
         "price_eur": best_price,
