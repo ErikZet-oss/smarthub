@@ -4119,6 +4119,24 @@ async def _login_and_search(
             f"search fill selector={search_sel!r} code={code!r}",
         )
         loc_search = page.locator(search_sel).first
+
+        async def _submit_search_click(selector: str) -> None:
+            submit_sel = (selector or "").strip()
+            if not submit_sel:
+                return
+            click_timeout = min(30_000, int(config.navigation_timeout_ms))
+            loc_submit = page.locator(submit_sel).first
+            if _supplier_is_fabory(supplier) or _supplier_is_hopefix(supplier):
+                # Fabory/Hopefix často vykonajú submit bez klasickej navigácie.
+                # Bez no_wait_after vie click čakať na "scheduled navigations" až do timeoutu.
+                await loc_submit.click(
+                    no_wait_after=True,
+                    timeout=click_timeout,
+                )
+                await asyncio.sleep(0.2)
+                return
+            await loc_submit.click(timeout=click_timeout)
+
         if _supplier_is_hopefix(supplier):
             await loc_search.fill(code)
             if config.search_pick_first_suggestion:
@@ -4137,7 +4155,7 @@ async def _login_and_search(
                     run_id,
                     f"search submit click: {config.search_submit_selector!r}",
                 )
-                await page.click(config.search_submit_selector)
+                await _submit_search_click(config.search_submit_selector)
             elif (config.search_submit_key or "").strip():
                 _log(
                     run_label,
@@ -4179,7 +4197,7 @@ async def _login_and_search(
                     run_id,
                     f"search submit click: {config.search_submit_selector!r}",
                 )
-                await page.click(config.search_submit_selector)
+                await _submit_search_click(config.search_submit_selector)
             elif (config.search_submit_key or "").strip():
                 _log(
                     run_label,
