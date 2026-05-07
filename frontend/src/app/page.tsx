@@ -701,6 +701,8 @@ type PackagingVariantRow = {
   mekrs_package_stock_text?: string | null;
   /** Argip HTTP: SKU pre GraphQL košík (vybraný variant / konfigurácia). */
   argip_sku?: string | null;
+  /** Počet ks v obchodnom balení (Argip `package` z API; nie MOQ cenovej hladiny). */
+  shop_pack_quantity?: number | null;
 };
 
 type SupplierScrapeState = {
@@ -718,6 +720,8 @@ type SupplierScrapeState = {
   /** Počet kusov v balení (z e-shopu), ak je v JSON pack_quantity_selector. */
   pack_quantity?: number | null;
   raw_pack_quantity?: string | null;
+  /** Argip: ks v balení na e-shope (pre nápovedu pri košíku). */
+  shop_pack_quantity?: number | null;
   /** Viac možností balenia — zobrazí sa viac košíkov v detaile. */
   packaging_variants?: PackagingVariantRow[] | null;
   /** Mekrs HTTP: false = z API price (bez DPH); true = núdzovo priceWithVAT. */
@@ -1619,6 +1623,17 @@ function ProductSupplierExpandedTableRow({
                                         activePv.pack_quantity >= 1
                                           ? activePv.pack_quantity
                                           : packSize;
+                                      const argipShopPackQty =
+                                        supplierNameIsArgip(offer.supplier) &&
+                                        activePv != null &&
+                                        activePv.shop_pack_quantity != null &&
+                                        activePv.shop_pack_quantity >= 1
+                                          ? activePv.shop_pack_quantity
+                                          : supplierNameIsArgip(offer.supplier) &&
+                                              scrape?.shop_pack_quantity != null &&
+                                              scrape.shop_pack_quantity >= 1
+                                            ? scrape.shop_pack_quantity
+                                            : null;
                                       const faboryTitleFromPdp =
                                         supplierNameIsFabory(offer.supplier) &&
                                         scrape &&
@@ -1802,7 +1817,25 @@ function ProductSupplierExpandedTableRow({
                                               pvars &&
                                               cartKey ? (
                                                 <div className="max-w-2xl overflow-hidden overflow-x-auto rounded-md border border-slate-200/90 bg-white shadow-sm ring-1 ring-slate-100/60">
-                                                  <table className="w-full border-collapse text-left text-xs sm:text-[13px]">
+                                                  <table className="w-full table-fixed border-collapse text-left text-xs sm:text-[13px]">
+                                                    <colgroup>
+                                                      <col className="w-[52%]" />
+                                                      <col className="w-[22%]" />
+                                                      {!supplierNameIsMekrs(
+                                                        offer.supplier,
+                                                      ) ? (
+                                                        <col className="w-[18%]" />
+                                                      ) : null}
+                                                      <col
+                                                        className={
+                                                          supplierNameIsMekrs(
+                                                            offer.supplier,
+                                                          )
+                                                            ? "w-[26%]"
+                                                            : "w-[8%]"
+                                                        }
+                                                      />
+                                                    </colgroup>
                                                     <thead>
                                                       <tr className="border-b border-slate-200/80 bg-slate-100/70 text-[9px] uppercase tracking-wide text-slate-600 sm:text-[10px]">
                                                         <th className="px-1.5 py-1 font-medium sm:px-2 sm:py-1.5">
@@ -1897,7 +1930,7 @@ function ProductSupplierExpandedTableRow({
                                                           >
                                                             <td
                                                               className={cn(
-                                                                "max-w-[13rem] px-1 py-0.5 align-middle text-[10px] leading-tight sm:max-w-[18rem] sm:px-2 sm:py-1.5 sm:text-[13px]",
+                                                                "min-w-0 break-words px-1 py-0.5 align-middle text-[10px] leading-tight sm:px-2 sm:py-1.5 sm:text-[13px]",
                                                                 supplierNameIsMekrs(
                                                                   offer.supplier,
                                                                 ) ||
@@ -1943,17 +1976,12 @@ function ProductSupplierExpandedTableRow({
                                                               ) : supplierNameIsArgip(
                                                                   offer.supplier,
                                                                 ) ? (
-                                                                <div className="leading-snug">
-                                                                  <div className="font-medium text-slate-900">
-                                                                    {(pv.raw_pack_quantity || "").trim() ||
-                                                                      (pv.pack_quantity != null &&
-                                                                      pv.pack_quantity >= 1
-                                                                        ? `od ${pv.pack_quantity} ks`
-                                                                        : `Variant ${vi + 1}`)}
-                                                                  </div>
-                                                                  <div className="mt-0.5 text-[9px] font-normal text-slate-600 sm:text-[10px]">
-                                                                    {pv.label?.trim() || ""}
-                                                                  </div>
+                                                                <div className="text-[8px] font-normal leading-snug text-slate-600 sm:text-[9px]">
+                                                                  {(pv.raw_pack_quantity || "").trim() ||
+                                                                    (pv.pack_quantity != null &&
+                                                                    pv.pack_quantity >= 1
+                                                                      ? `od ${pv.pack_quantity} ks`
+                                                                      : `Variant ${vi + 1}`)}
                                                                 </div>
                                                               ) : (
                                                                 pv.label?.trim() ||
@@ -2143,15 +2171,12 @@ function ProductSupplierExpandedTableRow({
                                                                 offer.supplier,
                                                               ) ? (
                                                               <div className="space-y-0.5">
-                                                                <div className="text-sm font-semibold text-slate-900">
+                                                                <div className="text-[8px] font-normal leading-snug text-slate-600 sm:text-[9px]">
                                                                   {(pv.raw_pack_quantity || "").trim() ||
                                                                     (pv.pack_quantity != null &&
                                                                     pv.pack_quantity >= 1
                                                                       ? `od ${pv.pack_quantity} ks`
                                                                       : `Variant ${vi + 1}`)}
-                                                                </div>
-                                                                <div className="text-[10px] font-normal text-slate-600 sm:text-[11px]">
-                                                                  {pv.label?.trim() || ""}
                                                                 </div>
                                                                 <div className="text-[10px] font-medium tabular-nums text-slate-800 sm:text-[11px]">
                                                                   {pv.price_eur != null &&
@@ -2357,9 +2382,14 @@ function ProductSupplierExpandedTableRow({
                                                         min={rowPack ?? 1}
                                                         step={rowPack ?? 1}
                                                         title={
-                                                          rowPack != null
-                                                            ? `Množstvo v ks (násobok balenia ${formatIntegerCsThousands(rowPack)} ks)`
-                                                            : "Množstvo na pridanie do košíka"
+                                                          supplierNameIsArgip(
+                                                            offer.supplier,
+                                                          ) &&
+                                                          argipShopPackQty != null
+                                                            ? `Množstvo v ks — násobok ${formatIntegerCsThousands(rowPack ?? 1)}; v balení ${formatIntegerCsThousands(argipShopPackQty)} ks`
+                                                            : rowPack != null
+                                                              ? `Množstvo v ks (násobok balenia ${formatIntegerCsThousands(rowPack)} ks)`
+                                                              : "Množstvo na pridanie do košíka"
                                                         }
                                                         disabled={offerStockUiBlocked}
                                                         className={cn(
@@ -2396,7 +2426,34 @@ function ProductSupplierExpandedTableRow({
                                                       <span className="text-[10px] font-medium text-slate-600 sm:text-xs">
                                                         ks
                                                       </span>
-                                                      {rowPack != null ? (
+                                                      {supplierNameIsArgip(
+                                                        offer.supplier,
+                                                      ) &&
+                                                      argipShopPackQty !=
+                                                        null ? (
+                                                        <>
+                                                          <span
+                                                            className="max-w-[4.2rem] truncate text-center text-[8px] leading-tight text-slate-500 sm:max-w-none sm:text-[10px]"
+                                                            title="Počet kusov v jednom balení na e-shope"
+                                                          >
+                                                            (
+                                                            {formatIntegerCsThousands(
+                                                              argipShopPackQty,
+                                                            )}
+                                                            &nbsp;ks/bal.)
+                                                          </span>
+                                                          {rowPack != null &&
+                                                          rowPack !==
+                                                            argipShopPackQty ? (
+                                                            <span
+                                                              className="text-[8px] tabular-nums text-slate-400 sm:text-[10px]"
+                                                              title="Minimálne množstvo / krok pre zvolenú cenovú hladinu"
+                                                            >
+                                                              ×{rowPack}
+                                                            </span>
+                                                          ) : null}
+                                                        </>
+                                                      ) : rowPack != null ? (
                                                         <span
                                                           className="hidden text-[10px] text-slate-500 sm:inline"
                                                           title="Objednávka v násobkoch balenia."
@@ -2444,7 +2501,8 @@ function ProductSupplierExpandedTableRow({
                                                             !usesHttpCartVariants
                                                             ? selVi
                                                             : usesHttpCartVariants &&
-                                                                inoxmareHttpVariants
+                                                                (inoxmareHttpVariants ||
+                                                                  argipHttpVariants)
                                                               ? selVi
                                                               : null,
                                                           {
@@ -3239,6 +3297,7 @@ export default function Home() {
             raw_stock?: string | null;
             pack_quantity?: number | null;
             raw_pack_quantity?: string | null;
+            shop_pack_quantity?: number | null;
             packaging_variants?: PackagingVariantRow[] | null;
             price_includes_vat?: boolean | null;
             currency_code?: string | null;
@@ -3277,6 +3336,7 @@ export default function Home() {
               raw_stock: payload.raw_stock ?? null,
               pack_quantity: payload.pack_quantity ?? null,
               raw_pack_quantity: payload.raw_pack_quantity ?? null,
+              shop_pack_quantity: payload.shop_pack_quantity ?? null,
               packaging_variants: payload.packaging_variants ?? null,
               price_includes_vat: payload.price_includes_vat ?? null,
               currency_code: payload.currency_code ?? null,

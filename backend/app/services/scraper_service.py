@@ -2240,6 +2240,7 @@ async def _argip_get_supplier_data_via_http(
                     {
                         "label": "Základná cena",
                         "pack": f"{pack_qty} ks",
+                        "shop_pack_quantity": pack_qty,
                         "pack_quantity": min_qty,
                         "raw_pack_quantity": f"min. {min_qty} ks",
                         "price_eur": base,
@@ -2254,6 +2255,7 @@ async def _argip_get_supplier_data_via_http(
                     {
                         "label": "Katalógová cena",
                         "pack": f"{pack_qty} ks",
+                        "shop_pack_quantity": pack_qty,
                         "pack_quantity": min_qty,
                         "raw_pack_quantity": f"min. {min_qty} ks",
                         "price_eur": cat,
@@ -2267,6 +2269,7 @@ async def _argip_get_supplier_data_via_http(
                     {
                         "label": "Základná cena",
                         "pack": f"{pack_qty} ks",
+                        "shop_pack_quantity": pack_qty,
                         "pack_quantity": min_qty,
                         "raw_pack_quantity": f"min. {min_qty} ks",
                         "price_eur": base,
@@ -2282,6 +2285,7 @@ async def _argip_get_supplier_data_via_http(
                 {
                     "label": "Objemová cena",
                     "pack": f"{pack_qty} ks",
+                    "shop_pack_quantity": pack_qty,
                     "pack_quantity": qty,
                     "raw_pack_quantity": f"min. {qty} ks",
                     "price_eur": tier_price,
@@ -2306,10 +2310,12 @@ async def _argip_get_supplier_data_via_http(
                 continue
             pe = _price_of(it)
             stq = _stock_of(it)
+            pq_shop = _pack_qty_of(it)
             pvars.append(
                 {
                     "label": str(it.get("name") or sku),
-                    "pack": f"{_pack_qty_of(it)} ks",
+                    "pack": f"{pq_shop} ks",
+                    "shop_pack_quantity": pq_shop,
                     "pack_quantity": _min_sale_qty_of(it),
                     "raw_pack_quantity": f"min. {_min_sale_qty_of(it)} ks",
                     "price_eur": pe,
@@ -2328,6 +2334,7 @@ async def _argip_get_supplier_data_via_http(
         "pack_quantity": min_qty,
         "raw_pack_quantity": f"min. {min_qty} ks",
         "price_unit": "per_100_ks",
+        "shop_pack_quantity": pack_qty,
         "packaging_variants": pvars,
         "logged_in": True,
         "argip_via_http": True,
