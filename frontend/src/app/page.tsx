@@ -1604,7 +1604,7 @@ function ProductSupplierExpandedTableRow({
                                       const supplierHeader = (
                                         <div
                                           className={cn(
-                                            "flex min-w-0 flex-1 items-center gap-1.5 rounded-md border p-1.5 shadow-sm ring-1",
+                                            "flex min-w-0 flex-1 flex-wrap items-start gap-1.5 rounded-md border p-1.5 shadow-sm ring-1 sm:flex-nowrap sm:items-center",
                                             supplierDetailHeaderBarClass(offerIndex),
                                           )}
                                         >
@@ -1663,7 +1663,7 @@ function ProductSupplierExpandedTableRow({
                                             </p>
                                           </div>
                                           {sid != null ? (
-                                            <div className="ml-auto flex shrink-0 justify-end self-center">
+                                            <div className="flex w-full justify-end sm:ml-auto sm:w-auto sm:shrink-0 sm:self-center">
                                               <label
                                                 className="sr-only"
                                                 htmlFor={`offer-note-${product.internal_code}-${sid}-${offerIndex}`}
@@ -1700,7 +1700,7 @@ function ProductSupplierExpandedTableRow({
                                                 spellCheck={true}
                                                 placeholder="Poznámka"
                                                 title="Uloží sa v prehliadači; pri Košíku sa skopíruje do záznamu."
-                                                className="h-6 w-[8.25rem] rounded border border-slate-200/90 bg-white px-1.5 text-[10px] leading-tight text-slate-800 shadow-sm placeholder:text-slate-400 focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-300/55 sm:h-6 sm:w-[9rem] sm:text-[11px]"
+                                                className="h-7 w-full rounded border border-slate-200/90 bg-white px-2 text-[11px] leading-tight text-slate-800 shadow-sm placeholder:text-slate-400 focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-300/55 sm:h-6 sm:w-[9rem] sm:px-1.5 sm:text-[11px]"
                                               />
                                             </div>
                                           ) : null}
@@ -4480,29 +4480,29 @@ export default function Home() {
     <div className="min-h-screen w-full bg-slate-50 text-slate-900">
       {toastMessage ? (
         <div
-          className="fixed right-4 top-4 z-[100] max-w-sm rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 shadow-lg"
+          className="fixed left-2 right-2 top-3 z-[100] max-w-sm rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 shadow-lg sm:left-auto sm:right-4 sm:top-4"
           role="status"
         >
           {toastMessage}
         </div>
       ) : null}
-      <div className="grid min-h-screen w-full grid-cols-[auto_1fr]">
+      <div className="min-h-screen w-full md:grid md:grid-cols-[auto_1fr]">
         <aside
           className={cn(
-            "sticky top-0 flex h-screen max-h-screen shrink-0 flex-col overflow-y-auto border-r border-slate-800 bg-slate-900 text-slate-100 transition-[width,padding] duration-200 ease-out",
-            navCollapsed ? "w-[56px] px-2 py-4" : "w-[260px] px-4 py-6",
+            "sticky top-0 z-30 flex w-full shrink-0 flex-col border-b border-slate-800 bg-slate-900 text-slate-100 md:h-screen md:max-h-screen md:overflow-y-auto md:border-b-0 md:border-r md:transition-[width,padding] md:duration-200 md:ease-out",
+            navCollapsed ? "px-2 py-2 md:w-[56px] md:px-2 md:py-4" : "px-3 py-3 md:w-[260px] md:px-4 md:py-6",
           )}
         >
           <div
             className={cn(
-              "mb-3 flex items-center",
+              "mb-2 flex items-center md:mb-3",
               navCollapsed ? "justify-center" : "justify-end",
             )}
           >
             <button
               type="button"
               onClick={() => setNavCollapsed((v) => !v)}
-              className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-100"
+              className="hidden rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-100 md:inline-flex"
               aria-expanded={!navCollapsed}
               aria-label={navCollapsed ? "Rozbaliť menu" : "Zbaliť menu"}
               title={navCollapsed ? "Rozbaliť menu" : "Zbaliť menu"}
@@ -4516,7 +4516,7 @@ export default function Home() {
           </div>
 
           {!navCollapsed ? (
-            <div className="mb-8 flex items-center gap-2">
+            <div className="mb-2 hidden items-center gap-2 md:mb-8 md:flex">
               <DatabaseZap className="h-5 w-5 shrink-0 text-sky-400" />
               <div className="min-w-0">
                 <p className="text-sm font-semibold">Smarthub</p>
@@ -4525,7 +4525,7 @@ export default function Home() {
             </div>
           ) : null}
 
-          <nav className="space-y-2">
+          <nav className="flex gap-1 overflow-x-auto pb-1 md:block md:space-y-2 md:overflow-visible md:pb-0">
             {[
               { id: "vyhladavanie", label: "Vyhladavanie", icon: PackageSearch },
               { id: "zoznamy", label: "Zoznamy", icon: List },
@@ -4541,17 +4541,17 @@ export default function Home() {
                   title={navCollapsed ? item.label : undefined}
                   onClick={() => setActiveView(item.id as View)}
                   className={cn(
-                    "flex w-full items-center rounded-lg text-sm transition-colors",
+                    "flex shrink-0 items-center rounded-lg text-sm transition-colors md:w-full",
                     navCollapsed
-                      ? "justify-center px-2 py-2.5"
-                      : "gap-3 px-3 py-2",
+                      ? "justify-center px-2 py-2 md:px-2 md:py-2.5"
+                      : "gap-2 px-2.5 py-2 md:gap-3 md:px-3 md:py-2",
                     active
                       ? "bg-sky-600 text-white"
                       : "text-slate-300 hover:bg-slate-800 hover:text-slate-100",
                   )}
                 >
                   <Icon className="h-4 w-4 shrink-0" />
-                  {!navCollapsed ? item.label : null}
+                  <span className={cn(navCollapsed ? "md:hidden" : "")}>{item.label}</span>
                 </button>
               );
             })}
@@ -4559,8 +4559,8 @@ export default function Home() {
 
           <nav
             className={cn(
-              "mt-auto space-y-2 border-t border-slate-700/80",
-              navCollapsed ? "pt-3" : "pt-4",
+              "mt-2 flex gap-1 overflow-x-auto border-t border-slate-700/80 pt-2 md:mt-auto md:block md:space-y-2 md:overflow-visible",
+              navCollapsed ? "md:pt-3" : "md:pt-4",
             )}
           >
             {[
@@ -4580,10 +4580,10 @@ export default function Home() {
                   title={navCollapsed ? item.label : undefined}
                   onClick={() => setActiveView(item.id as View)}
                   className={cn(
-                    "flex w-full items-center rounded-lg text-sm transition-colors",
+                    "flex shrink-0 items-center rounded-lg text-sm transition-colors md:w-full",
                     navCollapsed
-                      ? "justify-center px-2 py-2.5"
-                      : "gap-3 px-3 py-2",
+                      ? "justify-center px-2 py-2 md:px-2 md:py-2.5"
+                      : "gap-2 px-2.5 py-2 md:gap-3 md:px-3 md:py-2",
                     active
                       ? item.id === "dev"
                         ? "bg-amber-600 text-white"
@@ -4594,15 +4594,15 @@ export default function Home() {
                   )}
                 >
                   <Icon className="h-4 w-4 shrink-0" />
-                  {!navCollapsed ? item.label : null}
+                  <span className={cn(navCollapsed ? "md:hidden" : "")}>{item.label}</span>
                 </button>
               );
             })}
           </nav>
           <div
             className={cn(
-              "mt-2 border-t border-slate-700/80",
-              navCollapsed ? "pt-2" : "pt-3",
+              "mt-2 border-t border-slate-700/80 pt-2 md:mt-2",
+              navCollapsed ? "md:pt-2" : "md:pt-3",
             )}
           >
             <button
@@ -4618,17 +4618,17 @@ export default function Home() {
               className={cn(
                 "flex w-full items-center rounded-lg text-sm text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-100",
                 navCollapsed
-                  ? "justify-center px-2 py-2.5"
-                  : "gap-3 px-3 py-2",
+                  ? "justify-center px-2 py-2 md:px-2 md:py-2.5"
+                  : "gap-2 px-2.5 py-2 md:gap-3 md:px-3 md:py-2",
               )}
             >
               <LogOut className="h-4 w-4 shrink-0" aria-hidden />
-              {!navCollapsed ? "Odhlásiť" : null}
+              <span className={cn(navCollapsed ? "md:hidden" : "")}>Odhlásiť</span>
             </button>
           </div>
         </aside>
 
-        <main className="min-w-0 p-8">
+        <main className="min-w-0 p-3 sm:p-4 md:p-8">
           {activeView === "vyhladavanie" && (
             <section className="space-y-4">
               <Card className="relative z-20 overflow-visible p-0 shadow-sm ring-1 ring-slate-100/80">
@@ -4664,16 +4664,16 @@ export default function Home() {
                     </Button>
                   </div>
                 </div>
-                <div className="p-4">
+                <div className="p-3 sm:p-4">
                 {matchedCount === 0 && (
                   <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
                     Zatiaľ nie je uložené žiadne mapovanie. Otvor sekciu Párovanie,
                     vyber stĺpce a klikni „Potvrdiť mapovanie“.
                   </p>
                 )}
-                <div className="flex flex-wrap items-end gap-3">
+                <div className="flex flex-wrap items-end gap-2 sm:gap-3">
                   {isFieldMapped("code") && (
-                    <div className="min-w-[140px] flex-1 space-y-1">
+                    <div className="w-full space-y-1 sm:min-w-[140px] sm:flex-1">
                       <label className="text-xs text-slate-600">Kód</label>
                       <Input
                         placeholder="Časť interného kódu…"
@@ -4688,7 +4688,7 @@ export default function Home() {
                     </div>
                   )}
                   {isFieldMapped("norma") && (
-                    <div className="min-w-[160px] flex-1 space-y-1">
+                    <div className="w-full space-y-1 sm:min-w-[160px] sm:flex-1">
                       <label
                         htmlFor="search-filter-norma"
                         className="text-xs text-slate-600"
@@ -4706,7 +4706,7 @@ export default function Home() {
                     </div>
                   )}
                   {isFieldMapped("surface") && (
-                    <div className="min-w-[180px] flex-1 space-y-1">
+                    <div className="w-full space-y-1 sm:min-w-[180px] sm:flex-1">
                       <label
                         htmlFor="search-filter-surface"
                         className="text-xs text-slate-600"
@@ -4724,7 +4724,7 @@ export default function Home() {
                     </div>
                   )}
                   {isFieldMapped("diameter") && (
-                    <div className="min-w-[120px] flex-1 space-y-1">
+                    <div className="w-full space-y-1 sm:min-w-[120px] sm:flex-1">
                       <label
                         htmlFor="search-filter-diameter"
                         className="text-xs text-slate-600"
@@ -4742,7 +4742,7 @@ export default function Home() {
                     </div>
                   )}
                   {isFieldMapped("length") && (
-                    <div className="min-w-[120px] flex-1 space-y-1">
+                    <div className="w-full space-y-1 sm:min-w-[120px] sm:flex-1">
                       <label
                         htmlFor="search-filter-length"
                         className="text-xs text-slate-600"
@@ -4760,7 +4760,7 @@ export default function Home() {
                     </div>
                   )}
                   {isFieldMapped("v_class") && (
-                    <div className="min-w-[140px] flex-1 space-y-1">
+                    <div className="w-full space-y-1 sm:min-w-[140px] sm:flex-1">
                       <label
                         htmlFor="search-filter-v-class"
                         className="text-xs text-slate-600"
@@ -4778,7 +4778,7 @@ export default function Home() {
                     </div>
                   )}
                   {isFieldMapped("y_money_name") && (
-                    <div className="min-w-[160px] flex-1 space-y-1">
+                    <div className="w-full space-y-1 sm:min-w-[160px] sm:flex-1">
                       <label
                         htmlFor="search-filter-y-money"
                         className="text-xs text-slate-600"
@@ -4825,7 +4825,8 @@ export default function Home() {
               </Card>
 
               <Card className="overflow-hidden p-0">
-                <table className="w-full text-sm">
+                <div className="overflow-x-auto">
+                <table className="w-full min-w-[760px] text-sm">
                   <thead className="bg-slate-100 text-left text-xs uppercase text-slate-500">
                     <tr>
                       <th className="px-3 py-2" />
@@ -4952,6 +4953,7 @@ export default function Home() {
                     })}
                   </tbody>
                 </table>
+                </div>
                 {searchResults.length === 0 && (
                   <p className="px-4 py-6 text-center text-sm text-slate-600">
                     Žiadne riadky pre aktuálne filtre.
@@ -4963,13 +4965,13 @@ export default function Home() {
 
           {activeView === "zoznamy" && (
             <section className="space-y-4">
-              <Card className="p-4">
+              <Card className="p-3 sm:p-4">
                 <div className="flex flex-wrap items-center gap-2">
                   <Input
                     value={newListName}
                     onChange={(e) => setNewListName(e.target.value)}
                     placeholder="Názov nového zoznamu"
-                    className="max-w-sm"
+                    className="w-full sm:max-w-sm"
                   />
                   <Button type="button" onClick={() => void createProductList()}>
                     <Plus className="mr-1 h-4 w-4" />
@@ -5036,7 +5038,8 @@ export default function Home() {
                 </Card>
 
                 <Card className="overflow-hidden p-0">
-                  <table className="w-full text-sm">
+                  <div className="overflow-x-auto">
+                  <table className="w-full min-w-[760px] text-sm">
                     <thead className="bg-slate-100 text-left text-xs uppercase text-slate-500">
                       <tr>
                         <th className="px-3 py-2" />
@@ -5193,6 +5196,7 @@ export default function Home() {
                       ) : null}
                     </tbody>
                   </table>
+                  </div>
                 </Card>
               </div>
             </section>
