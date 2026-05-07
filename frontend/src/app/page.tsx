@@ -2215,7 +2215,7 @@ function ProductSupplierExpandedTableRow({
                                                   <>
                                                     <div
                                                       className={cn(
-                                                        "flex items-center gap-0.5 rounded-md border px-1.5 py-0.5 shadow-sm ring-1 sm:gap-1 sm:px-2 sm:py-1",
+                                                        "flex items-center gap-1 rounded-md border px-2 py-1 shadow-sm ring-1 sm:gap-1 sm:px-2 sm:py-1",
                                                         offerStockUiBlocked
                                                           ? "border-slate-300/80 bg-slate-100/90 ring-slate-200/60"
                                                           : "border-slate-200/90 bg-gradient-to-b from-slate-50 to-white ring-slate-100/50",
@@ -2240,7 +2240,7 @@ function ProductSupplierExpandedTableRow({
                                                         }
                                                         disabled={offerStockUiBlocked}
                                                         className={cn(
-                                                          "h-6 w-[3.35rem] rounded border px-0.5 text-center text-[10px] tabular-nums shadow-sm focus:outline-none focus:ring-1 sm:h-7 sm:w-[4.1rem] sm:px-1 sm:text-xs",
+                                                          "h-8 w-[4.25rem] rounded border px-1 text-center text-xs tabular-nums shadow-sm focus:outline-none focus:ring-1 sm:h-7 sm:w-[4.1rem] sm:px-1 sm:text-xs",
                                                           offerStockUiBlocked
                                                             ? "cursor-not-allowed border-slate-300 bg-slate-200/80 text-slate-500 focus:border-slate-300 focus:ring-0"
                                                             : "border-slate-200 bg-white text-slate-800 focus:border-sky-400 focus:ring-sky-300/40",
@@ -2270,7 +2270,7 @@ function ProductSupplierExpandedTableRow({
                                                           );
                                                         }}
                                                       />
-                                                      <span className="text-[10px] font-medium text-slate-600 sm:text-xs">
+                                                      <span className="text-xs font-medium text-slate-600 sm:text-xs">
                                                         ks
                                                       </span>
                                                       {rowPack != null ? (
@@ -2291,7 +2291,7 @@ function ProductSupplierExpandedTableRow({
                                                           offerStockUiBlocked,
                                                       )}
                                                       className={cn(
-                                                        "shrink-0 gap-1.5 shadow-sm shadow-sky-600/15",
+                                                        "h-8 shrink-0 gap-1.5 px-2 text-xs shadow-sm shadow-sky-600/15 sm:h-9 sm:px-3 sm:text-sm",
                                                         offerStockUiBlocked &&
                                                           "opacity-60",
                                                         cartAddSuccessByKey[cartKey] &&
@@ -4917,7 +4917,7 @@ export default function Home() {
                             <td className="px-3 py-2 text-center">
                               <button
                                 type="button"
-                                className="inline-flex h-7 w-7 items-center justify-center rounded border border-slate-300 bg-white text-slate-600 hover:bg-slate-100"
+                                className="inline-flex h-8 w-8 items-center justify-center rounded border border-slate-300 bg-white text-slate-600 hover:bg-slate-100 sm:h-7 sm:w-7"
                                 title="Pridať produkt do zoznamu"
                                 onClick={(event) => {
                                   event.preventDefault();
@@ -5011,7 +5011,7 @@ export default function Home() {
                           <Button
                             type="button"
                             variant="outline"
-                            className="h-7 px-2 text-[11px]"
+                            className="h-8 px-2.5 text-xs sm:h-7 sm:px-2 sm:text-[11px]"
                             onClick={() => {
                               const n = window.prompt("Nový názov zoznamu", l.name);
                               if (n && n.trim()) void renameProductList(l.id, n);
@@ -5022,7 +5022,7 @@ export default function Home() {
                           <Button
                             type="button"
                             variant="outline"
-                            className="h-7 border-red-200 px-2 text-[11px] text-red-700"
+                            className="h-8 border-red-200 px-2.5 text-xs text-red-700 sm:h-7 sm:px-2 sm:text-[11px]"
                             onClick={() => void deleteProductList(l.id)}
                           >
                             <Trash2 className="mr-1 h-3.5 w-3.5" />
@@ -5136,7 +5136,7 @@ export default function Home() {
                                     <Button
                                       type="button"
                                       variant="outline"
-                                      className="h-7 border-red-200 px-2 text-[11px] text-red-700"
+                                      className="h-8 border-red-200 px-2.5 text-xs text-red-700 sm:h-7 sm:px-2 sm:text-[11px]"
                                       onClick={(event) => {
                                         event.stopPropagation();
                                         void removeProductFromList(
