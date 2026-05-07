@@ -45,6 +45,7 @@ class ArgipHttpClient:
                 "User-Agent": DEFAULT_UA,
                 "Accept": "application/json",
                 "Content-Type": "application/json",
+                "Content-Currency": "EUR",
                 "Origin": self.base_url,
                 "Referer": f"{self.base_url}/eu_en/",
             },
@@ -103,16 +104,49 @@ class ArgipHttpClient:
         code = (product_code or "").strip()
         if not code:
             return []
-        q = (
+        q_search = (
             "query($search:String!,$pageSize:Int!,$currentPage:Int!){"
             "products(search:$search,pageSize:$pageSize,currentPage:$currentPage,"
-            'filter:{type_id:{eq:"simple"}}){'
+            'filter:{type_id:{eq:"simple"}}'
+            "){"
             "items{sku name stock_status salable_qty "
             "price_range{minimum_price{final_price{value currency}}}}}}"
         )
         data = await self._gql(
-            q, {"search": code, "pageSize": 24, "currentPage": 1}, auth_required=True
+            q_search, {"search": code, "pageSize": 24, "currentPage": 1}, auth_required=True
         )
+        items = self._extract_products_items(data)
+        if items:
+            return items
+
+        # HAR fallback: Argip frontend používa quoted search (napr. "\"2284\"").
+        data2 = await self._gql(
+            q_search,
+            {"search": f'"{code}"', "pageSize": 24, "currentPage": 1},
+            auth_required=True,
+        )
+        items2 = self._extract_products_items(data2)
+        if items2:
+            return items2
+
+        # Priamy SKU filter (Magento GraphQL štýl) ako ďalší fallback.
+        q_sku = (
+            "query($sku:String!){"
+            'products(filter:{sku:{eq:$sku},type_id:{eq:"simple"}},pageSize:24,currentPage:1){'
+            "items{sku name stock_status salable_qty "
+            "price_range{minimum_price{final_price{value currency}}}}}}"
+        )
+        data3 = await self._gql(q_sku, {"sku": code}, auth_required=True)
+        items3 = self._extract_products_items(data3)
+        if items3:
+            return items3
+
+        # Posledný fallback podľa HAR: GET /graphql?hash=...&search_1=... (persisted query).
+        items4 = await self._search_products_via_har_endpoint(code)
+        return items4
+
+    @staticmethod
+    def _extract_products_items(data: dict[str, Any]) -> list[dict[str, Any]]:
         products = data.get("products")
         if not isinstance(products, dict):
             return []
@@ -120,6 +154,47 @@ class ArgipHttpClient:
         if not isinstance(items, list):
             return []
         return [x for x in items if isinstance(x, dict)]
+
+    async def _search_products_via_har_endpoint(self, code: str) -> list[dict[str, Any]]:
+        if not self._token:
+            return []
+        params = {
+            "hash": "1121303192",
+            "search_1": f'"{code}"',
+            "pageSize_1": "24",
+            "currentPage_1": "1",
+            "filter_1": '{"type_id":{"eq":"simple"},"customer_group_id":{"eq":134}}',
+            "isAutocomplete_1": "true",
+        }
+        r = await self._client.get(
+            self.graphql_url,
+            params=params,
+            headers={"Authorization": f"Bearer {self._token}"},
+        )
+        r.raise_for_status()
+        payload = r.json()
+        if not isinstance(payload, dict):
+            return []
+        return self._find_items_deep(payload)
+
+    def _find_items_deep(self, node: Any) -> list[dict[str, Any]]:
+        if isinstance(node, dict):
+            items = node.get("items")
+            if isinstance(items, list):
+                valid = [x for x in items if isinstance(x, dict) and str(x.get("sku") or "").strip()]
+                if valid:
+                    return valid
+            for value in node.values():
+                found = self._find_items_deep(value)
+                if found:
+                    return found
+            return []
+        if isinstance(node, list):
+            for value in node:
+                found = self._find_items_deep(value)
+                if found:
+                    return found
+        return []
 
     async def customer_cart_id(self) -> str:
         if self._cart_id:

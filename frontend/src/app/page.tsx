@@ -310,6 +310,7 @@ type ProductSearchRow = {
     stock: number;
     supplier_id?: number | null;
     supplier_code?: string | null;
+    supplier_product_url?: string | null;
     logo_url?: string | null;
   }>;
 };
@@ -1656,12 +1657,26 @@ function ProductSupplierExpandedTableRow({
                                                 </span>
                                               ) : null}
                                             </div>
-                                            <p className="truncate text-[9px] leading-tight text-slate-500 sm:text-[11px]">
-                                              Kód:{" "}
-                                              {offer.supplier_code?.trim()
-                                                ? offer.supplier_code
-                                                : "—"}
-                                            </p>
+                                            <div className="flex items-center gap-1 text-[9px] leading-tight text-slate-500 sm:text-[11px]">
+                                              <span className="shrink-0">Kód:</span>
+                                              <span className="truncate">
+                                                {offer.supplier_code?.trim()
+                                                  ? offer.supplier_code
+                                                  : "—"}
+                                              </span>
+                                              {offer.supplier_product_url?.trim() ? (
+                                                <a
+                                                  href={offer.supplier_product_url}
+                                                  target="_blank"
+                                                  rel="noopener noreferrer"
+                                                  title="Otvoriť produkt u dodávateľa"
+                                                  className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border border-slate-300/80 bg-white/90 text-slate-600 transition hover:border-sky-300 hover:text-sky-700 sm:h-4.5 sm:w-4.5"
+                                                  onClick={(event) => event.stopPropagation()}
+                                                >
+                                                  <ExternalLink className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
+                                                </a>
+                                              ) : null}
+                                            </div>
                                           </div>
                                           {sid != null ? (
                                             <div className="ml-auto flex w-auto shrink-0 justify-end self-center">
