@@ -1605,12 +1605,12 @@ function ProductSupplierExpandedTableRow({
                                       const supplierHeader = (
                                         <div
                                           className={cn(
-                                            "flex min-w-0 flex-1 flex-wrap items-start gap-1.5 rounded-md border p-1.5 shadow-sm ring-1 sm:flex-nowrap sm:items-center",
+                                            "flex min-w-0 flex-1 flex-wrap items-start gap-1 rounded-md border p-1.5 shadow-sm ring-1 sm:gap-1.5 sm:flex-nowrap sm:items-center",
                                             supplierDetailHeaderBarClass(offerIndex),
                                           )}
                                         >
                                           <div
-                                            className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-md border border-slate-200/90 bg-white shadow-sm ring-1 ring-slate-100/60 sm:h-9 sm:w-9"
+                                            className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-md border border-slate-200/90 bg-white shadow-sm ring-1 ring-slate-100/60 sm:h-9 sm:w-9"
                                             title="Logo dodávateľa"
                                           >
                                             {publicApiAssetUrl(offer.logo_url) ? (
@@ -1632,7 +1632,7 @@ function ProductSupplierExpandedTableRow({
                                           </div>
                                           <div className="min-w-0 flex-1">
                                             <div className="flex flex-wrap items-center gap-x-1 gap-y-0.5">
-                                              <p className="min-w-0 max-w-[10.5rem] truncate text-xs font-semibold leading-snug text-slate-900 sm:max-w-[13rem] sm:text-[13px]">
+                                              <p className="min-w-0 max-w-[9rem] truncate text-[11px] font-semibold leading-snug text-slate-900 sm:max-w-[13rem] sm:text-[13px]">
                                                 {offer.supplier}
                                               </p>
                                               {supplierShowsScrapeLoginBadge(
@@ -1664,7 +1664,7 @@ function ProductSupplierExpandedTableRow({
                                             </p>
                                           </div>
                                           {sid != null ? (
-                                            <div className="flex w-full justify-end sm:ml-auto sm:w-auto sm:shrink-0 sm:self-center">
+                                            <div className="ml-auto flex w-auto shrink-0 justify-end self-center">
                                               <label
                                                 className="sr-only"
                                                 htmlFor={`offer-note-${product.internal_code}-${sid}-${offerIndex}`}
@@ -1701,7 +1701,7 @@ function ProductSupplierExpandedTableRow({
                                                 spellCheck={true}
                                                 placeholder="Poznámka"
                                                 title="Uloží sa v prehliadači; pri Košíku sa skopíruje do záznamu."
-                                                className="h-7 w-full rounded border border-slate-200/90 bg-white px-2 text-[11px] leading-tight text-slate-800 shadow-sm placeholder:text-slate-400 focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-300/55 sm:h-6 sm:w-[9rem] sm:px-1.5 sm:text-[11px]"
+                                                className="h-6 w-[7.1rem] rounded border border-slate-200/90 bg-white px-1.5 text-[10px] leading-tight text-slate-800 shadow-sm placeholder:text-slate-400 focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-300/55 sm:h-6 sm:w-[9rem] sm:px-1.5 sm:text-[11px]"
                                               />
                                             </div>
                                           ) : null}
@@ -1711,12 +1711,12 @@ function ProductSupplierExpandedTableRow({
                                         <div
                                           key={`${product.internal_code}-${offer.supplier}-${offer.supplier_code ?? offerIndex}`}
                                           className={cn(
-                                            "min-w-0 rounded-lg border border-slate-200/80 bg-gradient-to-b from-white via-slate-50/25 to-slate-100/35 p-2 shadow-sm ring-1 sm:p-2",
+                                            "min-w-0 rounded-lg border border-slate-200/80 bg-gradient-to-b from-white via-slate-50/25 to-slate-100/35 p-1.5 shadow-sm ring-1 sm:p-2",
                                             supplierDetailCardRingClass(offerIndex),
                                           )}
                                         >
-                                          <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:gap-3">
-                                            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                                          <div className="flex flex-col gap-1.5 lg:flex-row lg:items-start lg:gap-3">
+                                            <div className="flex min-w-0 flex-1 flex-col gap-1">
                                               {supplierHeader}
                                               {halfmannProductTitle ? (
                                                 <p
@@ -2066,9 +2066,9 @@ function ProductSupplierExpandedTableRow({
                                               ) : null}
                                             </div>
                                             <div className="flex w-full flex-col gap-1 lg:max-w-[min(100%,20rem)] lg:shrink-0 lg:items-stretch">
-                                              <div className="rounded-md border border-slate-200/80 bg-white/95 p-1.5 shadow-sm ring-1 ring-slate-100/60 sm:p-2">
-                                              <div className="flex flex-nowrap items-center justify-between gap-x-1.5 text-xs sm:gap-x-2 sm:text-[13px]">
-                                                <div className="min-w-0 flex-1 basis-0 overflow-hidden text-ellipsis whitespace-nowrap pr-0.5 text-left">
+                                              <div className="rounded-md border border-slate-200/80 bg-white/95 p-1 shadow-sm ring-1 ring-slate-100/60 sm:p-2">
+                                              <div className="flex flex-wrap items-center justify-between gap-x-1.5 gap-y-0.5 text-[11px] sm:flex-nowrap sm:gap-x-2 sm:text-[13px]">
+                                                <div className="min-w-0 flex-1 basis-[48%] overflow-hidden text-ellipsis whitespace-nowrap pr-0.5 text-left sm:basis-0">
                                                   <span className="mr-0.5 text-[9px] font-semibold uppercase tracking-wider text-slate-500 sm:mr-1 sm:text-[10px]">
                                                     Cena
                                                   </span>
@@ -2135,7 +2135,7 @@ function ProductSupplierExpandedTableRow({
                                                     </span>
                                                   )}
                                                 </div>
-                                                <div className="min-w-0 flex-1 basis-0 overflow-hidden text-ellipsis whitespace-nowrap pl-0.5 text-right">
+                                                <div className="min-w-0 flex-1 basis-[48%] overflow-hidden text-ellipsis whitespace-nowrap pl-0.5 text-right sm:basis-0">
                                                   <span className="mr-0.5 text-[9px] font-semibold uppercase tracking-wider text-slate-500 sm:mr-1 sm:text-[10px]">
                                                     Sklad
                                                   </span>
@@ -2199,7 +2199,7 @@ function ProductSupplierExpandedTableRow({
                                               </div>
                                               <div
                                                 className={cn(
-                                                  "flex flex-wrap items-center justify-end gap-1 lg:flex-nowrap",
+                                                  "flex flex-wrap items-center justify-end gap-1",
                                                   canCart &&
                                                     offerStockUiBlocked &&
                                                     "rounded-md bg-slate-200/80 px-1.5 py-1 ring-1 ring-slate-300/60",
@@ -4673,9 +4673,9 @@ export default function Home() {
                     vyber stĺpce a klikni „Potvrdiť mapovanie“.
                   </p>
                 )}
-                <div className="grid grid-cols-1 gap-2 min-[560px]:grid-cols-2 lg:grid-cols-3">
+                <div className="grid grid-cols-1 gap-2 min-[560px]:grid-cols-2 sm:flex sm:flex-wrap sm:items-end sm:gap-3">
                   {isFieldMapped("code") && (
-                    <div className="w-full space-y-1">
+                    <div className="w-full space-y-1 sm:min-w-[140px] sm:flex-1">
                       <label className="text-xs text-slate-600">Kód</label>
                       <Input
                         placeholder="Časť interného kódu…"
@@ -4690,7 +4690,7 @@ export default function Home() {
                     </div>
                   )}
                   {isFieldMapped("norma") && (
-                    <div className="w-full space-y-1">
+                    <div className="w-full space-y-1 sm:min-w-[160px] sm:flex-1">
                       <label
                         htmlFor="search-filter-norma"
                         className="text-xs text-slate-600"
@@ -4708,7 +4708,7 @@ export default function Home() {
                     </div>
                   )}
                   {isFieldMapped("surface") && (
-                    <div className="w-full space-y-1">
+                    <div className="w-full space-y-1 sm:min-w-[180px] sm:flex-1">
                       <label
                         htmlFor="search-filter-surface"
                         className="text-xs text-slate-600"
@@ -4726,7 +4726,7 @@ export default function Home() {
                     </div>
                   )}
                   {isFieldMapped("diameter") && (
-                    <div className="w-full space-y-1">
+                    <div className="w-full space-y-1 sm:min-w-[120px] sm:flex-1">
                       <label
                         htmlFor="search-filter-diameter"
                         className="text-xs text-slate-600"
@@ -4744,7 +4744,7 @@ export default function Home() {
                     </div>
                   )}
                   {isFieldMapped("length") && (
-                    <div className="w-full space-y-1">
+                    <div className="w-full space-y-1 sm:min-w-[120px] sm:flex-1">
                       <label
                         htmlFor="search-filter-length"
                         className="text-xs text-slate-600"
@@ -4762,7 +4762,7 @@ export default function Home() {
                     </div>
                   )}
                   {isFieldMapped("v_class") && (
-                    <div className="w-full space-y-1">
+                    <div className="w-full space-y-1 sm:min-w-[140px] sm:flex-1">
                       <label
                         htmlFor="search-filter-v-class"
                         className="text-xs text-slate-600"
@@ -4780,7 +4780,7 @@ export default function Home() {
                     </div>
                   )}
                   {isFieldMapped("y_money_name") && (
-                    <div className="w-full space-y-1">
+                    <div className="w-full space-y-1 sm:min-w-[160px] sm:flex-1">
                       <label
                         htmlFor="search-filter-y-money"
                         className="text-xs text-slate-600"

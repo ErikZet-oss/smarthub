@@ -17,6 +17,5 @@
   "post_modal_open_wait_ms": 400,
   "post_add_wait_ms": 800,
   "post_login_wait_ms": 800,
-  "headless": false,
-  "browser_channel": "chrome"
+  "headless": false
 }
