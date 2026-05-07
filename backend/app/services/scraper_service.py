@@ -51,6 +51,7 @@ from app.services.haspl_http_client import (
     haspl_variant_pack_quantity,
     supplier_shop_cart_url,
 )
+from app.services.argip_http_client import ArgipHttpClient, argip_cart_url
 from app.services.inoxmare_http_client import (
     InoxmareHttpClient,
     inoxmare_origin,
@@ -264,6 +265,14 @@ def _supplier_is_halfmann(supplier: Supplier) -> bool:
     return "halfmann-schrauben.de" in u
 
 
+def _supplier_is_argip(supplier: Supplier) -> bool:
+    compact = re.sub(r"\s+", "", (supplier.name or "").lower())
+    if "argip" in compact:
+        return True
+    u = (supplier.shop_url or "").lower()
+    return "argip.com.pl" in u
+
+
 def _supplier_is_inoxmare(supplier: Supplier) -> bool:
     """
     Inox Mare / https://www.inoxmare.com/en/ — „Inox Mare“ → inoxmare; skrátený názov „Inox“
@@ -309,6 +318,7 @@ def supplier_allows_empty_cart_config(supplier: Supplier) -> bool:
         or _supplier_is_inoxmare(supplier)
         or _supplier_is_bmkco(supplier)
         or _supplier_is_halfmann(supplier)
+        or _supplier_is_argip(supplier)
     ):
         return True
     u = (supplier.shop_url or "").lower()
@@ -320,6 +330,8 @@ def supplier_allows_empty_cart_config(supplier: Supplier) -> bool:
     if "bmkco.cz" in u:
         return True
     if "halfmann-schrauben.de" in u:
+        return True
+    if "argip.com.pl" in u:
         return True
     return False
 
@@ -1982,6 +1994,103 @@ async def _inoxmare_get_supplier_data_via_http(
         supplier,
         run_id,
         f"get_supplier_data Inoxmare HTTP: code={code!r} product_id={pid!r} path={path!r}",
+    )
+    return data
+
+
+async def _argip_get_supplier_data_via_http(
+    supplier: Supplier,
+    product_code: str,
+    *,
+    run_label: str,
+    run_id: str,
+) -> dict[str, Any]:
+    code = (product_code or "").strip()
+    if not code:
+        raise ValueError("Prázdny kód produktu.")
+
+    async with ArgipHttpClient(shop_url=supplier.shop_url or "") as client:
+        await client.ensure_login(supplier.username, supplier.password)
+        items = await client.search_products(code)
+
+    if not items:
+        raise ScraperProductNotFoundError(
+            f"Argip: kód {code!r} sa nenašiel (GraphQL products search je prázdny)."
+        )
+
+    code_norm = re.sub(r"\s+", "", code).upper()
+
+    def _score(item: dict[str, Any]) -> int:
+        sku = str(item.get("sku") or "").strip()
+        sku_norm = re.sub(r"\s+", "", sku).upper()
+        if sku_norm == code_norm:
+            return 0
+        if code_norm and code_norm in sku_norm:
+            return 1
+        return 2
+
+    def _price_of(it: dict[str, Any]) -> Optional[float]:
+        pr = (it.get("price_range") or {}) if isinstance(it, dict) else {}
+        mp = (pr.get("minimum_price") or {}) if isinstance(pr, dict) else {}
+        fp = (mp.get("final_price") or {}) if isinstance(mp, dict) else {}
+        try:
+            return round(float(fp.get("value")), 4)
+        except (TypeError, ValueError):
+            return None
+
+    def _stock_of(it: dict[str, Any]) -> int:
+        sq = it.get("salable_qty")
+        try:
+            q = int(float(sq))
+            return max(0, q)
+        except (TypeError, ValueError):
+            st = str(it.get("stock_status") or "").strip().upper()
+            return 1 if st == "IN_STOCK" else 0
+
+    ordered = sorted(items, key=_score)
+    best = ordered[0]
+    best_price = _price_of(best)
+    best_stock = _stock_of(best)
+    best_sku = str(best.get("sku") or "").strip() or code
+
+    pvars: list[dict[str, Any]] = []
+    for it in ordered[:8]:
+        sku = str(it.get("sku") or "").strip()
+        if not sku:
+            continue
+        pe = _price_of(it)
+        stq = _stock_of(it)
+        pvars.append(
+            {
+                "label": str(it.get("name") or sku),
+                "pack": "1 ks",
+                "pack_quantity": 1,
+                "price_eur": pe,
+                "stock": stq,
+                "argip_sku": sku,
+            }
+        )
+
+    data: dict[str, Any] = {
+        "price_eur": best_price,
+        "stock": best_stock,
+        "raw_price": f"{best_price:.2f} €"
+        if isinstance(best_price, (int, float))
+        else None,
+        "raw_stock": f"{best_stock} ks",
+        "pack_quantity": 1,
+        "raw_pack_quantity": "1 ks",
+        "packaging_variants": pvars,
+        "logged_in": True,
+        "argip_via_http": True,
+        "argip_sku": best_sku,
+        "cart_url": argip_cart_url(supplier.shop_url or ""),
+    }
+    _log(
+        run_label,
+        supplier,
+        run_id,
+        f"get_supplier_data Argip HTTP: code={code!r} sku={best_sku!r} stock={best_stock}",
     )
     return data
 
@@ -5256,6 +5365,31 @@ class ScraperService:
                     "warn",
                 )
 
+        if _supplier_is_argip(supplier):
+            try:
+                ag = await _argip_get_supplier_data_via_http(
+                    supplier,
+                    product_code,
+                    run_label=run_label,
+                    run_id=run_id,
+                )
+                _log(
+                    run_label,
+                    supplier,
+                    run_id,
+                    f"get_supplier_data done (Argip HTTP): {ag}",
+                )
+                return ag
+            except Exception as exc:
+                dev_run_log_exception(run_label, exc)
+                _log(
+                    run_label,
+                    supplier,
+                    run_id,
+                    f"Argip HTTP zlyhalo, pokračujem Playwright: {exc}",
+                    "warn",
+                )
+
         if _supplier_is_mekrs(supplier):
             try:
                 data_http = await _mekrs_get_supplier_data_via_http(
@@ -5544,6 +5678,7 @@ class ScraperService:
         is_haspl = _supplier_is_haspl(supplier)
         is_bmkco = _supplier_is_bmkco(supplier)
         is_halfmann = _supplier_is_halfmann(supplier)
+        is_argip = _supplier_is_argip(supplier)
         hopefix_http = _supplier_is_hopefix(supplier) and _hopefix_http_enabled(config)
         inoxmare_http = _supplier_is_inoxmare(supplier)
         if (
@@ -5552,6 +5687,7 @@ class ScraperService:
             and not is_haspl
             and not is_bmkco
             and not is_halfmann
+            and not is_argip
             and not inoxmare_http
         ):
             if not search_sel and not search_url_tmpl:
@@ -5822,6 +5958,39 @@ class ScraperService:
 
             await _halfmann_http_cart()
             _log(run_label, supplier, run_id, "add_to_cart done (Halfmann HTTP)")
+            return
+
+        if is_argip:
+            code_ag = (product_code or "").strip()
+            if not code_ag:
+                raise ValueError("Argip: prázdny kód produktu.")
+            sku_ag = code_ag
+            if packaging_variant_index is not None:
+                data_ag = await _argip_get_supplier_data_via_http(
+                    supplier,
+                    code_ag,
+                    run_label=run_label,
+                    run_id=run_id,
+                )
+                pvars_ag = list(data_ag.get("packaging_variants") or [])
+                if pvars_ag:
+                    idx_ag = max(0, min(int(packaging_variant_index), len(pvars_ag) - 1))
+                    row_ag = pvars_ag[idx_ag]
+                    sku_ag = str(row_ag.get("argip_sku") or "").strip() or sku_ag
+            _log(
+                run_label,
+                supplier,
+                run_id,
+                f"add_to_cart Argip HTTP sku={sku_ag!r} qty={quantity}",
+            )
+
+            async def _argip_http_cart() -> None:
+                async with ArgipHttpClient(shop_url=supplier.shop_url or "") as aclient:
+                    await aclient.ensure_login(supplier.username, supplier.password)
+                    await aclient.add_to_cart(sku_ag, int(quantity))
+
+            await _argip_http_cart()
+            _log(run_label, supplier, run_id, "add_to_cart done (Argip HTTP)")
             return
 
         if inoxmare_http:

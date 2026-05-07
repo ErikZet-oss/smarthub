@@ -208,8 +208,9 @@ def import_gamechanger_excel(
         if supplier.code_column and supplier.code_column.strip():
             explicit_header_to_supplier[supplier.code_column.strip()] = supplier.name
 
-    supplier_cache: dict[str, Supplier] = {}
-    product_cache: dict[str, Product] = {}
+    # Akumulácia z Excelu (jeden prechod), potom batch zápis do DB.
+    product_payloads: dict[str, dict[str, str | None]] = {}
+    mapping_payloads: dict[tuple[str, str], str] = {}
 
     for row in rows:
         result.rows_scanned += 1
@@ -221,33 +222,40 @@ def import_gamechanger_excel(
         if not internal_code:
             continue
 
-        product = product_cache.get(internal_code)
-        if product is None:
-            product = session.exec(
-                select(Product).where(Product.internal_code == internal_code)
-            ).first()
-            if product is None:
-                product = Product(internal_code=internal_code)
-                session.add(product)
-            product_cache[internal_code] = product
+        payload = product_payloads.get(internal_code)
+        if payload is None:
+            payload = {
+                "norma": None,
+                "diameter": None,
+                "length": None,
+                "surface": None,
+                "v_class": None,
+                "y_money_name": None,
+                "image_filename": None,
+            }
+            product_payloads[internal_code] = payload
 
-        _set_product_field_if_cell_nonempty(product, "norma", row, norma_idx)
-        _set_product_field_if_cell_nonempty(product, "diameter", row, diameter_idx)
-        _set_product_field_if_cell_nonempty(product, "length", row, length_idx)
-        _set_product_field_if_cell_nonempty(product, "surface", row, surface_idx)
-        _set_product_field_if_cell_nonempty(product, "v_class", row, v_class_idx)
-        _set_product_field_if_cell_nonempty(
-            product, "y_money_name", row, y_money_name_idx
+        r = tuple(row) if row is not None else ()
+        idx_to_field = (
+            (norma_idx, "norma"),
+            (diameter_idx, "diameter"),
+            (length_idx, "length"),
+            (surface_idx, "surface"),
+            (v_class_idx, "v_class"),
+            (y_money_name_idx, "y_money_name"),
         )
+        for idx, field_name in idx_to_field:
+            if idx is None or idx >= len(r):
+                continue
+            cell = _normalize(r[idx])
+            if cell:
+                payload[field_name] = cell
         if image_filename_idx is not None:
-            r = tuple(row) if row is not None else ()
             if image_filename_idx < len(r):
                 img_raw = _normalize(r[image_filename_idx])
                 if img_raw:
-                    product.image_filename = _excel_image_basename(img_raw) or None
+                    payload["image_filename"] = _excel_image_basename(img_raw) or None
         result.products_upserted += 1
-
-        session.flush()
 
         for col_idx, header in supplier_code_columns:
             supplier_code = _normalize(row[col_idx])
@@ -257,39 +265,85 @@ def import_gamechanger_excel(
             supplier_name = explicit_header_to_supplier.get(header.strip()) or _to_supplier_name(
                 header
             )
-            supplier = supplier_cache.get(supplier_name)
-            if supplier is None:
-                supplier = session.exec(
-                    select(Supplier).where(Supplier.name == supplier_name)
-                ).first()
-                if supplier is None:
-                    supplier = Supplier(
-                        name=supplier_name,
-                        shop_url="",
-                        username="",
-                        password="",
-                        is_connected=False,
-                        sort_order=_allocate_supplier_sort_order(session),
-                    )
-                    session.add(supplier)
-                    result.suppliers_upserted += 1
-                supplier_cache[supplier_name] = supplier
-                session.flush()
-
-            mapping = session.exec(
-                select(ProductMapping).where(
-                    ProductMapping.product_id == product.id,
-                    ProductMapping.supplier_id == supplier.id,
-                )
-            ).first()
-            if mapping is None:
-                mapping = ProductMapping(
-                    product_id=product.id, supplier_id=supplier.id, supplier_code=supplier_code
-                )
-                session.add(mapping)
-            else:
-                mapping.supplier_code = supplier_code
+            mapping_payloads[(internal_code, supplier_name)] = supplier_code
             result.mappings_upserted += 1
+
+    # 1) Produkty: preload + create/update
+    existing_products = session.exec(select(Product)).all()
+    product_by_code = {p.internal_code: p for p in existing_products}
+    for internal_code, payload in product_payloads.items():
+        product = product_by_code.get(internal_code)
+        if product is None:
+            product = Product(internal_code=internal_code)
+            session.add(product)
+            product_by_code[internal_code] = product
+        product.norma = payload["norma"] if isinstance(payload["norma"], str) else product.norma
+        product.diameter = (
+            payload["diameter"] if isinstance(payload["diameter"], str) else product.diameter
+        )
+        product.length = payload["length"] if isinstance(payload["length"], str) else product.length
+        product.surface = (
+            payload["surface"] if isinstance(payload["surface"], str) else product.surface
+        )
+        product.v_class = payload["v_class"] if isinstance(payload["v_class"], str) else product.v_class
+        product.y_money_name = (
+            payload["y_money_name"]
+            if isinstance(payload["y_money_name"], str)
+            else product.y_money_name
+        )
+        if payload["image_filename"] is not None:
+            product.image_filename = (
+                payload["image_filename"]
+                if isinstance(payload["image_filename"], str)
+                else None
+            )
+
+    session.flush()
+
+    # 2) Dodávatelia: preload + create chýbajúcich
+    suppliers_rows = session.exec(select(Supplier)).all()
+    supplier_by_name = {s.name: s for s in suppliers_rows}
+    next_sort_order = (
+        max((s.sort_order or 0) for s in suppliers_rows) + 10 if suppliers_rows else 0
+    )
+    for _, supplier_name in mapping_payloads.keys():
+        if supplier_name in supplier_by_name:
+            continue
+        supplier = Supplier(
+            name=supplier_name,
+            shop_url="",
+            username="",
+            password="",
+            is_connected=False,
+            sort_order=next_sort_order,
+        )
+        next_sort_order += 10
+        session.add(supplier)
+        supplier_by_name[supplier_name] = supplier
+        result.suppliers_upserted += 1
+
+    session.flush()
+
+    # 3) Mappingy: preload a následný upsert bez SELECT v slučke.
+    all_mappings = session.exec(select(ProductMapping)).all()
+    mapping_by_pair = {(m.product_id, m.supplier_id): m for m in all_mappings}
+    for (internal_code, supplier_name), supplier_code in mapping_payloads.items():
+        product = product_by_code.get(internal_code)
+        supplier = supplier_by_name.get(supplier_name)
+        if product is None or supplier is None or product.id is None or supplier.id is None:
+            continue
+        key = (int(product.id), int(supplier.id))
+        mapping = mapping_by_pair.get(key)
+        if mapping is None:
+            mapping = ProductMapping(
+                product_id=int(product.id),
+                supplier_id=int(supplier.id),
+                supplier_code=supplier_code,
+            )
+            session.add(mapping)
+            mapping_by_pair[key] = mapping
+        else:
+            mapping.supplier_code = supplier_code
 
     session.commit()
     if progress_cb is not None:

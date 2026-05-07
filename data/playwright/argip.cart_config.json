@@ -1,0 +1,21 @@
+{
+  "search_via_url_template": "https://b2b.argip.com.pl/eu_en/catalogsearch/result/?q={code}",
+  "login_form_selector": "form[action*=\"login\"]",
+  "username_selector": "input[name=\"email\"]",
+  "password_selector": "input[name=\"password\"]",
+  "login_button_selector": "button[type=\"submit\"], button.action.login.primary",
+  "search_input_selector": "input[name=\"search\"], input[id*=\"search\"]",
+  "search_submit_key": "Enter",
+  "first_product_link_selector": "a.searchitem-title, a[href*=\"/eu_en/\"]",
+  "post_login_wait_ms": 1200,
+  "post_search_wait_ms": 1200,
+  "navigation_goto_wait_until": "domcontentloaded",
+  "price_stock_timeout_ms": 4000,
+  "price_selector": "[data-price-type=\"finalPrice\"] .price, .price-wrapper .price, .price",
+  "stock_selector": ".stock.available, .availability, [class*=\"stock\"]",
+  "pack_quantity_selector": "input.qty, input[name=\"qty\"]",
+  "quantity_input_selector": "input.qty, input[name=\"qty\"]",
+  "add_to_cart_selector": "button.tocart, button.action.tocart, button[type=\"submit\"]",
+  "post_add_wait_ms": 900,
+  "headless": true
+}

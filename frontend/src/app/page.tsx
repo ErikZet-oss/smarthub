@@ -2508,6 +2508,9 @@ export default function Home() {
   const [sheetName, setSheetName] = useState("DIN");
   const [mappingProfile, setMappingProfile] = useState<MappingProfile | null>(null);
   const [mappingStatus, setMappingStatus] = useState("");
+  const [mappingProfileLoading, setMappingProfileLoading] = useState(false);
+  const [excelImportRunning, setExcelImportRunning] = useState(false);
+  const [excelImportProgressPct, setExcelImportProgressPct] = useState<number | null>(null);
   const [fieldToColumn, setFieldToColumn] = useState<Record<FilterField, string>>({
     code: "",
     norma: "",
@@ -4285,6 +4288,7 @@ export default function Home() {
   };
 
   const loadMappingProfile = async () => {
+    setMappingProfileLoading(true);
     setMappingStatus("Nacitavam stlpce zo suboru...");
     try {
       const response = await apiFetch(`${API_BASE}/api/mapping/profile`, {
@@ -4315,19 +4319,25 @@ export default function Home() {
           ? error.message
           : "Nepodarilo sa nacitat profil stlpcov.";
       setMappingStatus(message);
+    } finally {
+      setMappingProfileLoading(false);
     }
   };
 
   const runExcelImport = async () => {
     if (!isAppAdmin) {
       setMappingStatus("Import do databázy môže spustiť len administrátor.");
+      setExcelImportProgressPct(null);
       return;
     }
     const path = excelFilePath.trim();
     if (!path) {
       setMappingStatus("Zadaj cestu k XLSX súboru.");
+      setExcelImportProgressPct(null);
       return;
     }
+    setExcelImportRunning(true);
+    setExcelImportProgressPct(0);
     setMappingStatus("Importujem Excel do databázy…");
     try {
       const sheet = sheetName.trim() || "DIN";
@@ -4376,6 +4386,7 @@ export default function Home() {
           : total > 0 ?
             Math.min(100, Math.round((scanned / total) * 100))
           : 0;
+        setExcelImportProgressPct(pct);
         setMappingStatus(
           total > 0 ?
             `Importujem Excel… ${pct}% (${scanned}/${total} riadkov)`
@@ -4400,6 +4411,7 @@ export default function Home() {
       const prods = payload.products_upserted ?? 0;
       const scanned = payload.rows_scanned ?? 0;
       const total = payload.total_rows ?? 0;
+      setExcelImportProgressPct(100);
       const warnBlock =
         payload.warnings?.length ?
           `\n\nVarovanie: ${payload.warnings.join("\n\n")}`
@@ -4424,6 +4436,9 @@ export default function Home() {
           ? `Nepodarilo sa spojiť s API (${API_BASE}). Spusti backend (uvicorn), v .env.local musí sedieť tá istá adresa/port ako API, a otvor frontend rovnako (localhost vs 127.0.0.1 vs IP v sieti). Po zmene CORS reštartuj API.`
           : raw || "Import zlyhal.",
       );
+      setExcelImportProgressPct(null);
+    } finally {
+      setExcelImportRunning(false);
     }
   };
 
@@ -6283,21 +6298,29 @@ export default function Home() {
                   <div className="flex flex-wrap gap-2">
                     <Button
                       type="button"
-                      disabled={!isAppAdmin}
+                      disabled={!isAppAdmin || mappingProfileLoading || excelImportRunning}
                       onClick={() => void loadMappingProfile()}
                       className="gap-2"
                     >
-                      <FileSpreadsheet className="h-4 w-4 opacity-90" />
+                      {mappingProfileLoading ? (
+                        <Loader2 className="h-4 w-4 animate-spin opacity-90" />
+                      ) : (
+                        <FileSpreadsheet className="h-4 w-4 opacity-90" />
+                      )}
                       Načítať stĺpce
                     </Button>
                     <Button
                       type="button"
-                      disabled={!isAppAdmin}
+                      disabled={!isAppAdmin || excelImportRunning || mappingProfileLoading}
                       className="gap-2 bg-emerald-600 text-white hover:bg-emerald-700"
                       onClick={() => void runExcelImport()}
                     >
-                      <DatabaseZap className="h-4 w-4 opacity-90" />
-                      Importovať do databázy
+                      {excelImportRunning ? (
+                        <Loader2 className="h-4 w-4 animate-spin opacity-90" />
+                      ) : (
+                        <DatabaseZap className="h-4 w-4 opacity-90" />
+                      )}
+                      {excelImportRunning ? "Importujem…" : "Importovať do databázy"}
                     </Button>
                   </div>
 
@@ -6327,6 +6350,27 @@ export default function Home() {
                       )}
                     >
                       {mappingStatus}
+                      {mappingProfileLoading ? (
+                        <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-sky-200/70">
+                          <div className="h-full w-1/2 animate-pulse rounded-full bg-sky-600" />
+                        </div>
+                      ) : null}
+                      {excelImportRunning || excelImportProgressPct !== null ? (
+                        <div className="mt-2">
+                          <div className="mb-1 flex items-center justify-between text-[11px] opacity-80">
+                            <span>Priebeh importu</span>
+                            <span>{Math.max(0, Math.min(100, excelImportProgressPct ?? 0))}%</span>
+                          </div>
+                          <div className="h-1.5 w-full overflow-hidden rounded-full bg-sky-200/70">
+                            <div
+                              className="h-full rounded-full bg-sky-600 transition-all duration-300"
+                              style={{
+                                width: `${Math.max(0, Math.min(100, excelImportProgressPct ?? 0))}%`,
+                              }}
+                            />
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
 
