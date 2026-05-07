@@ -9,3 +9,4 @@ python-multipart
 openpyxl
 bcrypt
 PyJWT
+psycopg[binary]

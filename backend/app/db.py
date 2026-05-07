@@ -4,20 +4,31 @@ from pathlib import Path
 from sqlalchemy import text
 from sqlmodel import Session, SQLModel, create_engine
 
-# Predvolená lokálna DB (backend/procurement.db). V produkcii nastav SMARTHUB_DB_PATH
-# na persistent disk (napr. /var/data/procurement.db), aby sa dáta po reštarte nestratili.
 _BACKEND_ROOT = Path(__file__).resolve().parent.parent
-_db_path_raw = (os.environ.get("SMARTHUB_DB_PATH") or "").strip()
-if _db_path_raw:
-    _candidate = Path(_db_path_raw).expanduser()
-    if not _candidate.is_absolute():
-        _candidate = (_BACKEND_ROOT / _candidate).resolve()
-    DATABASE_FILE = _candidate
+DATABASE_URL = (os.environ.get("DATABASE_URL") or "").strip()
+if not DATABASE_URL:
+    # Predvolená lokálna DB (backend/procurement.db). V produkcii môžeš namiesto
+    # DATABASE_URL použiť SMARTHUB_DB_PATH na persistent disk.
+    _db_path_raw = (os.environ.get("SMARTHUB_DB_PATH") or "").strip()
+    if _db_path_raw:
+        _candidate = Path(_db_path_raw).expanduser()
+        if not _candidate.is_absolute():
+            _candidate = (_BACKEND_ROOT / _candidate).resolve()
+        DATABASE_FILE = _candidate
+    else:
+        DATABASE_FILE = _BACKEND_ROOT / "procurement.db"
+    DATABASE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    DATABASE_URL = f"sqlite:///{DATABASE_FILE.as_posix()}"
 else:
-    DATABASE_FILE = _BACKEND_ROOT / "procurement.db"
-DATABASE_FILE.parent.mkdir(parents=True, exist_ok=True)
-DATABASE_URL = f"sqlite:///{DATABASE_FILE.as_posix()}"
-engine = create_engine(DATABASE_URL, echo=False, connect_args={"check_same_thread": False})
+    DATABASE_FILE = Path("<external-db>")
+
+IS_SQLITE = DATABASE_URL.startswith("sqlite")
+if IS_SQLITE:
+    engine = create_engine(
+        DATABASE_URL, echo=False, connect_args={"check_same_thread": False}
+    )
+else:
+    engine = create_engine(DATABASE_URL, echo=False, pool_pre_ping=True)
 
 
 def create_db_and_tables() -> None:
@@ -26,6 +37,8 @@ def create_db_and_tables() -> None:
 
 def migrate_sqlite_schema() -> None:
     """Pridá chýbajúce stĺpce do existujúcej SQLite DB (create_all ich nepridá)."""
+    if not IS_SQLITE:
+        return
     with engine.connect() as conn:
         result = conn.execute(text("PRAGMA table_info(supplier)"))
         columns = {row[1] for row in result}

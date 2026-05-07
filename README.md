@@ -54,6 +54,20 @@ Backend používa SQLite súbor. Na Renderi musí byť uložený na persistent d
 
 Bez tohto nastavenia sa po reštarte služby vrátia staré/čisté dáta.
 
+## Neon (free) ako produkčná DB
+
+Backend vie bežať aj na PostgreSQL cez `DATABASE_URL` (odporúčané pre free plán bez Render disku).
+
+1. V Neon vytvor databázu a skopíruj connection string.
+2. V Render backend service nastav ENV:
+   - `DATABASE_URL=postgresql+psycopg://...?...sslmode=require`
+3. Redeploy backend.
+
+Poznámky:
+- Ak je nastavené `DATABASE_URL`, backend ignoruje lokálnu SQLite cestu.
+- Pri prvom štarte sa tabuľky vytvoria automaticky (`create_all`).
+- Dáta zo starej SQLite sa do Neon nepresunú automaticky (treba znovu import Excelu alebo urobiť jednorazový export/import).
+
 ## Co je pripravene
 
 - Dashboard layout so sidebarom
