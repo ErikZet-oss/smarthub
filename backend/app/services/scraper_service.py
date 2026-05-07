@@ -2095,13 +2095,26 @@ async def _argip_get_supplier_data_via_http(
         return None
 
     def _stock_of(it: dict[str, Any]) -> int:
+        nums: list[int] = []
         sq = it.get("salable_qty")
-        try:
-            q = int(float(sq))
-            return max(0, q)
-        except (TypeError, ValueError):
-            st = str(it.get("stock_status") or "").strip().upper()
-            return 1 if st == "IN_STOCK" else 0
+        if sq is not None and str(sq).strip() != "":
+            try:
+                nums.append(max(0, int(float(sq))))
+            except (TypeError, ValueError):
+                pass
+        si = (it.get("stock_item") or {}) if isinstance(it, dict) else {}
+        if isinstance(si, dict):
+            for key in ("qty", "quantity"):
+                raw = si.get(key)
+                if raw is not None and str(raw).strip() != "":
+                    try:
+                        nums.append(max(0, int(float(raw))))
+                    except (TypeError, ValueError):
+                        pass
+        if nums:
+            return max(nums)
+        st = str(it.get("stock_status") or "").strip().upper()
+        return 1 if st == "IN_STOCK" else 0
 
     def _tiers_of(it: dict[str, Any]) -> list[tuple[int, Optional[float]]]:
         out: list[tuple[int, Optional[float]]] = []
@@ -2131,6 +2144,29 @@ async def _argip_get_supplier_data_via_http(
                         val = None
                 out.append((qty, val))
         out.sort(key=lambda x: x[0])
+        return out
+
+    def _merge_tier_rows(nodes: list[dict[str, Any]]) -> list[tuple[int, Optional[float]]]:
+        by_qty: dict[int, Optional[float]] = {}
+        for node in nodes:
+            for qty, price in _tiers_of(node):
+                if qty < 1:
+                    continue
+                if qty not in by_qty or by_qty[qty] is None:
+                    by_qty[qty] = price
+        return sorted(by_qty.items(), key=lambda x: x[0])
+
+    def _expand_argip_configurable(parent: dict[str, Any]) -> list[dict[str, Any]]:
+        out = [parent]
+        variants = parent.get("variants")
+        if not isinstance(variants, list):
+            return out
+        for row in variants:
+            if not isinstance(row, dict):
+                continue
+            prod = row.get("product")
+            if isinstance(prod, dict) and str(prod.get("sku") or "").strip():
+                out.append(prod)
         return out
 
     def _catalog_price_of(it: dict[str, Any]) -> Optional[float]:
@@ -2164,9 +2200,10 @@ async def _argip_get_supplier_data_via_http(
         return 1
 
     ordered = sorted(items, key=_score)
-    stock_item = ordered[0]
-    stock_sku = str(stock_item.get("sku") or "").strip() or code
-    stock_base = _index_base(stock_item)
+    best_top = ordered[0]
+    primary = _expand_argip_configurable(best_top)
+    stock_sku = str(best_top.get("sku") or "").strip() or code
+    stock_base = _index_base(best_top)
     same_family = [
         it
         for it in ordered
@@ -2174,40 +2211,44 @@ async def _argip_get_supplier_data_via_http(
     ] or ordered
     price_item = next((it for it in same_family if _price_of(it) is not None), None)
     if price_item is None:
-        price_item = next((it for it in ordered if _price_of(it) is not None), stock_item)
+        price_item = next((it for it in ordered if _price_of(it) is not None), best_top)
+    if _price_of(price_item) is None:
+        price_item = next((it for it in primary if _price_of(it) is not None), best_top)
 
     best_price = _price_of(price_item)
     best_catalog_price = _catalog_price_of(price_item)
-    best_stock = _stock_of(stock_item)
-    best_sku = stock_sku
+    best_stock = max(_stock_of(x) for x in primary)
+    top_type = str(best_top.get("type_id") or "").strip().lower()
+    list_sku = str(price_item.get("sku") or "").strip() or stock_sku
+    cart_sku = stock_sku if "configurable" in top_type else list_sku
     min_qty = _min_sale_qty_of(price_item)
     pack_qty = _pack_qty_of(price_item)
 
     pvars: list[dict[str, Any]] = []
-    tiers = _tiers_of(price_item)
+    tiers = _merge_tier_rows(primary)
     if tiers:
         if best_catalog_price is not None:
             pvars.append(
                 {
-                    "label": f"{best_sku} (katalógová cena)",
+                    "label": f"{cart_sku} (katalógová cena)",
                     "pack": f"{pack_qty} ks",
                     "pack_quantity": min_qty,
                     "raw_pack_quantity": f"min. {min_qty} ks",
                     "price_eur": best_catalog_price,
                     "stock": best_stock,
-                    "argip_sku": best_sku,
+                    "argip_sku": cart_sku,
                 }
             )
         if best_price is not None:
             pvars.append(
                 {
-                    "label": f"{best_sku} (základná cena)",
+                    "label": f"{cart_sku} (základná cena)",
                     "pack": f"{pack_qty} ks",
                     "pack_quantity": min_qty,
                     "raw_pack_quantity": f"min. {min_qty} ks",
                     "price_eur": best_price,
                     "stock": best_stock,
-                    "argip_sku": best_sku,
+                    "argip_sku": cart_sku,
                 }
             )
         for qty, tier_price in tiers:
@@ -2215,17 +2256,26 @@ async def _argip_get_supplier_data_via_http(
                 continue
             pvars.append(
                 {
-                    "label": f"{best_sku} (objemová cena)",
+                    "label": f"{cart_sku} (objemová cena)",
                     "pack": f"{pack_qty} ks",
                     "pack_quantity": qty,
                     "raw_pack_quantity": f"min. {qty} ks",
                     "price_eur": tier_price,
                     "stock": best_stock,
-                    "argip_sku": best_sku,
+                    "argip_sku": cart_sku,
                 }
             )
     else:
-        for it in ordered[:8]:
+        pool: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for top in ordered[:8]:
+            for node in _expand_argip_configurable(top):
+                sku = str(node.get("sku") or "").strip()
+                if not sku or sku in seen:
+                    continue
+                seen.add(sku)
+                pool.append(node)
+        for it in pool[:12]:
             sku = str(it.get("sku") or "").strip()
             if not sku:
                 continue
@@ -2255,7 +2305,7 @@ async def _argip_get_supplier_data_via_http(
         "packaging_variants": pvars,
         "logged_in": True,
         "argip_via_http": True,
-        "argip_sku": best_sku,
+        "argip_sku": cart_sku,
         "cart_url": argip_cart_url(supplier.shop_url or ""),
     }
     _log(
@@ -2263,7 +2313,8 @@ async def _argip_get_supplier_data_via_http(
         supplier,
         run_id,
         f"get_supplier_data Argip HTTP: code={code!r} stock_sku={stock_sku!r} "
-        f"price_sku={str(price_item.get('sku') or '')!r} stock={best_stock} price={best_price}",
+        f"price_sku={str(price_item.get('sku') or '')!r} cart_sku={cart_sku!r} "
+        f"stock={best_stock} price={best_price} tiers={len(tiers)}",
     )
     return data
 

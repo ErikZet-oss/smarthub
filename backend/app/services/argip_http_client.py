@@ -106,13 +106,18 @@ class ArgipHttpClient:
             return []
         q_search = (
             "query($search:String!,$pageSize:Int!,$currentPage:Int!){"
-            "products(search:$search,pageSize:$pageSize,currentPage:$currentPage,"
-            "){"
+            "products(search:$search,pageSize:$pageSize,currentPage:$currentPage){"
             "items{sku name type_id index stock_status salable_qty package "
-            "stock_item{min_sale_qty qty_increments} "
+            "stock_item{min_sale_qty qty_increments qty} "
             "price_range{minimum_price{final_price{value currency} "
             "regular_price{value currency} default_price{value currency} default_final_price{value currency}}} "
-            "price_tiers{quantity final_price{value currency}}}}}"
+            "price_tiers{quantity final_price{value currency}} "
+            "... on ConfigurableProduct{"
+            "variants{product{sku name type_id index stock_status salable_qty package "
+            "stock_item{min_sale_qty qty_increments qty} "
+            "price_range{minimum_price{final_price{value currency} "
+            "regular_price{value currency} default_price{value currency} default_final_price{value currency}}} "
+            "price_tiers{quantity final_price{value currency}}}}}}}}"
         )
         data = await self._gql(
             q_search, {"search": code, "pageSize": 24, "currentPage": 1}, auth_required=True
@@ -136,10 +141,16 @@ class ArgipHttpClient:
             "query($sku:String!){"
             'products(filter:{sku:{eq:$sku}},pageSize:24,currentPage:1){'
             "items{sku name type_id index stock_status salable_qty package "
-            "stock_item{min_sale_qty qty_increments} "
+            "stock_item{min_sale_qty qty_increments qty} "
             "price_range{minimum_price{final_price{value currency} "
             "regular_price{value currency} default_price{value currency} default_final_price{value currency}}} "
-            "price_tiers{quantity final_price{value currency}}}}}"
+            "price_tiers{quantity final_price{value currency}} "
+            "... on ConfigurableProduct{"
+            "variants{product{sku name type_id index stock_status salable_qty package "
+            "stock_item{min_sale_qty qty_increments qty} "
+            "price_range{minimum_price{final_price{value currency} "
+            "regular_price{value currency} default_price{value currency} default_final_price{value currency}}} "
+            "price_tiers{quantity final_price{value currency}}}}}}}}"
         )
         data3 = await self._gql(q_sku, {"sku": code}, auth_required=True)
         items3 = self._extract_products_items(data3)
