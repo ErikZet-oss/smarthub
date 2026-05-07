@@ -1,0 +1,7 @@
+﻿**/__pycache__/
+*.pyc
+backend/.venv/
+backend/procurement.db
+backend/data/dev_automation.ndjson
+frontend/node_modules/
+frontend/.next/
