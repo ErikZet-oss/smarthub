@@ -903,20 +903,21 @@ function formatScrapePriceAmount(value: number): string {
 /** Jednotná prípona pri jednotkových/katalógových cenách v UI (nezmení uložené `price_unit` v histórii). */
 const SCRAPE_PRICE_DISPLAY_SUFFIX = " / 100";
 
-/** Suffix za sumou: explicitné jednotky z API; inak štandard „/ 100“ (Mekrs). */
+/** Suffix za sumou. `compact`: krátky tvar „/ 100“ v úzkom súhrne (Mekrs, Argip hlavička). */
 function scrapePriceUnitSuffix(
   supplierName: string | null | undefined,
   unit: string | null | undefined,
+  compact = false,
 ): string {
   const u = (unit || "").trim();
   if (u === "per_1_ks") {
     return " / 1 ks";
   }
   if (u === "per_100_ks") {
-    return " / 100 ks";
+    return compact ? SCRAPE_PRICE_DISPLAY_SUFFIX : " / 100 ks";
   }
   if (supplierNameIsArgip(supplierName)) {
-    return " / 100 ks";
+    return compact ? SCRAPE_PRICE_DISPLAY_SUFFIX : " / 100 ks";
   }
   return SCRAPE_PRICE_DISPLAY_SUFFIX;
 }
@@ -1509,6 +1510,7 @@ function ProductSupplierExpandedTableRow({
                                       const rowPriceSuffix = scrapePriceUnitSuffix(
                                         offer.supplier,
                                         rowPriceUnit,
+                                        true,
                                       );
                                       const rowStockText =
                                         mekrsStockSummaryOnly
@@ -2002,6 +2004,7 @@ function ProductSupplierExpandedTableRow({
                                                                       offer.supplier,
                                                                       pv.price_unit ??
                                                                         scrape?.price_unit,
+                                                                      false,
                                                                     )}
                                                                   </span>
                                                                 </>
@@ -2194,6 +2197,7 @@ function ProductSupplierExpandedTableRow({
                                                                           offer.supplier,
                                                                           pv.price_unit ??
                                                                             scrape?.price_unit,
+                                                                          false,
                                                                         )}
                                                                       </span>
                                                                     </>
@@ -2219,7 +2223,7 @@ function ProductSupplierExpandedTableRow({
                                             <div className="flex w-full flex-col gap-1 lg:max-w-[min(100%,20rem)] lg:shrink-0 lg:items-stretch">
                                               <div className="rounded-md border border-slate-200/80 bg-white/95 p-0.5 shadow-sm ring-1 ring-slate-100/60 sm:p-2">
                                               <div className="flex flex-wrap items-center justify-between gap-x-1 gap-y-0.5 text-[10px] sm:flex-nowrap sm:gap-x-2 sm:text-[13px]">
-                                                <div className="min-w-0 flex-1 basis-[48%] overflow-hidden text-ellipsis whitespace-nowrap pr-0.5 text-left sm:basis-0">
+                                                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1 pr-0.5 text-left">
                                                   <span className="mr-0.5 text-[8px] font-semibold uppercase tracking-wider text-slate-500 sm:mr-1 sm:text-[10px]">
                                                     Cena
                                                   </span>
@@ -2282,7 +2286,7 @@ function ProductSupplierExpandedTableRow({
                                                     </span>
                                                   )}
                                                 </div>
-                                                <div className="min-w-0 flex-1 basis-[48%] overflow-hidden text-ellipsis whitespace-nowrap pl-0.5 text-right sm:basis-0">
+                                                <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-x-1 pl-0.5 text-right sm:justify-end">
                                                     <span className="mr-0.5 text-[8px] font-semibold uppercase tracking-wider text-slate-500 sm:mr-1 sm:text-[10px]">
                                                     Sklad
                                                   </span>
@@ -2394,9 +2398,10 @@ function ProductSupplierExpandedTableRow({
                                                         disabled={offerStockUiBlocked}
                                                         className={cn(
                                                           "h-6 w-[3.45rem] rounded border px-0.5 text-center text-[10px] tabular-nums shadow-sm focus:outline-none focus:ring-1 sm:h-7 sm:w-[4.1rem] sm:px-1 sm:text-xs",
+                                                          "[appearance:textfield] [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none",
                                                           offerStockUiBlocked
                                                             ? "cursor-not-allowed border-slate-300 bg-slate-200/80 text-slate-500 focus:border-slate-300 focus:ring-0"
-                                                            : "border-slate-200 bg-white text-slate-800 focus:border-sky-400 focus:ring-sky-300/40",
+                                                            : "border-slate-200 bg-white text-slate-800 focus:border-slate-200 focus:ring-slate-200/80",
                                                         )}
                                                         value={effectiveCartQty(
                                                           cartKey,

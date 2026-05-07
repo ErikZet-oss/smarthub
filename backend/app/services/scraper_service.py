@@ -3411,6 +3411,79 @@ async def _dismiss_cookies(page: Page, selector: Optional[str]) -> None:
         pass
 
 
+async def _dismiss_cookiescript_if_present(
+    page: Page,
+    *,
+    run_label: str,
+    supplier: Supplier,
+    run_id: str,
+    config_selector: Optional[str] = None,
+) -> None:
+    """CookieScript (#cookiescript_injected_wrapper) často zakrýva tlačidlo prihlásenia — Playwright
+    click potom zlyhá na „intercepts pointer events“. Skúsime DOM click; ak nič, overlay skryjeme."""
+    try:
+        cfg = (config_selector or "").strip() or None
+        result = await page.evaluate(
+            """(configSel) => {
+              const wrap =
+                document.getElementById("cookiescript_injected_wrapper") ||
+                document.getElementById("cookiescript_injected");
+              const tryClickSel = (sel) => {
+                if (!sel || typeof sel !== "string") return false;
+                const el = document.querySelector(sel);
+                if (!el || !(el instanceof HTMLElement)) return false;
+                const r = el.getBoundingClientRect();
+                if (r.width < 2 || r.height < 2) return false;
+                const st = window.getComputedStyle(el);
+                if (st.visibility === "hidden" || st.display === "none") return false;
+                el.click();
+                return true;
+              };
+              if (tryClickSel(configSel)) {
+                return { ok: true, via: "config", sel: configSel };
+              }
+              const byId = [
+                "#cookiescript_accept",
+                "#cookiescript_reject",
+                "#CookieScriptAccept",
+                "#CookieScriptReject",
+              ];
+              for (const sel of byId) {
+                if (tryClickSel(sel)) return { ok: true, via: "id", sel };
+              }
+              if (wrap) {
+                const btnRe =
+                  /přijmout|prijmout|přijmout vše|accept|souhlas|súhlas|odmítnout|odmitnout|odmítnout|nezbytné|nezbytne|reject|decline|necessary|only essential|essential only|deny|odmietnuť/i;
+                const buttons = wrap.querySelectorAll(
+                  'button, a[href="#"], a[role="button"], [role="button"], input[type="button"]'
+                );
+                for (const b of buttons) {
+                  const t = (b.innerText || b.textContent || "")
+                    .replace(/\\s+/g, " ")
+                    .trim();
+                    if (t && t.length < 120 && btnRe.test(t)) {
+                    b.click();
+                    return { ok: true, via: "text", text: t.slice(0, 80) };
+                  }
+                }
+                if (wrap instanceof HTMLElement) {
+                  wrap.style.setProperty("pointer-events", "none", "important");
+                  wrap.style.setProperty("visibility", "hidden", "important");
+                  wrap.style.setProperty("display", "none", "important");
+                  return { ok: true, via: "hidden" };
+                }
+              }
+              return { ok: false };
+            }""",
+            cfg,
+        )
+        if isinstance(result, dict) and result.get("ok"):
+            _log(run_label, supplier, run_id, f"CookieScript overlay: {result!r}")
+            await asyncio.sleep(0.45)
+    except Exception as exc:
+        _log(run_label, supplier, run_id, f"CookieScript dismiss: {exc!s}", "warn")
+
+
 async def _handle_usercentrics_cmp(
     page: Page,
     *,
@@ -4084,6 +4157,13 @@ async def _login_and_search(
         supplier=supplier,
         run_id=run_id,
     )
+    await _dismiss_cookiescript_if_present(
+        page,
+        run_label=run_label,
+        supplier=supplier,
+        run_id=run_id,
+        config_selector=config.optional_cookie_dismiss_selector,
+    )
     await asyncio.sleep(0.35)
 
     try:
@@ -4244,6 +4324,14 @@ async def _login_and_search(
                 supplier=supplier,
                 run_id=run_id,
             )
+
+        await _dismiss_cookiescript_if_present(
+            page,
+            run_label=run_label,
+            supplier=supplier,
+            run_id=run_id,
+            config_selector=config.optional_cookie_dismiss_selector,
+        )
 
         _log(
             run_label,
