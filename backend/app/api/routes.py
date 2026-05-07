@@ -962,7 +962,7 @@ async def cart_remote_detail(
 def upsert_supplier(
     payload: SupplierUpsertPayload,
     session: Session = Depends(get_session),
-    _: AuthUserContext = Depends(require_admin),
+    admin: AuthUserContext = Depends(require_admin),
 ):
     if not payload.shop_url.startswith("http://") and not payload.shop_url.startswith("https://"):
         raise HTTPException(status_code=400, detail="shop_url must start with http:// or https://")
@@ -1001,6 +1001,26 @@ def upsert_supplier(
     session.commit()
     session.refresh(supplier)
     ensure_credentials_for_supplier(session, int(supplier.id))
+
+    # U admin účtu okamžite zosúlaď pobočkové credentials so šablónou.
+    # Inak môže scraper čítať staré UserSupplierCredential a login padá, hoci admin v UI práve uložil nové údaje.
+    admin_cred = session.exec(
+        select(UserSupplierCredential).where(
+            UserSupplierCredential.user_id == admin.id,
+            UserSupplierCredential.supplier_id == int(supplier.id),
+        )
+    ).first()
+    if admin_cred is None:
+        admin_cred = UserSupplierCredential(
+            user_id=admin.id,
+            supplier_id=int(supplier.id),
+            username=payload.username.strip(),
+            password=payload.password,
+        )
+        session.add(admin_cred)
+    else:
+        admin_cred.username = payload.username.strip()
+        admin_cred.password = payload.password
     session.commit()
     return {
         "id": supplier.id,
