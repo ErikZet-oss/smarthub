@@ -899,7 +899,7 @@ function formatScrapePriceAmount(value: number): string {
 /** Jednotná prípona pri jednotkových/katalógových cenách v UI (nezmení uložené `price_unit` v histórii). */
 const SCRAPE_PRICE_DISPLAY_SUFFIX = " / 100";
 
-/** Suffix za sumou: Argip = za 1 ks, Mekrs a pod. = / 100. */
+/** Suffix za sumou: explicitné jednotky z API; inak štandard „/ 100“ (Mekrs). */
 function scrapePriceUnitSuffix(
   supplierName: string | null | undefined,
   unit: string | null | undefined,
@@ -908,8 +908,11 @@ function scrapePriceUnitSuffix(
   if (u === "per_1_ks") {
     return " / 1 ks";
   }
+  if (u === "per_100_ks") {
+    return " / 100 ks";
+  }
   if (supplierNameIsArgip(supplierName)) {
-    return " / 1 ks";
+    return " / 100 ks";
   }
   return SCRAPE_PRICE_DISPLAY_SUFFIX;
 }
@@ -1942,15 +1945,14 @@ function ProductSupplierExpandedTableRow({
                                                                 ) ? (
                                                                 <div className="leading-snug">
                                                                   <div className="font-medium text-slate-900">
-                                                                    {pv.label?.trim() ||
-                                                                      `Variant ${vi + 1}`}
-                                                                  </div>
-                                                                  <div className="mt-0.5 text-[9px] font-normal text-slate-600 sm:text-[10px]">
                                                                     {(pv.raw_pack_quantity || "").trim() ||
                                                                       (pv.pack_quantity != null &&
                                                                       pv.pack_quantity >= 1
                                                                         ? `od ${pv.pack_quantity} ks`
-                                                                        : "")}
+                                                                        : `Variant ${vi + 1}`)}
+                                                                  </div>
+                                                                  <div className="mt-0.5 text-[9px] font-normal text-slate-600 sm:text-[10px]">
+                                                                    {pv.label?.trim() || ""}
                                                                   </div>
                                                                 </div>
                                                               ) : (
@@ -2142,10 +2144,16 @@ function ProductSupplierExpandedTableRow({
                                                               ) ? (
                                                               <div className="space-y-0.5">
                                                                 <div className="text-sm font-semibold text-slate-900">
-                                                                  {pv.label?.trim() ||
-                                                                    `Variant ${vi + 1}`}
+                                                                  {(pv.raw_pack_quantity || "").trim() ||
+                                                                    (pv.pack_quantity != null &&
+                                                                    pv.pack_quantity >= 1
+                                                                      ? `od ${pv.pack_quantity} ks`
+                                                                      : `Variant ${vi + 1}`)}
                                                                 </div>
                                                                 <div className="text-[10px] font-normal text-slate-600 sm:text-[11px]">
+                                                                  {pv.label?.trim() || ""}
+                                                                </div>
+                                                                <div className="text-[10px] font-medium tabular-nums text-slate-800 sm:text-[11px]">
                                                                   {pv.price_eur != null &&
                                                                   Number.isFinite(
                                                                     pv.price_eur,
@@ -2156,7 +2164,7 @@ function ProductSupplierExpandedTableRow({
                                                                       )}{" "}
                                                                       {pv.currency_symbol?.trim() ||
                                                                         "€"}
-                                                                      <span className="text-slate-500">
+                                                                      <span className="font-normal text-slate-500">
                                                                         {scrapePriceUnitSuffix(
                                                                           offer.supplier,
                                                                           pv.price_unit ??
@@ -2169,19 +2177,6 @@ function ProductSupplierExpandedTableRow({
                                                                       Cena —
                                                                     </span>
                                                                   )}
-                                                                  <span className="text-slate-400">
-                                                                    {" "}
-                                                                    ·{" "}
-                                                                  </span>
-                                                                  <span>
-                                                                    {(pv.raw_pack_quantity || "")
-                                                                      .trim() ||
-                                                                      (pv.pack_quantity !=
-                                                                        null &&
-                                                                      pv.pack_quantity >= 1
-                                                                        ? `od ${pv.pack_quantity} ks`
-                                                                        : "—")}
-                                                                  </span>
                                                                 </div>
                                                               </div>
                                                             ) : (

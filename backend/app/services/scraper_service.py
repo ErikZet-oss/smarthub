@@ -2227,42 +2227,67 @@ async def _argip_get_supplier_data_via_http(
     pvars: list[dict[str, Any]] = []
     tiers = _merge_tier_rows(primary)
     if tiers:
-        if best_catalog_price is not None:
-            pvars.append(
-                {
-                    "label": f"{cart_sku} (katalógová cena)",
-                    "pack": f"{pack_qty} ks",
-                    "pack_quantity": min_qty,
-                    "raw_pack_quantity": f"min. {min_qty} ks",
-                    "price_eur": best_catalog_price,
-                    "stock": best_stock,
-                    "argip_sku": cart_sku,
-                }
-            )
-        if best_price is not None:
-            pvars.append(
-                {
-                    "label": f"{cart_sku} (základná cena)",
-                    "pack": f"{pack_qty} ks",
-                    "pack_quantity": min_qty,
-                    "raw_pack_quantity": f"min. {min_qty} ks",
-                    "price_eur": best_price,
-                    "stock": best_stock,
-                    "argip_sku": cart_sku,
-                }
-            )
+        cat = best_catalog_price
+        base = best_price
+        same_catalog_base = (
+            cat is not None
+            and base is not None
+            and round(float(cat), 4) == round(float(base), 4)
+        )
+        if same_catalog_base:
+            if base is not None:
+                pvars.append(
+                    {
+                        "label": "Základná cena",
+                        "pack": f"{pack_qty} ks",
+                        "pack_quantity": min_qty,
+                        "raw_pack_quantity": f"min. {min_qty} ks",
+                        "price_eur": base,
+                        "stock": best_stock,
+                        "argip_sku": cart_sku,
+                        "price_unit": "per_100_ks",
+                    }
+                )
+        else:
+            if cat is not None:
+                pvars.append(
+                    {
+                        "label": "Katalógová cena",
+                        "pack": f"{pack_qty} ks",
+                        "pack_quantity": min_qty,
+                        "raw_pack_quantity": f"min. {min_qty} ks",
+                        "price_eur": cat,
+                        "stock": best_stock,
+                        "argip_sku": cart_sku,
+                        "price_unit": "per_100_ks",
+                    }
+                )
+            if base is not None:
+                pvars.append(
+                    {
+                        "label": "Základná cena",
+                        "pack": f"{pack_qty} ks",
+                        "pack_quantity": min_qty,
+                        "raw_pack_quantity": f"min. {min_qty} ks",
+                        "price_eur": base,
+                        "stock": best_stock,
+                        "argip_sku": cart_sku,
+                        "price_unit": "per_100_ks",
+                    }
+                )
         for qty, tier_price in tiers:
             if qty <= min_qty:
                 continue
             pvars.append(
                 {
-                    "label": f"{cart_sku} (objemová cena)",
+                    "label": "Objemová cena",
                     "pack": f"{pack_qty} ks",
                     "pack_quantity": qty,
                     "raw_pack_quantity": f"min. {qty} ks",
                     "price_eur": tier_price,
                     "stock": best_stock,
                     "argip_sku": cart_sku,
+                    "price_unit": "per_100_ks",
                 }
             )
     else:
@@ -2302,7 +2327,7 @@ async def _argip_get_supplier_data_via_http(
         "raw_stock": f"{best_stock} ks",
         "pack_quantity": min_qty,
         "raw_pack_quantity": f"min. {min_qty} ks",
-        "price_unit": "per_1_ks",
+        "price_unit": "per_100_ks",
         "packaging_variants": pvars,
         "logged_in": True,
         "argip_via_http": True,
