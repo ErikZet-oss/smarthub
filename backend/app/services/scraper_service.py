@@ -3162,6 +3162,50 @@ async def _dismiss_eu_cookie_banner_overlay(
         _log(run_label, supplier, run_id, f"EU cookie banner: {exc}", "warn")
 
 
+async def _neutralize_blocking_cmp_overlays(
+    page: Page,
+    *,
+    run_label: str,
+    supplier: Supplier,
+    run_id: str,
+) -> None:
+    """Fallback: skryje CMP overlay, ktorý zachytáva pointer events nad inputmi."""
+    try:
+        result = await page.evaluate(
+            r"""
+            () => {
+              const hidden = [];
+              const selectors = [
+                '#usercentrics-cmp-ui',
+                '#usercentrics-root',
+                'aside#usercentrics-cmp-ui',
+                '[id*="usercentrics"]',
+                '[class*="usercentrics"]',
+                '[id*="cookie"]',
+                '[class*="cookie-banner"]',
+                '[class*="consent"]'
+              ];
+              for (const sel of selectors) {
+                const nodes = document.querySelectorAll(sel);
+                for (const el of nodes) {
+                  if (!(el instanceof HTMLElement)) continue;
+                  const st = window.getComputedStyle(el);
+                  if (st.display === 'none') continue;
+                  el.style.setProperty('pointer-events', 'none', 'important');
+                  el.style.setProperty('display', 'none', 'important');
+                  el.setAttribute('data-ai-cmp-hidden', '1');
+                  hidden.push(sel);
+                }
+              }
+              return { hidden_count: hidden.length };
+            }
+            """
+        )
+        _log(run_label, supplier, run_id, f"cmp overlay fallback: {result!r}")
+    except Exception as exc:
+        _log(run_label, supplier, run_id, f"cmp overlay fallback failed: {exc}", "warn")
+
+
 async def _probe_post_login(
     page: Page,
     supplier: Supplier,
@@ -4103,6 +4147,15 @@ async def _login_and_search(
                 )
                 await page.keyboard.press(config.search_submit_key)
         else:
+            await _handle_usercentrics_cmp(
+                page, run_label=run_label, supplier=supplier, run_id=run_id
+            )
+            await _dismiss_eu_cookie_banner_overlay(
+                page, run_label=run_label, supplier=supplier, run_id=run_id
+            )
+            await _neutralize_blocking_cmp_overlays(
+                page, run_label=run_label, supplier=supplier, run_id=run_id
+            )
             await loc_search.click()
             await loc_search.fill(code)
 
