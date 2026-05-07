@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import re
-from typing import Any
+from typing import Any, Callable
 
 from openpyxl import load_workbook
 from sqlmodel import Session, select
@@ -47,6 +47,7 @@ class ImportResult:
     suppliers_upserted: int = 0
     mappings_upserted: int = 0
     rows_scanned: int = 0
+    total_rows: int = 0
     warnings: list[str] = field(default_factory=list)
 
 
@@ -138,6 +139,7 @@ def import_gamechanger_excel(
     session: Session,
     *,
     sheet_name: str = "DIN",
+    progress_cb: Callable[[int, int], None] | None = None,
 ) -> ImportResult:
     name = (sheet_name or "DIN").strip() or "DIN"
     wb = load_workbook(file_path, read_only=True, data_only=True)
@@ -149,6 +151,7 @@ def import_gamechanger_excel(
         )
 
     ws = wb[name]
+    total_rows = max(0, int((ws.max_row or 1) - 1))
     rows = ws.iter_rows(min_row=1, values_only=True)
     headers = _normalized_sheet_headers(next(rows))
 
@@ -174,6 +177,7 @@ def import_gamechanger_excel(
         )
 
     result = ImportResult()
+    result.total_rows = total_rows
     code_hdr = headers[internal_code_idx]
     ch_low = code_hdr.casefold()
     if "katalóg" in ch_low or "katalog" in ch_low:
@@ -209,6 +213,10 @@ def import_gamechanger_excel(
 
     for row in rows:
         result.rows_scanned += 1
+        if progress_cb is not None and (
+            result.rows_scanned <= 25 or result.rows_scanned % 200 == 0
+        ):
+            progress_cb(result.rows_scanned, result.total_rows)
         internal_code = _normalize(row[internal_code_idx])
         if not internal_code:
             continue
@@ -284,6 +292,8 @@ def import_gamechanger_excel(
             result.mappings_upserted += 1
 
     session.commit()
+    if progress_cb is not None:
+        progress_cb(result.rows_scanned, result.total_rows)
     return result
 
 

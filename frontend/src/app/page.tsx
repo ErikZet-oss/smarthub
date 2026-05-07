@@ -4331,35 +4331,86 @@ export default function Home() {
     setMappingStatus("Importujem Excel do databázy…");
     try {
       const sheet = sheetName.trim() || "DIN";
-      const response = await apiFetch(`${API_BASE}/api/import/excel`, {
+      const startResponse = await apiFetch(`${API_BASE}/api/import/excel/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ file_path: path, sheet_name: sheet }),
       });
-      const payload = (await response.json()) as {
+      const startPayload = (await startResponse.json()) as {
         detail?: unknown;
+        task_id?: string;
+      };
+      if (!startResponse.ok || !startPayload.task_id) {
+        throw new Error(formatApiDetail(startPayload.detail));
+      }
+      const taskId = startPayload.task_id;
+      type ImportTaskResponse = {
+        detail?: unknown;
+        state?: string;
+        progress_pct?: number;
+        rows_scanned?: number;
+        total_rows?: number;
+        error?: string;
+        result?: {
+          products_upserted?: number;
+          suppliers_upserted?: number;
+          mappings_upserted?: number;
+          rows_scanned?: number;
+          total_rows?: number;
+          warnings?: string[];
+        };
+      };
+      let finalPayload: ImportTaskResponse | null = null;
+      while (true) {
+        await new Promise((resolve) => window.setTimeout(resolve, 1200));
+        const statusResponse = await apiFetch(`${API_BASE}/api/import/excel/${taskId}`);
+        const statusPayload = (await statusResponse.json()) as ImportTaskResponse;
+        if (!statusResponse.ok) {
+          throw new Error(formatApiDetail(statusPayload.detail));
+        }
+        const scanned = statusPayload.rows_scanned ?? 0;
+        const total = statusPayload.total_rows ?? 0;
+        const pct =
+          typeof statusPayload.progress_pct === "number" ?
+            statusPayload.progress_pct
+          : total > 0 ?
+            Math.min(100, Math.round((scanned / total) * 100))
+          : 0;
+        setMappingStatus(
+          total > 0 ?
+            `Importujem Excel… ${pct}% (${scanned}/${total} riadkov)`
+          : `Importujem Excel… spracovaných ${scanned} riadkov`,
+        );
+        if (statusPayload.state === "done") {
+          finalPayload = statusPayload;
+          break;
+        }
+        if (statusPayload.state === "error") {
+          throw new Error(statusPayload.error || "Import zlyhal.");
+        }
+      }
+      const payload = (finalPayload?.result ?? {}) as {
         products_upserted?: number;
         suppliers_upserted?: number;
         mappings_upserted?: number;
         rows_scanned?: number;
+        total_rows?: number;
         warnings?: string[];
       };
-      if (!response.ok) {
-        throw new Error(formatApiDetail(payload.detail));
-      }
       const prods = payload.products_upserted ?? 0;
       const scanned = payload.rows_scanned ?? 0;
+      const total = payload.total_rows ?? 0;
       const warnBlock =
         payload.warnings?.length ?
           `\n\nVarovanie: ${payload.warnings.join("\n\n")}`
         : "";
       setMappingStatus(
         prods === 0
-          ? `Import z listu „${sheet}“: 0 produktov (naskenovaných riadkov: ${scanned}). Skontroluj, či v tomto liste sú dáta, či mapovanie „Kód“ ukazuje na správnu hlavičku a či prvý stĺpec kódu nie je prázdny v riadkoch.`
+          ? `Import z listu „${sheet}“: 0 produktov (naskenovaných riadkov: ${scanned}/${total || "?"}). Skontroluj, či v tomto liste sú dáta, či mapovanie „Kód“ ukazuje na správnu hlavičku a či prvý stĺpec kódu nie je prázdny v riadkoch.`
           : `Import z listu „${sheet}“ hotový: ${prods} produktov, ` +
               `${payload.suppliers_upserted ?? 0} dodávateľov, ` +
               `${payload.mappings_upserted ?? 0} väzieb kódom, ` +
-              `riadkov: ${scanned}.${warnBlock}`,
+              `riadkov: ${scanned}/${total || "?"}.${warnBlock}`,
       );
       setSearchTick((t) => t + 1);
     } catch (error) {

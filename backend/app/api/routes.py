@@ -1,13 +1,16 @@
 import asyncio
 import json
+import threading
+import time
 from urllib.parse import quote
+from uuid import uuid4
 
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlmodel import Session, select
 
 from app.api.deps import AuthUserContext, get_current_user, require_admin
-from app.db import get_session
+from app.db import engine, get_session
 from app.models.entities import (
     FieldMapping,
     Product,
@@ -52,6 +55,8 @@ from app.services.user_credentials import (
 
 router = APIRouter()
 automation = AutomationEngine()
+_IMPORT_TASKS: dict[str, dict[str, object]] = {}
+_IMPORT_TASKS_LOCK = threading.Lock()
 
 
 def _supplier_product_url(supplier: Supplier, supplier_code: str | None) -> str | None:
@@ -1197,6 +1202,121 @@ def delete_supplier_logo(
     return {"ok": True, "logo_url": None}
 
 
+def _import_task_snapshot(task_id: str) -> dict[str, object] | None:
+    with _IMPORT_TASKS_LOCK:
+        task = _IMPORT_TASKS.get(task_id)
+        if task is None:
+            return None
+        return dict(task)
+
+
+def _import_task_update(task_id: str, **patch: object) -> None:
+    with _IMPORT_TASKS_LOCK:
+        task = _IMPORT_TASKS.get(task_id)
+        if task is None:
+            return
+        task.update(patch)
+        task["updated_at"] = time.time()
+
+
+def _run_excel_import_task(task_id: str, file_path: str, sheet_name: str) -> None:
+    _import_task_update(task_id, state="running")
+    try:
+        with Session(engine) as session:
+            result = import_gamechanger_excel(
+                file_path,
+                session,
+                sheet_name=sheet_name,
+                progress_cb=lambda scanned, total: _import_task_update(
+                    task_id, rows_scanned=scanned, total_rows=total
+                ),
+            )
+            for sup in session.exec(select(Supplier)).all():
+                ensure_credentials_for_supplier(session, int(sup.id))
+            session.commit()
+        _import_task_update(
+            task_id,
+            state="done",
+            result={
+                "products_upserted": result.products_upserted,
+                "suppliers_upserted": result.suppliers_upserted,
+                "mappings_upserted": result.mappings_upserted,
+                "rows_scanned": result.rows_scanned,
+                "total_rows": result.total_rows,
+                "warnings": result.warnings,
+            },
+            rows_scanned=result.rows_scanned,
+            total_rows=result.total_rows,
+            finished_at=time.time(),
+        )
+    except FileNotFoundError as exc:
+        _import_task_update(
+            task_id, state="error", error=str(exc), error_code=404, finished_at=time.time()
+        )
+    except ValueError as exc:
+        _import_task_update(
+            task_id, state="error", error=str(exc), error_code=400, finished_at=time.time()
+        )
+    except Exception as exc:
+        _import_task_update(
+            task_id, state="error", error=str(exc), error_code=500, finished_at=time.time()
+        )
+
+
+@router.post("/import/excel/start")
+def import_excel_start(
+    payload: ImportExcelPayload,
+    _: AuthUserContext = Depends(require_admin),
+):
+    sheet = (payload.sheet_name or "DIN").strip() or "DIN"
+    task_id = uuid4().hex
+    with _IMPORT_TASKS_LOCK:
+        _IMPORT_TASKS[task_id] = {
+            "task_id": task_id,
+            "state": "queued",
+            "rows_scanned": 0,
+            "total_rows": 0,
+            "result": None,
+            "error": None,
+            "error_code": None,
+            "created_at": time.time(),
+            "updated_at": time.time(),
+            "finished_at": None,
+        }
+    thread = threading.Thread(
+        target=_run_excel_import_task,
+        args=(task_id, payload.file_path, sheet),
+        daemon=True,
+    )
+    thread.start()
+    return {"task_id": task_id, "state": "queued"}
+
+
+@router.get("/import/excel/{task_id}")
+def import_excel_status(
+    task_id: str,
+    _: AuthUserContext = Depends(require_admin),
+):
+    task = _import_task_snapshot(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Import task neexistuje.")
+    total_rows = int(task.get("total_rows") or 0)
+    rows_scanned = int(task.get("rows_scanned") or 0)
+    progress_pct = 0
+    if total_rows > 0:
+        progress_pct = min(100, int((rows_scanned / total_rows) * 100))
+    return {
+        "task_id": task_id,
+        "state": task.get("state"),
+        "rows_scanned": rows_scanned,
+        "total_rows": total_rows,
+        "progress_pct": progress_pct,
+        "result": task.get("result"),
+        "error": task.get("error"),
+        "error_code": task.get("error_code"),
+    }
+
+
 @router.post("/import/excel")
 def import_excel(
     payload: ImportExcelPayload,
@@ -1216,6 +1336,7 @@ def import_excel(
             "suppliers_upserted": result.suppliers_upserted,
             "mappings_upserted": result.mappings_upserted,
             "rows_scanned": result.rows_scanned,
+            "total_rows": result.total_rows,
             "warnings": result.warnings,
         }
     except FileNotFoundError as exc:
