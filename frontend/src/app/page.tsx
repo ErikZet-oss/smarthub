@@ -3365,10 +3365,20 @@ export default function Home() {
               ));
           if (pvarsNeedVariantPick) {
             const baseCk = cartStorageKey(sid, code, null);
-            const pk0 = pvars[0]?.pack_quantity;
+            const argipShopPk0 =
+              supplierNameIsArgip(offer.supplier) &&
+              pvars[0]?.shop_pack_quantity != null &&
+              pvars[0]?.shop_pack_quantity >= 1
+                ? pvars[0].shop_pack_quantity
+                : null;
+            const pk0 =
+              argipShopPk0 ??
+              (pvars[0]?.pack_quantity != null && pvars[0]?.pack_quantity >= 1
+                ? pvars[0].pack_quantity
+                : null);
             if (typeof pk0 === "number" && pk0 >= 1) {
               setCartQuantityByKey((prev) => {
-                if (prev[baseCk] !== undefined) {
+                if (prev[baseCk] !== undefined && !(supplierNameIsArgip(offer.supplier) && prev[baseCk] === 1 && pk0 > 1)) {
                   return prev;
                 }
                 return { ...prev, [baseCk]: pk0 };
@@ -3385,6 +3395,12 @@ export default function Home() {
               payload.pack_quantity != null && payload.pack_quantity >= 1
                 ? payload.pack_quantity
                 : null;
+            const argipShopPk =
+              supplierNameIsArgip(offer.supplier) &&
+              payload.shop_pack_quantity != null &&
+              payload.shop_pack_quantity >= 1
+                ? payload.shop_pack_quantity
+                : null;
             let pkFromRaw: number | null = null;
             if (pkFromApi == null && payload.raw_pack_quantity?.trim()) {
               const m = payload.raw_pack_quantity
@@ -3396,11 +3412,11 @@ export default function Home() {
                 if (Number.isFinite(n) && n >= 1) pkFromRaw = n;
               }
             }
-            const pkPrefill = pkFromApi ?? pkFromRaw;
+            const pkPrefill = argipShopPk ?? pkFromApi ?? pkFromRaw;
             if (pkPrefill != null && pkPrefill >= 1) {
               const cartKey = cartStorageKey(sid, code, null);
               setCartQuantityByKey((prev) => {
-                if (prev[cartKey] !== undefined) {
+                if (prev[cartKey] !== undefined && !(supplierNameIsArgip(offer.supplier) && prev[cartKey] === 1 && pkPrefill > 1)) {
                   return prev;
                 }
                 return { ...prev, [cartKey]: pkPrefill };
