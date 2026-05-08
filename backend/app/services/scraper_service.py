@@ -3968,6 +3968,23 @@ def _login_failure_hint(extra: Optional[str] = None) -> str:
     return base
 
 
+def _looks_like_invalid_credentials(text: str) -> bool:
+    low = (text or "").strip().lower()
+    if not low:
+        return False
+    needles = (
+        "vaše používateľské meno alebo heslo bolo nesprávne",
+        "vaše používateľské meno alebo heslo bolo nespravne",
+        "nesprávne prihlasovacie meno alebo heslo",
+        "nespravne prihlasovacie meno alebo heslo",
+        "badcredentials",
+        "error=true",
+        "incorrect username or password",
+        "wrong username or password",
+    )
+    return any(n in low for n in needles)
+
+
 async def _extract_login_error_message(page: Page) -> Optional[str]:
     try:
         url = (page.url or "").lower()
@@ -4537,6 +4554,18 @@ async def _login_and_search(
             pe = await _extract_login_error_message(page)
             if pe:
                 login_diagnostic["page_error"] = pe
+            if _supplier_is_fabory(supplier):
+                err_parts: list[str] = []
+                if pe:
+                    err_parts.append(pe)
+                if spring_location:
+                    err_parts.append(str(spring_location))
+                if _looks_like_invalid_credentials(" | ".join(err_parts)):
+                    detail = pe or "Fabory: neplatné prihlasovacie údaje."
+                    raise RuntimeError(
+                        f"Fabory credentials invalid: {detail} "
+                        "Skontroluj meno/heslo pre aktuálneho používateľa v sekcii Dodávatelia."
+                    )
     await _save_step_screenshot(
         page,
         run_label=run_label,
