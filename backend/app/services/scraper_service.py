@@ -4076,6 +4076,13 @@ def _timeout_waiting_for_first_product_result(exc: BaseException) -> bool:
     return "wait_for" in msg or "waiting for locator" in msg
 
 
+def _is_navigation_interrupted_by_redirect(exc: BaseException) -> bool:
+    """Playwright pri SPA redirecte vie hodiť goto chybu typu:
+    'Navigation to ... is interrupted by another navigation to ...'."""
+    msg = str(exc).lower()
+    return "interrupted by another navigation" in msg
+
+
 async def _login_and_search(
     page: Page,
     supplier: Supplier,
@@ -4126,15 +4133,28 @@ async def _login_and_search(
         )
         _log(run_label, supplier, run_id, f"page loaded ({wu})")
     except Exception as exc:
-        _log(
-            run_label,
-            supplier,
-            run_id,
-            f"goto {wu}: {exc!s}, fallback domcontentloaded",
-            "warn",
-        )
-        await page.goto(start_url, wait_until="domcontentloaded")
-        _log(run_label, supplier, run_id, "page loaded (domcontentloaded)")
+        if _supplier_is_hopefix(supplier) and _is_navigation_interrupted_by_redirect(exc):
+            _log(
+                run_label,
+                supplier,
+                run_id,
+                f"goto {wu}: Hopefix redirect race ({exc!s}) — pokračujem po domcontentloaded",
+                "warn",
+            )
+            try:
+                await page.wait_for_load_state("domcontentloaded", timeout=12_000)
+            except Exception:
+                pass
+        else:
+            _log(
+                run_label,
+                supplier,
+                run_id,
+                f"goto {wu}: {exc!s}, fallback domcontentloaded",
+                "warn",
+            )
+            await page.goto(start_url, wait_until="domcontentloaded")
+            _log(run_label, supplier, run_id, "page loaded (domcontentloaded)")
     await _save_step_screenshot(
         page,
         run_label=run_label,
@@ -4443,7 +4463,23 @@ async def _login_and_search(
 
     if config.after_login_url:
         _log(run_label, supplier, run_id, f"goto after_login_url={config.after_login_url!r}")
-        await page.goto(config.after_login_url, wait_until="domcontentloaded")
+        try:
+            await page.goto(config.after_login_url, wait_until="domcontentloaded")
+        except Exception as exc:
+            if _supplier_is_hopefix(supplier) and _is_navigation_interrupted_by_redirect(exc):
+                _log(
+                    run_label,
+                    supplier,
+                    run_id,
+                    f"after_login goto: Hopefix redirect race ({exc!s}) — pokračujem",
+                    "warn",
+                )
+                try:
+                    await page.wait_for_load_state("domcontentloaded", timeout=8_000)
+                except Exception:
+                    pass
+            else:
+                raise
         await asyncio.sleep(
             0.12
             if _supplier_is_hopefix(supplier)
