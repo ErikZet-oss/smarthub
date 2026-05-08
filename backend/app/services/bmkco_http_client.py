@@ -303,6 +303,7 @@ class BmkcoHttpClient:
             "raw_price": pv.get("raw_price"),
             "raw_stock": pv.get("raw_stock"),
             "raw_pack_quantity": str(pv.get("pack_quantity") or ""),
+            "product_title": label or None,
             "packaging_variants": [pv],
             "logged_in": True,
             "bmkco_via_http": True,

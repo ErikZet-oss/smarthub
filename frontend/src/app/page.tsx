@@ -1662,10 +1662,8 @@ function ProductSupplierExpandedTableRow({
                                         : faboryLineLabelRaw
                                           ? faboryUiProductTitleOnly(faboryLineLabelRaw)
                                           : "";
-                                      const halfmannProductTitle =
-                                        supplierNameIsHalfmann(offer.supplier) &&
-                                        scrape &&
-                                        !scrape.loading
+                                      const supplierProductTitle =
+                                        scrape && !scrape.loading
                                           ? (scrape.product_title || "").trim()
                                           : "";
                                       const supplierHeader = (
@@ -1798,12 +1796,13 @@ function ProductSupplierExpandedTableRow({
                                           <div className="flex flex-col gap-1 lg:flex-row lg:items-start lg:gap-3">
                                             <div className="flex min-w-0 flex-1 flex-col gap-0.5 sm:gap-1">
                                               {supplierHeader}
-                                              {halfmannProductTitle ? (
+                                              {supplierProductTitle &&
+                                              !(supplierNameIsFabory(offer.supplier) && !showPackSelector) ? (
                                                 <p
                                                   className="min-w-0 break-words text-[9px] font-normal leading-snug text-slate-600 sm:text-[11px]"
-                                                  title={halfmannProductTitle}
+                                                  title={supplierProductTitle}
                                                 >
-                                                  {halfmannProductTitle}
+                                                  {supplierProductTitle}
                                                 </p>
                                               ) : null}
                                               {faboryLineLabel &&
