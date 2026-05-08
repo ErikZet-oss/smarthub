@@ -3683,7 +3683,11 @@ async def _probe_post_login(
                 run_id,
                 f"Spring redirect HTTP {spring_status} Location={spring_location!r} — čakám na DOM",
             )
-            await asyncio.sleep(0.65 if _supplier_is_fabory(supplier) else 1.2)
+            await asyncio.sleep(
+                0.65
+                if _supplier_is_fabory(supplier)
+                else (0.45 if _supplier_is_hopefix(supplier) else 1.2)
+            )
 
     form_sel = (config.login_form_selector or "").strip()
     attempts = max(1, min(64, int(max_probe_attempts)))
@@ -3756,7 +3760,11 @@ async def _probe_post_login(
                 return True
         except Exception as exc:
             _log(run_label, supplier, run_id, f"login probe krok {attempt}: {exc}", "warn")
-        await asyncio.sleep(0.3 if _supplier_is_fabory(supplier) else 0.5)
+        await asyncio.sleep(
+            0.3
+            if _supplier_is_fabory(supplier)
+            else (0.22 if _supplier_is_hopefix(supplier) else 0.5)
+        )
     _log(
         run_label,
         supplier,
@@ -4527,7 +4535,8 @@ async def _login_and_search(
     elif _supplier_is_mekrs(supplier):
         probe_max = 14
     elif _supplier_is_hopefix(supplier):
-        probe_max = 9
+        # Hopefix redirectuje rýchlo; dlhý probe zbytočne predlžuje scrape.
+        probe_max = 5
     elif _supplier_is_fabory(supplier):
         probe_max = 12
     else:
@@ -4823,8 +4832,8 @@ async def _login_and_search(
             )
         tail_ps = config.post_search_wait_ms
         if _supplier_is_hopefix(supplier):
-            # Tabuľka #rows na /sortiment sa plní asynchrónne — príliš krátky sleep → timeout na tr#line-<kód>.
-            tail_ps = min(tail_ps, 2_200)
+            # Hopefix už má vlastné čakanie na konkrétny riadok; držíme len krátky settle.
+            tail_ps = min(tail_ps, 1_200)
         await asyncio.sleep(tail_ps / 1000.0)
         _log(
             run_label,
@@ -5528,6 +5537,8 @@ async def _read_price_stock(
     stock: Optional[int] = None
     pack_quantity: Optional[int] = None
     timeout = max(1000, config.price_stock_timeout_ms)
+    if _supplier_is_hopefix(supplier):
+        timeout = min(timeout, 4_500)
 
     if not skip_currency:
         await _maybe_select_price_currency(
@@ -5891,6 +5902,8 @@ class ScraperService:
                             storage_user_id=automation_user_id,
                         )
                         timeout = max(1000, config.price_stock_timeout_ms)
+                        if _supplier_is_hopefix(supplier):
+                            timeout = min(timeout, 4_500)
                         await _maybe_select_price_currency(
                             page,
                             config,
