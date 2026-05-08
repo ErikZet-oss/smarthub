@@ -109,11 +109,16 @@ def _bmkco_pick_pack_quantity(detail: dict[str, Any]) -> Optional[int]:
         k = key_path.lower()
         score = 0
         if "pocetmjvbaleni" in k or "početmjvbaleni" in k:
-            score += 9
+            score += 12
         if "prepocetbaleninamj" in k:
-            score += 8
+            # Často je to prevodový koeficient (napr. 2), nie reálne ks v balení.
+            score += 3
         if "mnozstvivbaleni" in k:
-            score += 7
+            score += 10
+        if "pocetkusuvbaleni" in k or "početkusůvbalení" in k:
+            score += 11
+        if "obsahbaleni" in k or "obsahbalení" in k:
+            score += 9
         if "balenimj" in k:
             score += 6
         if "balen" in k and "mj" in k:
@@ -146,9 +151,6 @@ def _bmkco_pick_pack_quantity(detail: dict[str, Any]) -> Optional[int]:
         candidates.append((s, n))
 
     _walk(detail, tuple())
-    if pack_q is not None and pack_q > 0:
-        # Explicitné top-level pole má prednosť pred heuristikou rovnakej kvality.
-        candidates.append((10, pack_q))
 
     if not candidates:
         return pack_q if pack_q and pack_q > 0 else None
