@@ -4978,9 +4978,9 @@ export default function Home() {
                     vyber stĺpce a klikni „Potvrdiť mapovanie“.
                   </p>
                 )}
-                <div className="grid grid-cols-1 gap-2 min-[560px]:grid-cols-2 sm:flex sm:flex-wrap sm:items-end sm:gap-3">
+                <div className="grid grid-cols-1 gap-2 min-[420px]:grid-cols-2 lg:grid-cols-4">
                   {isFieldMapped("code") && (
-                    <div className="w-full space-y-1 sm:min-w-[140px] sm:flex-1">
+                    <div className="min-w-0 space-y-1">
                       <label className="text-xs text-slate-600">Kód</label>
                       <Input
                         placeholder="Časť interného kódu…"
@@ -4995,7 +4995,7 @@ export default function Home() {
                     </div>
                   )}
                   {isFieldMapped("norma") && (
-                    <div className="w-full space-y-1 sm:min-w-[160px] sm:flex-1">
+                    <div className="min-w-0 space-y-1">
                       <label
                         htmlFor="search-filter-norma"
                         className="text-xs text-slate-600"
@@ -5013,7 +5013,7 @@ export default function Home() {
                     </div>
                   )}
                   {isFieldMapped("surface") && (
-                    <div className="w-full space-y-1 sm:min-w-[180px] sm:flex-1">
+                    <div className="min-w-0 space-y-1">
                       <label
                         htmlFor="search-filter-surface"
                         className="text-xs text-slate-600"
@@ -5031,7 +5031,7 @@ export default function Home() {
                     </div>
                   )}
                   {isFieldMapped("diameter") && (
-                    <div className="w-full space-y-1 sm:min-w-[120px] sm:flex-1">
+                    <div className="min-w-0 space-y-1">
                       <label
                         htmlFor="search-filter-diameter"
                         className="text-xs text-slate-600"
@@ -5049,7 +5049,7 @@ export default function Home() {
                     </div>
                   )}
                   {isFieldMapped("length") && (
-                    <div className="w-full space-y-1 sm:min-w-[120px] sm:flex-1">
+                    <div className="min-w-0 space-y-1">
                       <label
                         htmlFor="search-filter-length"
                         className="text-xs text-slate-600"
@@ -5067,7 +5067,7 @@ export default function Home() {
                     </div>
                   )}
                   {isFieldMapped("v_class") && (
-                    <div className="w-full space-y-1 sm:min-w-[140px] sm:flex-1">
+                    <div className="min-w-0 space-y-1">
                       <label
                         htmlFor="search-filter-v-class"
                         className="text-xs text-slate-600"
@@ -5085,7 +5085,7 @@ export default function Home() {
                     </div>
                   )}
                   {isFieldMapped("y_money_name") && (
-                    <div className="w-full space-y-1 sm:min-w-[160px] sm:flex-1">
+                    <div className="min-w-0 space-y-1">
                       <label
                         htmlFor="search-filter-y-money"
                         className="text-xs text-slate-600"
@@ -5132,20 +5132,20 @@ export default function Home() {
               </Card>
 
               <Card className="overflow-hidden p-0">
-                <div className="overflow-x-auto">
-                <table className="w-full min-w-[700px] text-xs sm:min-w-[760px] sm:text-sm">
+                <div className="overflow-x-auto overflow-y-hidden">
+                <table className="w-full text-xs sm:text-sm">
                   <thead className="bg-slate-100 text-left text-xs uppercase text-slate-500">
                     <tr>
                       <th className="px-2 py-1.5 sm:px-3 sm:py-2" />
                       <th className="px-2 py-1.5 sm:px-3 sm:py-2">Kód</th>
-                      <th className="px-2 py-1.5 sm:px-3 sm:py-2">Norma</th>
+                      <th className="hidden px-2 py-1.5 sm:table-cell sm:px-3 sm:py-2">Norma</th>
                       <th className="px-2 py-1.5 sm:px-3 sm:py-2">Priemer</th>
                       <th className="px-2 py-1.5 sm:px-3 sm:py-2">Dĺžka</th>
                       {showSurfaceCol && (
-                        <th className="px-2 py-1.5 sm:px-3 sm:py-2">Povrch</th>
+                        <th className="hidden px-2 py-1.5 sm:table-cell sm:px-3 sm:py-2">Povrch</th>
                       )}
-                      <th className="px-2 py-1.5 sm:px-3 sm:py-2">Class</th>
-                      <th className="px-2 py-1.5 sm:px-3 sm:py-2">Money názov</th>
+                      <th className="hidden px-2 py-1.5 md:table-cell sm:px-3 sm:py-2">Class</th>
+                      <th className="hidden px-2 py-1.5 md:table-cell sm:px-3 sm:py-2">Money názov</th>
                       <th className="px-2 py-1.5 text-center sm:px-3 sm:py-2">+</th>
                     </tr>
                   </thead>
@@ -5211,14 +5211,14 @@ export default function Home() {
                               </div>
                             </td>
                             <td className="px-2 py-1.5 font-medium sm:px-3 sm:py-2">{product.internal_code}</td>
-                            <td className="px-2 py-1.5 sm:px-3 sm:py-2">{product.norma ?? "—"}</td>
+                            <td className="hidden px-2 py-1.5 sm:table-cell sm:px-3 sm:py-2">{product.norma ?? "—"}</td>
                             <td className="px-2 py-1.5 sm:px-3 sm:py-2">{product.diameter ?? "—"}</td>
                             <td className="px-2 py-1.5 sm:px-3 sm:py-2">{product.length ?? "—"}</td>
                             {showSurfaceCol && (
-                              <td className="px-2 py-1.5 sm:px-3 sm:py-2">{product.surface ?? "—"}</td>
+                              <td className="hidden px-2 py-1.5 sm:table-cell sm:px-3 sm:py-2">{product.surface ?? "—"}</td>
                             )}
-                            <td className="px-2 py-1.5 sm:px-3 sm:py-2">{product.v_class ?? "—"}</td>
-                            <td className="px-2 py-1.5 sm:px-3 sm:py-2">
+                            <td className="hidden px-2 py-1.5 md:table-cell sm:px-3 sm:py-2">{product.v_class ?? "—"}</td>
+                            <td className="hidden px-2 py-1.5 md:table-cell sm:px-3 sm:py-2">
                               {product.y_money_name ?? "—"}
                             </td>
                             <td className="px-2 py-1.5 text-center sm:px-3 sm:py-2">
