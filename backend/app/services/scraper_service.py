@@ -3686,7 +3686,7 @@ async def _probe_post_login(
             await asyncio.sleep(
                 0.65
                 if _supplier_is_fabory(supplier)
-                else (0.45 if _supplier_is_hopefix(supplier) else 1.2)
+                else (0.85 if _supplier_is_hopefix(supplier) else 1.2)
             )
 
     form_sel = (config.login_form_selector or "").strip()
@@ -3763,7 +3763,7 @@ async def _probe_post_login(
         await asyncio.sleep(
             0.3
             if _supplier_is_fabory(supplier)
-            else (0.22 if _supplier_is_hopefix(supplier) else 0.5)
+            else (0.35 if _supplier_is_hopefix(supplier) else 0.5)
         )
     _log(
         run_label,
@@ -4535,8 +4535,8 @@ async def _login_and_search(
     elif _supplier_is_mekrs(supplier):
         probe_max = 14
     elif _supplier_is_hopefix(supplier):
-        # Hopefix redirectuje rýchlo; dlhý probe zbytočne predlžuje scrape.
-        probe_max = 5
+        # Hopefix občas oneskorene prepne reláciu na B2B tabuľku.
+        probe_max = 8
     elif _supplier_is_fabory(supplier):
         probe_max = 12
     else:
@@ -4832,8 +4832,8 @@ async def _login_and_search(
             )
         tail_ps = config.post_search_wait_ms
         if _supplier_is_hopefix(supplier):
-            # Hopefix už má vlastné čakanie na konkrétny riadok; držíme len krátky settle.
-            tail_ps = min(tail_ps, 1_200)
+            # Hopefix tabuľka sa po login redirecte dopĺňa asynchrónne.
+            tail_ps = min(tail_ps, 1_800)
         await asyncio.sleep(tail_ps / 1000.0)
         _log(
             run_label,
