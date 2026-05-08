@@ -129,6 +129,36 @@ def _bmkco_pick_pack_quantity(detail: dict[str, Any]) -> Optional[int]:
             score -= 4
         return score
 
+    def _pack_from_text(text: str) -> Optional[int]:
+        t = str(text or "").strip().lower()
+        if not t:
+            return None
+        # BMCo často zobrazuje balenie ako "2 MJ 100 KUS" -> výsledné balenie 200 ks.
+        m_mul = re.search(
+            r"(\d+(?:[.,]\d+)?)\s*mj\b.*?(\d+(?:[.,]\d+)?)\s*kus\b",
+            t,
+            re.I,
+        )
+        if m_mul:
+            try:
+                a = int(float(m_mul.group(1).replace(",", ".")))
+                b = int(float(m_mul.group(2).replace(",", ".")))
+                prod = a * b
+                if prod > 0:
+                    return prod
+            except Exception:
+                pass
+        # Fallback pre "balení 200 ks" / "... 200 kus"
+        m_kus = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:ks|kus)\b", t, re.I)
+        if m_kus:
+            try:
+                n = int(float(m_kus.group(1).replace(",", ".")))
+                if n > 0:
+                    return n
+            except Exception:
+                pass
+        return None
+
     def _walk(node: Any, path: tuple[str, ...]) -> None:
         if isinstance(node, dict):
             for k, v in node.items():
@@ -140,9 +170,18 @@ def _bmkco_pick_pack_quantity(detail: dict[str, Any]) -> Optional[int]:
             return
         n = _bmkco_parse_int(node)
         if n is None or n <= 0:
-            return
+            if isinstance(node, str):
+                n = _pack_from_text(node)
+                if n is None or n <= 0:
+                    return
+            else:
+                return
         key_path = ".".join(path)
         s = _score_key(key_path)
+        if isinstance(node, str):
+            txt = node.lower()
+            if "mj" in txt and ("kus" in txt or "ks" in txt):
+                s += 6
         # Povoliť slabé zhody len pre väčšie hodnoty; zabráni to chybnému výberu typu "2".
         if s < 0:
             return
