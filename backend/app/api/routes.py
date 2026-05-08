@@ -119,6 +119,7 @@ class SupplierUpsertPayload(BaseModel):
     code_column: str | None = None
     cart_config_json: str | None = None
     free_shipping_threshold_eur: float | None = None
+    is_connected: bool = True
 
 
 class SupplierRemovePayload(BaseModel):
@@ -385,7 +386,9 @@ async def search_products(
 
     products = session.exec(query).all()
     suppliers = session.exec(
-        select(Supplier).order_by(Supplier.sort_order, Supplier.id)
+        select(Supplier)
+        .where(Supplier.is_connected == True)  # noqa: E712
+        .order_by(Supplier.sort_order, Supplier.id)
     ).all()
 
     response: list[ProductComparison] = []
@@ -395,6 +398,7 @@ async def search_products(
             select(ProductMapping, Supplier)
             .join(Supplier, ProductMapping.supplier_id == Supplier.id)
             .where(ProductMapping.product_id == product.id)
+            .where(Supplier.is_connected == True)  # noqa: E712
         ).all()
         mapping_rows = sorted(
             mapping_rows,
@@ -1007,7 +1011,7 @@ def upsert_supplier(
             shop_url=payload.shop_url,
             username=payload.username,
             password=payload.password,
-            is_connected=True,
+            is_connected=bool(payload.is_connected),
             code_column=payload.code_column or None,
             cart_config_json=normalized_cart_cfg,
             free_shipping_threshold_eur=payload.free_shipping_threshold_eur,
@@ -1019,7 +1023,7 @@ def upsert_supplier(
         supplier.shop_url = payload.shop_url
         supplier.username = payload.username
         supplier.password = payload.password
-        supplier.is_connected = True
+        supplier.is_connected = bool(payload.is_connected)
         supplier.code_column = payload.code_column or None
         supplier.cart_config_json = normalized_cart_cfg
         supplier.free_shipping_threshold_eur = payload.free_shipping_threshold_eur

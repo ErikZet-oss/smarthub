@@ -4198,6 +4198,7 @@ export default function Home() {
           shop_url: data.shopUrl,
           username: data.username,
           password: data.password,
+          is_connected: data.isConnected,
           code_column: data.codeColumn || null,
           cart_config_json: data.cartConfigJson.trim() || null,
           free_shipping_threshold_eur: thrParsed,
@@ -6310,6 +6311,26 @@ export default function Home() {
                               />
                             </div>
                           </div>
+                          <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={Boolean(supplier.isConnected)}
+                              disabled={supplierTemplateLocked}
+                              onChange={(event) =>
+                                setSupplierForms((prev) =>
+                                  prev.map((row, rowIndex) =>
+                                    rowIndex === index
+                                      ? { ...row, isConnected: event.target.checked }
+                                      : row,
+                                  ),
+                                )
+                              }
+                              className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500 disabled:opacity-50"
+                            />
+                            <span>
+                              Zobraziť vo vyhľadávaní
+                            </span>
+                          </label>
 
                           <div className="rounded-lg border border-sky-100 bg-sky-50/30 p-2">
                             <label className="text-[11px] font-medium text-slate-800">
