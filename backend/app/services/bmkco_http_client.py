@@ -82,6 +82,81 @@ def _pick_first(d: dict[str, Any], keys: tuple[str, ...]) -> Any:
     return None
 
 
+def _bmkco_pick_pack_quantity(detail: dict[str, Any]) -> Optional[int]:
+    """BMCo nie vždy vracia počet ks v balení pod rovnakým kľúčom.
+    Najprv skúsime známe polia, potom fallback na ďalšie "baleni" metadáta.
+    """
+    pack_raw = _pick_first(
+        detail,
+        (
+            "početMJvBaleni",
+            "pocetMJvBaleni",
+            "prepocetBaleninaMJ",
+            "baleni",
+            "mnozstviVBaleni",
+            "mnozstviVbaleni",
+            "baleniMj",
+            "baleniMJ",
+        ),
+    )
+    pack_q = _bmkco_parse_int(pack_raw)
+    if pack_q is not None and pack_q > 1:
+        return pack_q
+
+    candidates: list[tuple[int, int]] = []
+
+    def _score_key(key_path: str) -> int:
+        k = key_path.lower()
+        score = 0
+        if "pocetmjvbaleni" in k or "početmjvbaleni" in k:
+            score += 9
+        if "prepocetbaleninamj" in k:
+            score += 8
+        if "mnozstvivbaleni" in k:
+            score += 7
+        if "balenimj" in k:
+            score += 6
+        if "balen" in k and "mj" in k:
+            score += 4
+        elif "balen" in k or "balik" in k or "karton" in k:
+            score += 2
+        if any(x in k for x in ("sklad", "stock", "cena", "price", "karta", "id")):
+            score -= 4
+        return score
+
+    def _walk(node: Any, path: tuple[str, ...]) -> None:
+        if isinstance(node, dict):
+            for k, v in node.items():
+                _walk(v, (*path, str(k)))
+            return
+        if isinstance(node, list):
+            for i, v in enumerate(node):
+                _walk(v, (*path, f"[{i}]"))
+            return
+        n = _bmkco_parse_int(node)
+        if n is None or n <= 0:
+            return
+        key_path = ".".join(path)
+        s = _score_key(key_path)
+        # Povoliť slabé zhody len pre väčšie hodnoty; zabráni to chybnému výberu typu "2".
+        if s < 0:
+            return
+        if s == 0 and n < 10:
+            return
+        candidates.append((s, n))
+
+    _walk(detail, tuple())
+    if pack_q is not None and pack_q > 0:
+        # Explicitné top-level pole má prednosť pred heuristikou rovnakej kvality.
+        candidates.append((10, pack_q))
+
+    if not candidates:
+        return pack_q if pack_q and pack_q > 0 else None
+    # Najprv kvalita kľúča, potom väčšia hodnota (napr. 200 pred 2).
+    candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    return candidates[0][1]
+
+
 class BmkcoHttpClient:
     def __init__(self, base_url: str) -> None:
         self._base = bmkco_base_url(base_url)
@@ -206,17 +281,8 @@ class BmkcoHttpClient:
         price_eur = _bmkco_parse_decimal(str(raw_price or ""))
         stock_raw = _pick_first(detail, ("mnozstviSkladem", "mnozstviSklademText", "sklad"))
         stock = _bmkco_parse_int(stock_raw)
-        # Počet kusov v balení: preferuj údaj "početMJvBaleni", fallback "prepocetBaleninaMJ".
-        pack_raw = _pick_first(
-            detail,
-            (
-                "početMJvBaleni",
-                "pocetMJvBaleni",
-                "prepocetBaleninaMJ",
-                "baleni",
-            ),
-        )
-        pack_q = _bmkco_parse_int(pack_raw)
+        # Počet kusov v balení: BMCo mení názvy polí podľa produktu.
+        pack_q = _bmkco_pick_pack_quantity(detail)
         label = str(
             _pick_first(detail, ("kratkyNazev", "nazev", "Krizovy_Odkaz", "karta")) or ""
         ).strip()
