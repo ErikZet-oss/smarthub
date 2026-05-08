@@ -3941,13 +3941,30 @@ async def _save_step_screenshot(
 
 
 def _login_failure_hint(extra: Optional[str] = None) -> str:
+    extra_txt = (extra or "").strip()
+    low = extra_txt.lower()
+    if (
+        extra_txt
+        and (
+            "používateľské meno alebo heslo bolo nesprávne" in low
+            or "nesprávne prihlasovacie meno alebo heslo" in low
+            or "badcredentials" in low
+            or "error=true" in low
+        )
+    ):
+        return (
+            f"{extra_txt}\n\n"
+            "Fabory odmietlo prihlasovacie údaje. Skontroluj meno/heslo uložené pre aktuálneho používateľa "
+            "v sekcii Dodávatelia → Fabory. Ak sa vieš ručne prihlásiť, prepíš heslo aj sem (často po zmene "
+            "hesla alebo pri inom účte na live)."
+        )
     base = (
         "Prihlásenie neprešlo (formulár ostáva alebo redirect s error=true). Skús v cart_config_json "
         "„headless“: false a „browser_channel“: „chrome“, prípadne vyšší post_login_wait_ms. "
         "Ak ručne funguje rovnaké heslo, často ide o cookies (Usercentrics) alebo rozdiel headless vs. normálny prehliadač."
     )
-    if extra and extra.strip():
-        return f"{extra.strip()}\n\n{base}"
+    if extra_txt:
+        return f"{extra_txt}\n\n{base}"
     return base
 
 
@@ -5987,6 +6004,8 @@ class ScraperService:
                                 "\n".join(extra_parts) if extra_parts else None
                             )
                         if (
+                            logged_in
+                            and
                             data.get("price_eur") is None
                             and data.get("stock") is None
                             and (config.price_selector or config.stock_selector)
@@ -5998,6 +6017,8 @@ class ScraperService:
                                 "Prípadne skús „search_pick_first_suggestion“: true pri comboboxe."
                             )
                         elif (
+                            logged_in
+                            and
                             data.get("pack_quantity") is None
                             and not (data.get("raw_pack_quantity") or "").strip()
                             and (
