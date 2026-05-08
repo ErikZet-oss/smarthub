@@ -437,6 +437,20 @@ function productImagePublicUrl(fileName: string | null | undefined): string | nu
   return `${API_BASE}/product-images/${encodeURIComponent(base)}`;
 }
 
+/** Deep link na B2B produkt často skončí loginom; otvárame radšej doménu e-shopu. */
+function supplierSafeExternalUrl(
+  productUrl: string | null | undefined,
+): string | null {
+  const raw = (productUrl || "").trim();
+  if (!raw) return null;
+  try {
+    const u = new URL(raw);
+    return `${u.origin}/`;
+  } catch {
+    return raw;
+  }
+}
+
 type SelectFilterKey =
   | "norma"
   | "surface"
@@ -1728,16 +1742,33 @@ function ProductSupplierExpandedTableRow({
                                                   : "—"}
                                               </span>
                                               {offer.supplier_product_url?.trim() ? (
-                                                <a
-                                                  href={offer.supplier_product_url}
-                                                  target="_blank"
-                                                  rel="noopener noreferrer"
-                                                  title="Otvoriť produkt u dodávateľa"
+                                                <button
+                                                  type="button"
+                                                  title="Otvoriť e-shop dodávateľa (kód sa skopíruje do schránky)"
                                                   className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border border-slate-300/80 bg-white/90 text-slate-600 transition hover:border-sky-300 hover:text-sky-700 sm:h-4.5 sm:w-4.5"
-                                                  onClick={(event) => event.stopPropagation()}
+                                                  onClick={(event) => {
+                                                    event.stopPropagation();
+                                                    const code =
+                                                      offer.supplier_code?.trim() || "";
+                                                    if (code && navigator?.clipboard?.writeText) {
+                                                      void navigator.clipboard
+                                                        .writeText(code)
+                                                        .catch(() => undefined);
+                                                    }
+                                                    const target = supplierSafeExternalUrl(
+                                                      offer.supplier_product_url,
+                                                    );
+                                                    if (target) {
+                                                      window.open(
+                                                        target,
+                                                        "_blank",
+                                                        "noopener,noreferrer",
+                                                      );
+                                                    }
+                                                  }}
                                                 >
                                                   <ExternalLink className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
-                                                </a>
+                                                </button>
                                               ) : null}
                                             </div>
                                           </div>
