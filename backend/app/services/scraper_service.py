@@ -4628,7 +4628,22 @@ async def _login_and_search(
             await _neutralize_blocking_cmp_overlays(
                 page, run_label=run_label, supplier=supplier, run_id=run_id
             )
-            await loc_search.click()
+            try:
+                await loc_search.click(timeout=6_000)
+            except Exception as exc:
+                # Fabory: search input môže byť síce „visible“, ale overlay/animácia
+                # občas zablokuje pointer events. Fallback bez kliku, nech scrape pokračuje.
+                _log(
+                    run_label,
+                    supplier,
+                    run_id,
+                    f"search input click fallback (focus bez kliku): {exc!s}",
+                    "warn",
+                )
+                try:
+                    await loc_search.focus()
+                except Exception:
+                    pass
             await loc_search.fill(code)
 
             if config.search_pick_first_suggestion:
