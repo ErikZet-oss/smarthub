@@ -52,6 +52,7 @@ from app.services.haspl_http_client import (
     supplier_shop_cart_url,
 )
 from app.services.argip_http_client import ArgipHttpClient, argip_cart_url
+from app.services.schachermayer_http_client import SchachermayerHttpClient
 from app.services.inoxmare_http_client import (
     InoxmareHttpClient,
     inoxmare_origin,
@@ -273,6 +274,14 @@ def _supplier_is_argip(supplier: Supplier) -> bool:
     return "argip.com.pl" in u
 
 
+def _supplier_is_schachermayer(supplier: Supplier) -> bool:
+    compact = re.sub(r"\s+", "", (supplier.name or "").lower())
+    if "schachermayer" in compact:
+        return True
+    u = (supplier.shop_url or "").lower()
+    return "schachermayer.com" in u
+
+
 def _supplier_is_inoxmare(supplier: Supplier) -> bool:
     """
     Inox Mare / https://www.inoxmare.com/en/ — „Inox Mare“ → inoxmare; skrátený názov „Inox“
@@ -319,6 +328,7 @@ def supplier_allows_empty_cart_config(supplier: Supplier) -> bool:
         or _supplier_is_bmkco(supplier)
         or _supplier_is_halfmann(supplier)
         or _supplier_is_argip(supplier)
+        or _supplier_is_schachermayer(supplier)
     ):
         return True
     u = (supplier.shop_url or "").lower()
@@ -332,6 +342,8 @@ def supplier_allows_empty_cart_config(supplier: Supplier) -> bool:
     if "halfmann-schrauben.de" in u:
         return True
     if "argip.com.pl" in u:
+        return True
+    if "schachermayer.com" in u:
         return True
     return False
 
@@ -2352,6 +2364,38 @@ async def _argip_get_supplier_data_via_http(
     return data
 
 
+async def _schachermayer_get_supplier_data_via_http(
+    supplier: Supplier,
+    product_code: str,
+    config: ScraperConfig,
+    *,
+    run_label: str,
+    run_id: str,
+) -> dict[str, Any]:
+    code = (product_code or "").strip()
+    if not code:
+        raise ValueError("Prázdny kód produktu.")
+    cat_override = (config.schachermayer_catalog_id or "").strip() or None
+    async with SchachermayerHttpClient(supplier.shop_url or "") as client:
+        await client.ensure_login(supplier.username, supplier.password)
+        try:
+            data = await client.fetch_product_pricing(
+                code, catalog_override=cat_override
+            )
+        except RuntimeError as exc:
+            msg = str(exc)
+            if "nenašiel" in msg:
+                raise ScraperProductNotFoundError(msg) from exc
+            raise
+    _log(
+        run_label,
+        supplier,
+        run_id,
+        f"get_supplier_data Schachermayer HTTP: code={code!r}",
+    )
+    return data
+
+
 def _mekrs_sum_variant_stocks(
     variants: list[dict[str, Any]],
 ) -> Optional[int]:
@@ -2533,6 +2577,8 @@ class ScraperConfig(BaseModel):
     hopefix_default_package_type: str = "box"
     # Inoxmare (Magento): cesta store view, napr. "/en" — inak z shop_url alebo "/en".
     inoxmare_store_path: Optional[str] = None
+    # Schachermayer: ak automatika z vkorg/vtweg/sparte zlyhá, vlož presný catalog z URL (?catalog=…).
+    schachermayer_catalog_id: Optional[str] = None
     # Celá hlavička Cookie z prehliadača po ručnom prihlásení (DevTools → Sieť → Cookie). Obíde CAPTCHA.
     inoxmare_session_cookie_header: Optional[str] = None
     search_submit_selector: Optional[str] = None
@@ -5844,6 +5890,35 @@ class ScraperService:
                 )
                 raise RuntimeError(f"Argip HTTP zlyhalo: {exc}") from exc
 
+        if _supplier_is_schachermayer(supplier):
+            try:
+                sch = await _schachermayer_get_supplier_data_via_http(
+                    supplier,
+                    product_code,
+                    config,
+                    run_label=run_label,
+                    run_id=run_id,
+                )
+                _log(
+                    run_label,
+                    supplier,
+                    run_id,
+                    f"get_supplier_data done (Schachermayer HTTP): {sch}",
+                )
+                return sch
+            except ScraperProductNotFoundError:
+                raise
+            except Exception as exc:
+                dev_run_log_exception(run_label, exc)
+                _log(
+                    run_label,
+                    supplier,
+                    run_id,
+                    f"Schachermayer HTTP zlyhalo: {exc}",
+                    "error",
+                )
+                raise RuntimeError(f"Schachermayer HTTP zlyhalo: {exc}") from exc
+
         if _supplier_is_mekrs(supplier):
             try:
                 data_http = await _mekrs_get_supplier_data_via_http(
@@ -6139,6 +6214,7 @@ class ScraperService:
         is_bmkco = _supplier_is_bmkco(supplier)
         is_halfmann = _supplier_is_halfmann(supplier)
         is_argip = _supplier_is_argip(supplier)
+        is_schachermayer = _supplier_is_schachermayer(supplier)
         hopefix_http = _supplier_is_hopefix(supplier) and _hopefix_http_enabled(config)
         inoxmare_http = _supplier_is_inoxmare(supplier)
         if (
@@ -6148,6 +6224,7 @@ class ScraperService:
             and not is_bmkco
             and not is_halfmann
             and not is_argip
+            and not is_schachermayer
             and not inoxmare_http
         ):
             if not search_sel and not search_url_tmpl:
@@ -6451,6 +6528,33 @@ class ScraperService:
 
             await _argip_http_cart()
             _log(run_label, supplier, run_id, "add_to_cart done (Argip HTTP)")
+            return
+
+        if is_schachermayer:
+            code_sch = (product_code or "").strip()
+            if not code_sch:
+                raise ValueError("Schachermayer: prázdny kód produktu.")
+            cat_ov = (config.schachermayer_catalog_id or "").strip() or None
+            _log(
+                run_label,
+                supplier,
+                run_id,
+                f"add_to_cart Schachermayer HTTP code={code_sch!r} qty={quantity}",
+            )
+
+            async def _schachermayer_http_cart() -> None:
+                async with SchachermayerHttpClient(
+                    supplier.shop_url or ""
+                ) as sclient:
+                    await sclient.ensure_login(supplier.username, supplier.password)
+                    await sclient.add_to_cart_for_product_code(
+                        code_sch,
+                        int(quantity),
+                        catalog_override=cat_ov,
+                    )
+
+            await _schachermayer_http_cart()
+            _log(run_label, supplier, run_id, "add_to_cart done (Schachermayer HTTP)")
             return
 
         if inoxmare_http:
@@ -6872,6 +6976,19 @@ class ScraperService:
                     "line_count": 0,
                     "message": None,
                 }
+            if _supplier_is_schachermayer(supplier):
+                async with SchachermayerHttpClient(
+                    supplier.shop_url or ""
+                ) as client:
+                    await client.ensure_login(supplier.username, supplier.password)
+                return {
+                    **base,
+                    "remote_supported": True,
+                    "logged_in": True,
+                    "total_eur": None,
+                    "line_count": 0,
+                    "message": None,
+                }
         except Exception as exc:
             return {
                 **base,
@@ -7011,6 +7128,21 @@ class ScraperService:
                         "Prihlásenie funguje; zoznam položiek košíka cez API zatiaľ nečítame."
                     ),
                 }
+            if _supplier_is_schachermayer(supplier):
+                async with SchachermayerHttpClient(
+                    supplier.shop_url or ""
+                ) as client:
+                    await client.ensure_login(supplier.username, supplier.password)
+                return {
+                    **out,
+                    "remote_supported": True,
+                    "logged_in": True,
+                    "total_eur": None,
+                    "lines": [],
+                    "message": (
+                        "Prihlásenie funguje; zoznam položiek košíka cez API zatiaľ nečítame."
+                    ),
+                }
         except Exception as exc:
             return {
                 **out,
@@ -7063,6 +7195,21 @@ def load_scraper_config(supplier: Supplier) -> ScraperConfig:
                 username_selector='input[name="uname"], input[name="username"]',
                 password_selector='input[name="psw"], input[type="password"]',
                 login_button_selector='button[type="submit"], input[type="submit"]',
+                login_expect_spring_security_post=False,
+            )
+        if _supplier_is_schachermayer(supplier):
+            from app.services.schachermayer_http_client import schachermayer_base_url
+
+            base_sm = schachermayer_base_url(supplier.shop_url or "")
+            return ScraperConfig(
+                login_url=f"{base_sm}/sso/oauth2/authorization/keycloak?ui_locales=sk",
+                after_login_url=f"{base_sm}/cat/sk-SK",
+                login_form_selector="#kc-form-login",
+                username_selector='input[name="username"]',
+                password_selector='input[name="password"]',
+                login_button_selector=(
+                    '#kc-form-login input[type="submit"], #kc-form-login button[type="submit"]'
+                ),
                 login_expect_spring_security_post=False,
             )
         return ScraperConfig(

@@ -52,6 +52,10 @@ def supplier_shop_cart_url(shop_url: str) -> str:
         from app.services.inoxmare_http_client import inoxmare_cart_url
 
         return inoxmare_cart_url(raw, None)
+    if "schachermayer.com" in raw.lower():
+        from app.services.schachermayer_http_client import schachermayer_web_cart_url
+
+        return schachermayer_web_cart_url(raw)
     return f"{haspl_base_url(raw)}/kosik"
 
 

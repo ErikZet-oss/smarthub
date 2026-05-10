@@ -593,7 +593,8 @@ function supplierShowsScrapeLoginBadge(supplierName: string): boolean {
     c.includes("bmkco") ||
     c.includes("bmco") ||
     c.includes("halfmann") ||
-    c.includes("argip")
+    c.includes("argip") ||
+    c.includes("schachermayer")
   );
 }
 
