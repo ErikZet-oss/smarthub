@@ -64,6 +64,13 @@ type View =
 const CART_HISTORY_STORAGE_KEY = "smart_procurement_cart_history_v1";
 const CART_HISTORY_MAX = 500;
 
+/**
+ * Predvolená absolútna cesta k Gamechanger XLSX — backend musí súbor vidieť na disku.
+ * (Rovnaká pre Párovanie aj Excel panel u dodávateľov.)
+ */
+const DEFAULT_GAMECHANGER_XLSX_PATH =
+  "C:\\Users\\zahor\\OneDrive\\Počítač\\Projekty AI\\Smart\\data\\Smart_data_Gamechanger.xlsx";
+
 /** Poznámka k konkrétnej ponuke: interný kód produktu + id dodávateľa. */
 function offerNoteStorageKey(internalCode: string, supplierId: number): string {
   return `${internalCode}::${supplierId}`;
@@ -2742,10 +2749,22 @@ export default function Home() {
     window.localStorage.setItem("smarthub_theme_mode", themeMode);
   }, [themeMode]);
 
-  const [excelFilePath, setExcelFilePath] = useState(
-    "C:\\Users\\zahor\\OneDrive\\Počítač\\Projekty AI\\Smart\\data\\Smart_data_Gamechanger.xlsx",
-  );
+  const [excelFilePath, setExcelFilePath] = useState(DEFAULT_GAMECHANGER_XLSX_PATH);
   const [sheetName, setSheetName] = useState("DIN");
+
+  /** Nahradí zastaranú relatívnu cestu (napr. z copy-paste) absolútnou predvolenou. */
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setExcelFilePath((prev) => {
+      const norm = prev.trim().replace(/\//g, "\\");
+      const base = norm.split("\\").pop() ?? "";
+      const looksLegacy =
+        (norm.includes("..") &&
+          base.toLowerCase() === "smart_data_gamechanger.xlsx") ||
+        norm.toLowerCase() === "smart_data_gamechanger.xlsx";
+      return looksLegacy ? DEFAULT_GAMECHANGER_XLSX_PATH : prev;
+    });
+  }, []);
   const [mappingProfile, setMappingProfile] = useState<MappingProfile | null>(null);
   const [mappingStatus, setMappingStatus] = useState("");
   const [mappingProfileLoading, setMappingProfileLoading] = useState(false);
@@ -6033,7 +6052,7 @@ export default function Home() {
                       <Input
                         value={excelFilePath}
                         onChange={(event) => setExcelFilePath(event.target.value)}
-                        placeholder="Cesta k XLSX"
+                        placeholder={DEFAULT_GAMECHANGER_XLSX_PATH}
                         className="h-9 font-mono text-xs"
                         readOnly={supplierTemplateLocked}
                       />
@@ -6574,7 +6593,7 @@ export default function Home() {
                         id="parovanie-excel-path"
                         value={excelFilePath}
                         onChange={(event) => setExcelFilePath(event.target.value)}
-                        placeholder="napr. C:\Projekty\data\Smart_data_Gamechanger.xlsx"
+                        placeholder={DEFAULT_GAMECHANGER_XLSX_PATH}
                         className="font-mono text-sm"
                         spellCheck={false}
                         autoComplete="off"
