@@ -98,8 +98,31 @@ def _resolve_header_col_index(headers: list[str], mapped_name: str | None) -> in
 
 
 def _to_supplier_name(header: str) -> str:
-    # "Fabory kód" -> "Fabory"
-    return header.rsplit(" ", 1)[0].strip()
+    # "Fabory kód" / "Schachermayer nový kód" -> text pred posledným „ kód“
+    h = (header or "").strip()
+    if not h:
+        return ""
+    if h.casefold().endswith(" kód"):
+        return h[: -len(" kód")].strip()
+    return h.rsplit(" ", 1)[0].strip() if " " in h else h
+
+
+def _mapping_supplier_name_for_header(
+    header: str,
+    explicit_header_to_supplier: dict[str, str],
+    supplier_names_longest_first: list[str],
+) -> str:
+    """Vyberie názov dodávateľa pre hlavičku stĺpca s kódom (aj po premenovaní v Exceli)."""
+    h = header.strip()
+    hit = explicit_header_to_supplier.get(h)
+    if hit:
+        return hit
+    low_h = h.casefold()
+    if "kód" in low_h or "kod" in low_h:
+        for sname in supplier_names_longest_first:
+            if low_h.startswith(sname.casefold()):
+                return sname
+    return _to_supplier_name(h)
 
 
 def _allocate_supplier_sort_order(session: Session) -> int:
@@ -190,18 +213,54 @@ def import_gamechanger_excel(
     # Stĺpce s kódmi dodávateľov: z DB (code_column) + doplnenie stĺpcov končiacich na " kód".
     supplier_code_columns: list[tuple[int, str]] = []
     seen_indices: set[int] = set()
+    # Aktuálna hlavička z Excelu -> UI a ďalší import (po premenovaní stĺpca).
+    sync_supplier_code_column: dict[str, str] = {}
     suppliers_rows = session.exec(select(Supplier)).all()
+    supplier_names_longest_first = sorted(
+        list({(s.name or "").strip() for s in suppliers_rows if (s.name or "").strip()}),
+        key=len,
+        reverse=True,
+    )
     for supplier in suppliers_rows:
         if supplier.code_column:
             col_name = supplier.code_column.strip()
             idx = _resolve_header_col_index(headers, col_name)
             if idx is not None and idx not in seen_indices:
-                supplier_code_columns.append((idx, headers[idx]))
+                hdr = headers[idx]
+                supplier_code_columns.append((idx, hdr))
                 seen_indices.add(idx)
+                sname = (supplier.name or "").strip()
+                if sname:
+                    sync_supplier_code_column[sname] = hdr
     for idx, header in enumerate(headers):
         if header.endswith(" kód") and idx not in seen_indices:
             supplier_code_columns.append((idx, header))
             seen_indices.add(idx)
+            sname = _to_supplier_name(header)
+            if sname:
+                sync_supplier_code_column.setdefault(sname, header)
+
+    # Starý názov v DB už nesedí, ale hlavička začína na meno dodávateľa a obsahuje kód.
+    suppliers_by_len = sorted(
+        [s for s in suppliers_rows if (s.name or "").strip()],
+        key=lambda s: len((s.name or "").strip()),
+        reverse=True,
+    )
+    for supplier in suppliers_by_len:
+        sname = (supplier.name or "").strip()
+        if sname in sync_supplier_code_column:
+            continue
+        low_sn = sname.casefold()
+        for idx, header in enumerate(headers):
+            if idx in seen_indices:
+                continue
+            low_h = header.strip().casefold()
+            if low_h.startswith(low_sn) and ("kód" in low_h or "kod" in low_h):
+                hstrip = header.strip()
+                supplier_code_columns.append((idx, hstrip))
+                seen_indices.add(idx)
+                sync_supplier_code_column[sname] = hstrip
+                break
 
     explicit_header_to_supplier: dict[str, str] = {}
     for supplier in suppliers_rows:
@@ -262,8 +321,10 @@ def import_gamechanger_excel(
             if not supplier_code:
                 continue
 
-            supplier_name = explicit_header_to_supplier.get(header.strip()) or _to_supplier_name(
-                header
+            supplier_name = _mapping_supplier_name_for_header(
+                header,
+                explicit_header_to_supplier,
+                supplier_names_longest_first,
             )
             mapping_payloads[(internal_code, supplier_name)] = supplier_code
             result.mappings_upserted += 1
@@ -344,6 +405,13 @@ def import_gamechanger_excel(
             mapping_by_pair[key] = mapping
         else:
             mapping.supplier_code = supplier_code
+
+    # Zosúladenie uloženého názvu stĺpca s hlavičkou v Exceli (viditeľné v apke pri dodávateľovi).
+    for supplier in suppliers_rows:
+        sname = (supplier.name or "").strip()
+        new_hdr = sync_supplier_code_column.get(sname)
+        if new_hdr and (supplier.code_column or "").strip() != new_hdr:
+            supplier.code_column = new_hdr
 
     session.commit()
     if progress_cb is not None:

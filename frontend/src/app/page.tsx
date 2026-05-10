@@ -4704,6 +4704,7 @@ export default function Home() {
               `riadkov: ${scanned}/${total || "?"}.${warnBlock}`,
       );
       setSearchTick((t) => t + 1);
+      void refetchSuppliersList();
     } catch (error) {
       const raw = error instanceof Error ? error.message : "";
       const isNetwork =
