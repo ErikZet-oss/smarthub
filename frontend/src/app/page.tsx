@@ -5046,7 +5046,7 @@ export default function Home() {
                     vyber stĺpce a klikni „Potvrdiť mapovanie“.
                   </p>
                 )}
-                <div className="grid grid-cols-1 gap-2 min-[420px]:grid-cols-2 lg:grid-cols-4">
+                <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
                   {isFieldMapped("code") && (
                     <div className="min-w-0 space-y-1">
                       <label className="text-xs text-slate-600">Kód</label>
@@ -5153,7 +5153,7 @@ export default function Home() {
                     </div>
                   )}
                   {isFieldMapped("y_money_name") && (
-                    <div className="min-w-0 space-y-1">
+                    <div className="col-span-2 min-w-0 space-y-1 lg:col-span-1">
                       <label
                         htmlFor="search-filter-y-money"
                         className="text-xs text-slate-600"
