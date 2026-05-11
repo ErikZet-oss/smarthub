@@ -43,6 +43,21 @@ uvicorn app.main:app --reload --port 8001
 
 `NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8001`
 
+## Render: backend sa hneď po deployi vypne (exit 1)
+
+Príkaz `uvicorn app.main:app` musí bežať z priečinka **`backend`** (tam je Python balík `app`). Ak je v Renderi **Root Directory** prázdny (koreň monorepa), `import app` zlyhá a proces skončí hneď po štarte.
+
+**Oprava (jedna z možností):**
+
+1. V službe Web Service nastav **Root Directory** na `backend`, **Build Command** na `pip install -r requirements.txt` a **Start Command** na `uvicorn app.main:app --host 0.0.0.0 --port $PORT`,  
+   **alebo**
+2. Nechaj Root Directory prázdny, ale nastav **Start Command** napr. na:  
+   `cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT`  
+   a **Build Command** na:  
+   `cd backend && pip install -r requirements.txt`.
+
+V koreňovom `render.yaml` je ukážka Blueprintu s `rootDir: backend` (pri novom prepojení repozitára cez Blueprint).
+
 ## Render: aby sa nestrácali dáta po reštarte
 
 Backend používa SQLite súbor. Na Renderi musí byť uložený na persistent disku:
