@@ -44,6 +44,60 @@ _PRICE_CZK_RE = re.compile(
 )
 
 
+def _valenta_title_after_article_plain(cu: str, article_code: str) -> str | None:
+    """Text hneď za kódom artikla v plain texte (tabuľka objednávky)."""
+    code = (article_code or "").strip()
+    if len(code) < 1 or not (cu or "").strip():
+        return None
+    needle = code.upper()
+    u = cu.upper()
+    pos = u.find(needle)
+    if pos < 0:
+        return None
+    tail = cu[pos + len(needle) :].strip(" \t\r\n:;,.-|—–")
+    if len(tail) < 4:
+        return None
+    one = re.split(r"\s{2,}|\n", tail, maxsplit=1)[0].strip()
+    if len(one) < 4 or len(one) > 400:
+        return None
+    return one
+
+
+def _extract_valenta_product_title(
+    html: str,
+    article_code: str,
+    *,
+    plain_near_form: str,
+    plain_full_page: str,
+) -> str | None:
+    """
+    Názov z PDP / tabuľky objednávky (Arebo HTML — heuristika).
+    """
+    t = html or ""
+    for rx in (
+        re.compile(r"<h1[^>]*>(.*?)</h1>", re.I | re.DOTALL),
+        re.compile(r"<h2[^>]*>(.*?)</h2>", re.I | re.DOTALL),
+    ):
+        m = rx.search(t)
+        if m:
+            inner = _strip_tags(m.group(1))
+            if 3 <= len(inner) <= 500:
+                return inner.strip()
+    tm = re.search(r"<title[^>]*>(.*?)</title>", t, re.I | re.DOTALL)
+    if tm:
+        inner = _strip_tags(tm.group(1))
+        for sep in (" | ", " – ", " - ", "|"):
+            if sep in inner:
+                inner = inner.split(sep)[0].strip()
+        if 3 <= len(inner) <= 500:
+            return inner
+    for sample in (plain_near_form, plain_full_page):
+        hit = _valenta_title_after_article_plain(sample, article_code)
+        if hit:
+            return hit
+    return None
+
+
 def _parse_int_cs_digits(text: str) -> Optional[int]:
     t = re.sub(r"[\s\u00a0\u202f]", "", (text or "").strip())
     if not t.isdigit():
@@ -101,7 +155,7 @@ def _extract_session_id(html: str, current_url: str) -> str | None:
     return sid or None
 
 
-def parse_valenta_product_page(html: str) -> dict[str, object]:
+def parse_valenta_product_page(html: str, *, article_code: str = "") -> dict[str, object]:
     """
     Heuristika z HTML: nájde prvý formulár pre add-to-cart + cenu/stock.
     Ak cena/sklad nie sú jasné, nechá ich ako None.
@@ -170,6 +224,13 @@ def parse_valenta_product_page(html: str) -> dict[str, object]:
     if not _apply_stock_from_text(clean):
         _apply_stock_from_text(clean_page)
 
+    product_title = _extract_valenta_product_title(
+        txt,
+        article_code,
+        plain_near_form=clean,
+        plain_full_page=clean_page,
+    )
+
     return {
         "form_action": action,
         "product_id": pid,
@@ -177,6 +238,7 @@ def parse_valenta_product_page(html: str) -> dict[str, object]:
         "raw_price": raw_price,
         "stock": stock_val,
         "raw_stock": raw_stock,
+        "product_title": product_title,
     }
 
 
@@ -252,7 +314,7 @@ class ValentaHttpClient:
         }
         r = await self._client.get(f"{self._base}/order_edit.php", params=params)
         r.raise_for_status()
-        parsed = parse_valenta_product_page(r.text or "")
+        parsed = parse_valenta_product_page(r.text or "", article_code=code)
         if not parsed:
             raise RuntimeError(
                 f"Valenta: produkt {code!r} sa nepodarilo nájsť (formulár add-to-cart chýba)."

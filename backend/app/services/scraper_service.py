@@ -2434,9 +2434,11 @@ async def _valenta_get_supplier_data_via_http(
     stock = int(stock_raw) if isinstance(stock_raw, int) else None
     raw_price = str(raw.get("raw_price") or "").strip() or None
     raw_stock = str(raw.get("raw_stock") or "").strip() or None
+    product_title = str(raw.get("product_title") or "").strip() or None
+    row_label = product_title or f"Valenta {code}"
 
     pv: dict[str, Any] = {
-        "label": f"Valenta {code}",
+        "label": row_label,
         "pack_quantity": 1,
         "raw_pack_quantity": "1 ks",
         "price_eur": price_eur,
@@ -2451,6 +2453,7 @@ async def _valenta_get_supplier_data_via_http(
         "stock": stock,
         "raw_price": raw_price,
         "raw_stock": raw_stock,
+        "product_title": product_title,
         "pack_quantity": 1,
         "raw_pack_quantity": "1 ks",
         "packaging_variants": [pv],
