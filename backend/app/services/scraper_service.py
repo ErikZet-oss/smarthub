@@ -6430,32 +6430,21 @@ class ScraperService:
             return
 
         if is_mekrs:
-            vid_in = (mekrs_product_variant_id or "").strip()
+            vid = (mekrs_product_variant_id or "").strip()
             referer_path = "/"
             row: Optional[dict[str, Any]] = None
-            data_mek = await _mekrs_get_supplier_data_via_http(
-                supplier,
-                product_code,
-                run_label=run_label,
-                run_id=run_id,
-            )
-            pvars = list(data_mek.get("packaging_variants") or [])
-            if not pvars:
-                raise RuntimeError(
-                    "Mekrs: z API neprišli žiadne varianty balenia — nedá sa vybrať riadok do košíka."
+            if not vid:
+                data = await _mekrs_get_supplier_data_via_http(
+                    supplier,
+                    product_code,
+                    run_label=run_label,
+                    run_id=run_id,
                 )
-            if vid_in:
-                for cand in pvars:
-                    if str(cand.get("mekrs_variant_id") or "").strip() == vid_in:
-                        row = cand
-                        break
-                if row is None:
+                pvars = list(data.get("packaging_variants") or [])
+                if not pvars:
                     raise RuntimeError(
-                        f"Mekrs: variant_id {vid_in!r} sa nenašiel v aktuálnom výpise produktu — "
-                        "obnov ceny alebo skontroluj výber balenia."
+                        "Mekrs: z API neprišli žiadne varianty balenia — nedá sa vybrať riadok do košíka."
                     )
-                vid = vid_in
-            else:
                 idx = (
                     int(packaging_variant_index)
                     if packaging_variant_index is not None
@@ -6464,76 +6453,53 @@ class ScraperService:
                 idx = max(0, min(idx, len(pvars) - 1))
                 row = pvars[idx]
                 vid = str(row.get("mekrs_variant_id") or "").strip()
+                slug = str(row.get("mekrs_product_slug") or "").strip()
+                if slug:
+                    referer_path = f"/produkty/{slug}"
                 if not vid:
                     raise RuntimeError(
                         f"Mekrs: variant na indexe {idx} nemá mekrs_variant_id — "
                         "obnov ceny (scrape) alebo vyber iné balenie."
                     )
-            slug = str(row.get("mekrs_product_slug") or "").strip()
-            if slug:
-                referer_path = f"/produkty/{slug}"
-
-            pq_raw = row.get("pack_quantity")
-            pack_q = 1
-            if isinstance(pq_raw, int) and pq_raw >= 1:
-                pack_q = pq_raw
             else:
-                try:
-                    pack_q = max(1, int(float(pq_raw)))
-                except (TypeError, ValueError):
-                    pack_q = 1
+                referer_path = "/produkty"
 
-            # UI posiela množstvo v **kusoch** (label „Množstvo (ks)“); Mekrs API `quantity`
-            # pri balení je počet **balení** (predajných jednotiek), nie kusov.
-            pieces_requested = max(1, int(quantity))
+            qty_requested = int(quantity)
 
             async def _mekrs_http_cart() -> None:
                 async with MekrsHttpClient() as client:
                     await client.ensure_session(supplier.username, supplier.password)
                     vs: Optional[int] = None
-                    rvs = row.get("mekrs_variant_stock")
-                    if isinstance(rvs, int):
-                        vs = rvs
+                    if row is not None:
+                        rvs = row.get("mekrs_variant_stock")
+                        if isinstance(rvs, int):
+                            vs = rvs
                     if vs is None and (product_code or "").strip():
                         vs = await client.stock_level_for_variant(
                             product_code=product_code.strip(),
                             variant_id=vid,
                         )
-                    pieces_cap = pieces_requested
-                    if isinstance(vs, int) and vs >= 1 and pieces_cap > vs:
+                    q = qty_requested
+                    if isinstance(vs, int) and vs >= 1 and q > vs:
                         _log(
                             run_label,
                             supplier,
                             run_id,
-                            f"Mekrs: požadované {pieces_cap} ks znížené na sklad variantu {vs} ks",
+                            f"Mekrs: požadované množstvo {q} znížené na sklad variantu {vs} ks",
                             "warn",
                         )
-                        pieces_cap = vs
-                    if isinstance(vs, int) and vs < 1 and pieces_requested >= 1:
+                        q = vs
+                    if isinstance(vs, int) and vs < 1 and q >= 1:
                         raise RuntimeError(
                             "Mekrs: vybraný variant nemá sklad (0 ks) — nedá sa pridať do košíka."
-                        )
-                    max_packages = None
-                    if isinstance(vs, int) and vs >= 1 and pack_q >= 1:
-                        max_packages = vs // pack_q
-                    packages = max(
-                        1, (pieces_cap + pack_q - 1) // pack_q if pack_q >= 1 else pieces_cap
-                    )
-                    if max_packages is not None:
-                        packages = min(packages, max(0, max_packages))
-                    if packages < 1:
-                        raise RuntimeError(
-                            "Mekrs: na sklade nie je ani jedno celé balenie podľa zadaného množstva."
                         )
                     _log(
                         run_label,
                         supplier,
                         run_id,
-                        "add_to_cart Mekrs HTTP "
-                        f"variant_id={vid!r} ks_požadované={pieces_requested} ks_po_orezaní={pieces_cap} "
-                        f"balenie={pack_q} ks → api_quantity(balenia)={packages} referer={referer_path!r}",
+                        f"add_to_cart Mekrs HTTP variant_id={vid!r} qty={q} referer={referer_path!r}",
                     )
-                    await client.add_to_cart(vid, packages, referer_path=referer_path)
+                    await client.add_to_cart(vid, q, referer_path=referer_path)
 
             await _mekrs_http_cart()
             _log(run_label, supplier, run_id, "add_to_cart done (Mekrs HTTP)")

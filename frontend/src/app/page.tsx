@@ -2436,14 +2436,7 @@ function ProductSupplierExpandedTableRow({
                                                           className="sr-only"
                                                           htmlFor={`cart-qty-${product.internal_code}-${offer.supplier_id}-${offerIndex}`}
                                                         >
-                                                          {supplierNameIsMekrs(
-                                                            offer.supplier,
-                                                          ) && mekrsHttpVariants
-                                                            ? rowPack != null &&
-                                                                rowPack > 1
-                                                              ? `Množstvo v kusoch; krok ${rowPack} ks. Mekrs API pridáva balenia (${rowPack} ks = 1 balenie).`
-                                                              : "Množstvo v kusoch (Mekrs API)."
-                                                            : "Množstvo (ks)"}
+                                                          Množstvo (ks)
                                                         </label>
                                                         <button
                                                           type="button"
@@ -2498,23 +2491,10 @@ function ProductSupplierExpandedTableRow({
                                                             argipShopPackQty !=
                                                               null
                                                               ? `Množstvo v ks — násobok ${formatIntegerCsThousands(rowPack ?? 1)}; v balení ${formatIntegerCsThousands(argipShopPackQty)} ks`
-                                                              : supplierNameIsMekrs(
-                                                                    offer.supplier,
-                                                                  ) &&
-                                                                  mekrsHttpVariants &&
-                                                                  rowPack !=
-                                                                    null &&
-                                                                  rowPack > 1
-                                                                ? `Množstvo v ks (krok ±${formatIntegerCsThousands(rowPack)}). Mekrs API: ${formatIntegerCsThousands(rowPack)} ks = 1 balenie.`
-                                                                : supplierNameIsMekrs(
-                                                                      offer.supplier,
-                                                                    ) &&
-                                                                    mekrsHttpVariants
-                                                                  ? "Množstvo v ks; Mekrs API pridáva celé balenia podľa zvoleného riadku."
-                                                                  : rowPack !=
-                                                                      null
-                                                                    ? `Množstvo v ks (násobok balenia ${formatIntegerCsThousands(rowPack)} ks)`
-                                                                    : "Množstvo na pridanie do košíka"
+                                                              : rowPack !=
+                                                                  null
+                                                                ? `Množstvo v ks (násobok balenia ${formatIntegerCsThousands(rowPack)} ks)`
+                                                                : "Množstvo na pridanie do košíka"
                                                           }
                                                           disabled={
                                                             offerStockUiBlocked
@@ -2600,16 +2580,6 @@ function ProductSupplierExpandedTableRow({
                                                           ks
                                                         </span>
                                                       </div>
-                                                      {supplierNameIsMekrs(
-                                                        offer.supplier,
-                                                      ) && mekrsHttpVariants ? (
-                                                        <p className="text-center text-[8px] leading-snug text-slate-500 sm:max-w-[14rem] sm:text-left sm:text-[9px]">
-                                                          {rowPack != null &&
-                                                          rowPack > 1
-                                                            ? `Mekrs: zadávajte kusy (±${formatIntegerCsThousands(rowPack)}). Do košíka ide počet balení — ${formatIntegerCsThousands(rowPack)} ks = 1 balenie.`
-                                                            : "Mekrs: množstvo je v kusoch; API pridá celé balenia podľa zvoleného variantu."}
-                                                        </p>
-                                                      ) : null}
                                                       {supplierNameIsArgip(
                                                         offer.supplier,
                                                       ) &&
