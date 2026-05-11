@@ -2437,11 +2437,7 @@ async def _valenta_get_supplier_data_via_http(
         if price_eur is not None
         else None
     )
-    raw_stock = (
-        str(raw.get("raw_stock") or "").strip() or None
-        if stock is not None
-        else None
-    )
+    raw_stock = str(raw.get("raw_stock") or "").strip() or None
 
     pv: dict[str, Any] = {
         "label": f"Valenta {code}",

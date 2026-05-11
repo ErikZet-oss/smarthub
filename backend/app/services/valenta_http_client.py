@@ -114,7 +114,7 @@ def parse_valenta_product_page(html: str) -> dict[str, object]:
     stock_val: Optional[int] = None
     raw_stock: Optional[str] = None
     stock_match = re.search(
-        r"(?:sklad(?:em)?|dostupn(?:ost|é|e)?)[^0-9]{0,20}(\d{1,6})",
+        r"(?:sklad(?:em)?|dostupn(?:ost|é|e)?)[^0-9]{0,20}(\d{1,7})",
         clean,
         re.I,
     )
@@ -125,6 +125,25 @@ def parse_valenta_product_page(html: str) -> dict[str, object]:
         except ValueError:
             stock_val = None
             raw_stock = None
+
+    # Čeština: „více než 1500 ks“ — pôvodný regex po „sklad“ to nechytí.
+    if stock_val is None:
+        for pat in (
+            # „než“ aj ASCII „nez“ (nekonzistentné kódovanie HTML)
+            r"(?:více|vice|víc)\s+(?:než|nez)\s+(\d{1,7})\s*(?:ks|kus|kusů|kusy)?",
+            r"(?:více|vice|víc)\s+jak\s+(\d{1,7})\s*(?:ks|kus|kusů|kusy)?",
+            r"\bnad\s+(\d{1,7})\s*(?:ks|kus|kusů|kusy)?",
+            r"\bpřes\s+(\d{1,7})\s*(?:ks|kus|kusů|kusy)?",
+        ):
+            m2 = re.search(pat, clean, re.I)
+            if m2:
+                try:
+                    stock_val = int(m2.group(1))
+                    raw_stock = m2.group(0).strip()
+                except ValueError:
+                    stock_val = None
+                    raw_stock = None
+                break
 
     return {
         "form_action": action,
