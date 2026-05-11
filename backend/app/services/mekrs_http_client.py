@@ -157,7 +157,7 @@ def _mekrs_nominal_to_per_100ks_display(
 
     Rozlišovanie: pri ``pq >= 5`` a „malej“ cene v danej mene berieme hodnotu ako za ks; inak ako za balenie.
 
-    Pri ``pack_quantity`` == 1: pod prahom (EUR < 0,65; CZK < 0,75) ×100 (malé číslo = cena za ks).
+    Pri ``pack_quantity`` == 1: pod prahom ×100 (malé číslo = cena za ks).
 
     Vracia: (hodnota pre UI, price_includes_vat — True len pri núdzovom fallbacku na gross, scaled).
     """
@@ -196,14 +196,12 @@ def _mekrs_nominal_to_per_100ks_display(
         return out, includes_vat, False
     # Jednotkové balenie: pod prahom berieme hodnotu ako cenu za 1 ks (resp. za 1 predajnú jednotku) → ×100 pre „/ 100 ks“.
     # CZK: prah < 0,75 aby ~0,80 Kč/100 ks (identická pri viacerých baleniach) ostalo bez ×100.
-    # EUR: 0,15 bolo príliš nízke — napr. 0,51 €/bal (1 ks) ostalo v UI ako 0,51 namiesto ~51 €/100 ks (viď Mekrs PDP).
-    # Prah 0,65: pod ním typicky „malá“ jednotková cena (0,51; 0,1059); nad tým častejšie už suma blízka „/ 100 ks“.
     if c == "czk":
         threshold = 0.75
     elif c == "eur":
-        threshold = 0.65
+        threshold = 0.15
     else:
-        threshold = 0.65
+        threshold = 0.15
     scaled = x < threshold
     out = round((x * 100.0) if scaled else x, 4)
     return out, includes_vat, scaled
