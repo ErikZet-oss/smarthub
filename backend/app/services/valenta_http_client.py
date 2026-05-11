@@ -37,6 +37,21 @@ _HIDDEN_PID_RE = re.compile(
     r'name=["\']areboshpid["\'][^>]*value=["\']([^"\']+)["\']', re.I | re.DOTALL
 )
 _PRICE_RE = re.compile(r"(\d+(?:[.,]\d{2,4})?)\s*(?:€|EUR)\b", re.I)
+# Valenta často len Kč — raw_price stačí na „živú“ cenu v UI (bez EUR prepočtu).
+_PRICE_CZK_RE = re.compile(
+    r"(\d+(?:[\s\u00a0\u202f]\d{3})*(?:[.,]\d{2})?)\s*(?:Kč|CZK)\b",
+    re.I,
+)
+
+
+def _parse_int_cs_digits(text: str) -> Optional[int]:
+    t = re.sub(r"[\s\u00a0\u202f]", "", (text or "").strip())
+    if not t.isdigit():
+        return None
+    try:
+        return int(t)
+    except ValueError:
+        return None
 
 
 def valenta_base_url(shop_url: str) -> str:
@@ -104,46 +119,56 @@ def parse_valenta_product_page(html: str) -> dict[str, object]:
 
     block = txt[max(0, m.start() - 2500) : min(len(txt), m.end() + 2500)]
     clean = _strip_tags(block)
+    clean_page = _strip_tags(txt)
     price_val: Optional[float] = None
     raw_price: Optional[str] = None
     pm = _PRICE_RE.search(clean)
     if pm:
         raw_price = pm.group(0).strip()
         price_val = _parse_float_local(pm.group(1))
+    if raw_price is None:
+        ck = _PRICE_CZK_RE.search(clean) or _PRICE_CZK_RE.search(clean_page)
+        if ck:
+            raw_price = ck.group(0).strip()
 
     stock_val: Optional[int] = None
     raw_stock: Optional[str] = None
-    stock_match = re.search(
-        r"(?:sklad(?:em)?|dostupn(?:ost|é|e)?)[^0-9]{0,20}(\d{1,7})",
-        clean,
-        re.I,
-    )
-    if stock_match:
-        try:
-            stock_val = int(stock_match.group(1))
-            raw_stock = stock_match.group(0).strip()
-        except ValueError:
-            stock_val = None
-            raw_stock = None
 
-    # Čeština: „více než 1500 ks“ — pôvodný regex po „sklad“ to nechytí.
-    if stock_val is None:
+    def _apply_stock_from_text(sample: str) -> bool:
+        nonlocal stock_val, raw_stock
+        stock_match = re.search(
+            r"(?:sklad(?:em)?|dostupn(?:ost|é|e)?)[^0-9]{0,20}(\d{1,7})",
+            sample,
+            re.I,
+        )
+        if stock_match:
+            try:
+                stock_val = int(stock_match.group(1))
+                raw_stock = stock_match.group(0).strip()
+                return True
+            except ValueError:
+                stock_val = None
+                raw_stock = None
+
+        # Najprv „1 500“, až potom jednoduché číslo (inak by \d{1,7} zobralo len „1“).
+        digit_group = r"(\d{1,3}(?:[\s\u00a0\u202f]\d{3})+|\d{1,7})"
         for pat in (
-            # „než“ aj ASCII „nez“ (nekonzistentné kódovanie HTML)
-            r"(?:více|vice|víc)\s+(?:než|nez)\s+(\d{1,7})\s*(?:ks|kus|kusů|kusy)?",
-            r"(?:více|vice|víc)\s+jak\s+(\d{1,7})\s*(?:ks|kus|kusů|kusy)?",
-            r"\bnad\s+(\d{1,7})\s*(?:ks|kus|kusů|kusy)?",
-            r"\bpřes\s+(\d{1,7})\s*(?:ks|kus|kusů|kusy)?",
+            rf"(?:více|vice|víc)\s+(?:než|nez)\s+{digit_group}\s*(?:ks|kus|kusů|kusy)?",
+            rf"(?:více|vice|víc)\s+jak\s+{digit_group}\s*(?:ks|kus|kusů|kusy)?",
+            rf"\bnad\s+{digit_group}\s*(?:ks|kus|kusů|kusy)?",
+            rf"\bpřes\s+{digit_group}\s*(?:ks|kus|kusů|kusy)?",
         ):
-            m2 = re.search(pat, clean, re.I)
+            m2 = re.search(pat, sample, re.I)
             if m2:
-                try:
-                    stock_val = int(m2.group(1))
+                n = _parse_int_cs_digits(m2.group(1))
+                if n is not None:
+                    stock_val = n
                     raw_stock = m2.group(0).strip()
-                except ValueError:
-                    stock_val = None
-                    raw_stock = None
-                break
+                    return True
+        return False
+
+    if not _apply_stock_from_text(clean):
+        _apply_stock_from_text(clean_page)
 
     return {
         "form_action": action,

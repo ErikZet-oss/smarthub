@@ -2432,11 +2432,7 @@ async def _valenta_get_supplier_data_via_http(
     price_eur = float(price) if isinstance(price, (int, float)) else None
     stock_raw = raw.get("stock")
     stock = int(stock_raw) if isinstance(stock_raw, int) else None
-    raw_price = (
-        str(raw.get("raw_price") or "").strip() or None
-        if price_eur is not None
-        else None
-    )
+    raw_price = str(raw.get("raw_price") or "").strip() or None
     raw_stock = str(raw.get("raw_stock") or "").strip() or None
 
     pv: dict[str, Any] = {
