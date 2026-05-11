@@ -66,10 +66,12 @@ const CART_HISTORY_MAX = 500;
 
 /**
  * Predvolená absolútna cesta k Gamechanger XLSX — backend musí súbor vidieť na disku.
- * (Rovnaká pre Párovanie aj Excel panel u dodávateľov.)
+ * Live (Render): typicky /opt/render/project/src/... Lokálne: nastav NEXT_PUBLIC_GAMECHANGER_XLSX_PATH v .env.local.
  */
 const DEFAULT_GAMECHANGER_XLSX_PATH =
-  "C:\\Users\\zahor\\OneDrive\\Počítač\\Projekty AI\\Smart\\data\\Smart_data_Gamechanger.xlsx";
+  (typeof process !== "undefined" &&
+    process.env.NEXT_PUBLIC_GAMECHANGER_XLSX_PATH?.trim()) ||
+  "/opt/render/project/src/data/Smart_data_Gamechanger.xlsx";
 
 /** Poznámka k konkrétnej ponuke: interný kód produktu + id dodávateľa. */
 function offerNoteStorageKey(internalCode: string, supplierId: number): string {
