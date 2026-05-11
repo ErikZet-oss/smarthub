@@ -1225,6 +1225,24 @@ function snapToPackQuantity(raw: number, pack: number | null): number {
   return Math.min(snapped, 999_999);
 }
 
+/** +/- pri košíku: krok = veľkosť balenia (násobok), alebo 1 ks. */
+function bumpCartQuantity(
+  current: number,
+  pack: number | null,
+  direction: 1 | -1,
+): number {
+  const p = pack != null && pack >= 1 ? pack : null;
+  const cur = Math.floor(Number.isFinite(current) ? current : (p ?? 1));
+  if (p == null) {
+    const n = cur + direction;
+    return Math.min(999_999, Math.max(1, n));
+  }
+  if (direction > 0) {
+    return Math.min(999_999, cur + p);
+  }
+  return Math.max(p, cur - p);
+}
+
 /** Veľkosť balenia z API alebo prvé číslo z raw_pack_quantity (value z inputu). */
 function packSizeFromScrape(
   scrape: SupplierScrapeState | undefined,
@@ -2407,70 +2425,191 @@ function ProductSupplierExpandedTableRow({
                                                   <>
                                                     <div
                                                       className={cn(
-                                                        "flex w-full items-center justify-center gap-1 rounded-md border px-1.5 py-1 shadow-sm ring-1 sm:w-auto sm:justify-start sm:gap-1 sm:px-2 sm:py-1",
+                                                        "flex w-full flex-col items-stretch gap-0.5 rounded-md border px-1.5 py-1 shadow-sm ring-1 sm:w-auto sm:items-start sm:px-2 sm:py-1",
                                                         offerStockUiBlocked
                                                           ? "border-slate-300/80 bg-slate-100/90 ring-slate-200/60"
                                                           : "border-slate-200/90 bg-gradient-to-b from-slate-50 to-white ring-slate-100/50",
                                                       )}
                                                     >
-                                                      <label
-                                                        className="sr-only"
-                                                        htmlFor={`cart-qty-${product.internal_code}-${offer.supplier_id}-${offerIndex}`}
-                                                      >
-                                                        Množstvo (ks)
-                                                      </label>
-                                                      <input
-                                                        id={`cart-qty-${product.internal_code}-${offer.supplier_id}-${offerIndex}`}
-                                                        type="number"
-                                                        inputMode="numeric"
-                                                        min={rowPack ?? 1}
-                                                        step={rowPack ?? 1}
-                                                        title={
-                                                          supplierNameIsArgip(
+                                                      <div className="flex w-full items-center justify-center gap-0.5 sm:justify-start sm:gap-1">
+                                                        <label
+                                                          className="sr-only"
+                                                          htmlFor={`cart-qty-${product.internal_code}-${offer.supplier_id}-${offerIndex}`}
+                                                        >
+                                                          {supplierNameIsMekrs(
                                                             offer.supplier,
-                                                          ) &&
-                                                          argipShopPackQty != null
-                                                            ? `Množstvo v ks — násobok ${formatIntegerCsThousands(rowPack ?? 1)}; v balení ${formatIntegerCsThousands(argipShopPackQty)} ks`
-                                                            : rowPack != null
-                                                              ? `Množstvo v ks (násobok balenia ${formatIntegerCsThousands(rowPack)} ks)`
-                                                              : "Množstvo na pridanie do košíka"
-                                                        }
-                                                        disabled={offerStockUiBlocked}
-                                                        className={cn(
-                                                          "h-8 w-[4.6rem] rounded border px-1 text-center text-xs tabular-nums shadow-sm focus:outline-none focus:ring-1 sm:h-7 sm:w-[4.1rem] sm:px-1 sm:text-xs",
-                                                          "[appearance:textfield] [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none",
-                                                          offerStockUiBlocked
-                                                            ? "cursor-not-allowed border-slate-300 bg-slate-200/80 text-slate-500 focus:border-slate-300 focus:ring-0"
-                                                            : "border-slate-200 bg-white text-slate-800 focus:border-slate-200 focus:ring-slate-200/80",
-                                                        )}
-                                                        value={effectiveCartQty(
-                                                          cartKey,
-                                                          cartQuantityByKey,
-                                                          rowPack,
-                                                        )}
-                                                        onChange={(e) => {
-                                                          const n = parseInt(
-                                                            e.target.value,
-                                                            10,
-                                                          );
-                                                          const v =
-                                                            snapToPackQuantity(
-                                                              Number.isFinite(n)
-                                                                ? n
-                                                                : rowPack ?? 1,
-                                                              rowPack,
+                                                          ) && mekrsHttpVariants
+                                                            ? rowPack != null &&
+                                                                rowPack > 1
+                                                              ? `Množstvo v kusoch; krok ${rowPack} ks. Mekrs API pridáva balenia (${rowPack} ks = 1 balenie).`
+                                                              : "Množstvo v kusoch (Mekrs API)."
+                                                            : "Množstvo (ks)"}
+                                                        </label>
+                                                        <button
+                                                          type="button"
+                                                          disabled={offerStockUiBlocked}
+                                                          aria-label="Znížiť množstvo"
+                                                          title="Znížiť množstvo"
+                                                          className={cn(
+                                                            "flex h-8 w-7 shrink-0 items-center justify-center rounded border text-slate-600 transition-colors sm:h-7 sm:w-6",
+                                                            offerStockUiBlocked
+                                                              ? "cursor-not-allowed border-slate-300 bg-slate-200/80 text-slate-400"
+                                                              : "border-slate-200 bg-white hover:bg-slate-50 active:bg-slate-100",
+                                                          )}
+                                                          onClick={() => {
+                                                            const cur =
+                                                              effectiveCartQty(
+                                                                cartKey,
+                                                                cartQuantityByKey,
+                                                                rowPack,
+                                                              );
+                                                            const v =
+                                                              snapToPackQuantity(
+                                                                bumpCartQuantity(
+                                                                  cur,
+                                                                  rowPack,
+                                                                  -1,
+                                                                ),
+                                                                rowPack,
+                                                              );
+                                                            setCartQuantityByKey(
+                                                              (prev) => ({
+                                                                ...prev,
+                                                                [cartKey]: v,
+                                                              }),
                                                             );
-                                                          setCartQuantityByKey(
-                                                            (prev) => ({
-                                                              ...prev,
-                                                              [cartKey]: v,
-                                                            }),
-                                                          );
-                                                        }}
-                                                      />
-                                                      <span className="text-[10px] font-medium text-slate-600 sm:text-xs">
-                                                        ks
-                                                      </span>
+                                                          }}
+                                                        >
+                                                          <ChevronDown
+                                                            className="h-4 w-4"
+                                                            aria-hidden
+                                                          />
+                                                        </button>
+                                                        <input
+                                                          id={`cart-qty-${product.internal_code}-${offer.supplier_id}-${offerIndex}`}
+                                                          type="number"
+                                                          inputMode="numeric"
+                                                          min={rowPack ?? 1}
+                                                          step={rowPack ?? 1}
+                                                          title={
+                                                            supplierNameIsArgip(
+                                                              offer.supplier,
+                                                            ) &&
+                                                            argipShopPackQty !=
+                                                              null
+                                                              ? `Množstvo v ks — násobok ${formatIntegerCsThousands(rowPack ?? 1)}; v balení ${formatIntegerCsThousands(argipShopPackQty)} ks`
+                                                              : supplierNameIsMekrs(
+                                                                    offer.supplier,
+                                                                  ) &&
+                                                                  mekrsHttpVariants &&
+                                                                  rowPack !=
+                                                                    null &&
+                                                                  rowPack > 1
+                                                                ? `Množstvo v ks (krok ±${formatIntegerCsThousands(rowPack)}). Mekrs API: ${formatIntegerCsThousands(rowPack)} ks = 1 balenie.`
+                                                                : supplierNameIsMekrs(
+                                                                      offer.supplier,
+                                                                    ) &&
+                                                                    mekrsHttpVariants
+                                                                  ? "Množstvo v ks; Mekrs API pridáva celé balenia podľa zvoleného riadku."
+                                                                  : rowPack !=
+                                                                      null
+                                                                    ? `Množstvo v ks (násobok balenia ${formatIntegerCsThousands(rowPack)} ks)`
+                                                                    : "Množstvo na pridanie do košíka"
+                                                          }
+                                                          disabled={
+                                                            offerStockUiBlocked
+                                                          }
+                                                          className={cn(
+                                                            "h-8 w-[4.6rem] rounded border px-1 text-center text-xs tabular-nums shadow-sm focus:outline-none focus:ring-1 sm:h-7 sm:w-[4.1rem] sm:px-1 sm:text-xs",
+                                                            "[appearance:textfield] [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none",
+                                                            offerStockUiBlocked
+                                                              ? "cursor-not-allowed border-slate-300 bg-slate-200/80 text-slate-500 focus:border-slate-300 focus:ring-0"
+                                                              : "border-slate-200 bg-white text-slate-800 focus:border-slate-200 focus:ring-slate-200/80",
+                                                          )}
+                                                          value={effectiveCartQty(
+                                                            cartKey,
+                                                            cartQuantityByKey,
+                                                            rowPack,
+                                                          )}
+                                                          onChange={(e) => {
+                                                            const n = parseInt(
+                                                              e.target.value,
+                                                              10,
+                                                            );
+                                                            const v =
+                                                              snapToPackQuantity(
+                                                                Number.isFinite(
+                                                                  n,
+                                                                )
+                                                                  ? n
+                                                                  : rowPack ??
+                                                                      1,
+                                                                rowPack,
+                                                              );
+                                                            setCartQuantityByKey(
+                                                              (prev) => ({
+                                                                ...prev,
+                                                                [cartKey]: v,
+                                                              }),
+                                                            );
+                                                          }}
+                                                        />
+                                                        <button
+                                                          type="button"
+                                                          disabled={
+                                                            offerStockUiBlocked
+                                                          }
+                                                          aria-label="Zvýšiť množstvo"
+                                                          title="Zvýšiť množstvo"
+                                                          className={cn(
+                                                            "flex h-8 w-7 shrink-0 items-center justify-center rounded border text-slate-600 transition-colors sm:h-7 sm:w-6",
+                                                            offerStockUiBlocked
+                                                              ? "cursor-not-allowed border-slate-300 bg-slate-200/80 text-slate-400"
+                                                              : "border-slate-200 bg-white hover:bg-slate-50 active:bg-slate-100",
+                                                          )}
+                                                          onClick={() => {
+                                                            const cur =
+                                                              effectiveCartQty(
+                                                                cartKey,
+                                                                cartQuantityByKey,
+                                                                rowPack,
+                                                              );
+                                                            const v =
+                                                              snapToPackQuantity(
+                                                                bumpCartQuantity(
+                                                                  cur,
+                                                                  rowPack,
+                                                                  1,
+                                                                ),
+                                                                rowPack,
+                                                              );
+                                                            setCartQuantityByKey(
+                                                              (prev) => ({
+                                                                ...prev,
+                                                                [cartKey]: v,
+                                                              }),
+                                                            );
+                                                          }}
+                                                        >
+                                                          <ChevronUp
+                                                            className="h-4 w-4"
+                                                            aria-hidden
+                                                          />
+                                                        </button>
+                                                        <span className="text-[10px] font-medium text-slate-600 sm:text-xs">
+                                                          ks
+                                                        </span>
+                                                      </div>
+                                                      {supplierNameIsMekrs(
+                                                        offer.supplier,
+                                                      ) && mekrsHttpVariants ? (
+                                                        <p className="text-center text-[8px] leading-snug text-slate-500 sm:max-w-[14rem] sm:text-left sm:text-[9px]">
+                                                          {rowPack != null &&
+                                                          rowPack > 1
+                                                            ? `Mekrs: zadávajte kusy (±${formatIntegerCsThousands(rowPack)}). Do košíka ide počet balení — ${formatIntegerCsThousands(rowPack)} ks = 1 balenie.`
+                                                            : "Mekrs: množstvo je v kusoch; API pridá celé balenia podľa zvoleného variantu."}
+                                                        </p>
+                                                      ) : null}
                                                       {supplierNameIsArgip(
                                                         offer.supplier,
                                                       ) &&

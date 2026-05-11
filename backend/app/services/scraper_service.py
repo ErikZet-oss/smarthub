@@ -53,6 +53,7 @@ from app.services.haspl_http_client import (
 )
 from app.services.argip_http_client import ArgipHttpClient, argip_cart_url
 from app.services.schachermayer_http_client import SchachermayerHttpClient
+from app.services.valenta_http_client import ValentaHttpClient, valenta_cart_url
 from app.services.inoxmare_http_client import (
     InoxmareHttpClient,
     inoxmare_origin,
@@ -282,6 +283,14 @@ def _supplier_is_schachermayer(supplier: Supplier) -> bool:
     return "schachermayer.com" in u
 
 
+def _supplier_is_valenta(supplier: Supplier) -> bool:
+    compact = re.sub(r"\s+", "", (supplier.name or "").lower())
+    if "valenta" in compact:
+        return True
+    u = (supplier.shop_url or "").lower()
+    return "valentazt.cz" in u
+
+
 def _supplier_is_inoxmare(supplier: Supplier) -> bool:
     """
     Inox Mare / https://www.inoxmare.com/en/ — „Inox Mare“ → inoxmare; skrátený názov „Inox“
@@ -329,6 +338,7 @@ def supplier_allows_empty_cart_config(supplier: Supplier) -> bool:
         or _supplier_is_halfmann(supplier)
         or _supplier_is_argip(supplier)
         or _supplier_is_schachermayer(supplier)
+        or _supplier_is_valenta(supplier)
     ):
         return True
     u = (supplier.shop_url or "").lower()
@@ -344,6 +354,8 @@ def supplier_allows_empty_cart_config(supplier: Supplier) -> bool:
     if "argip.com.pl" in u:
         return True
     if "schachermayer.com" in u:
+        return True
+    if "valentazt.cz" in u:
         return True
     return False
 
@@ -2392,6 +2404,75 @@ async def _schachermayer_get_supplier_data_via_http(
         supplier,
         run_id,
         f"get_supplier_data Schachermayer HTTP: code={code!r}",
+    )
+    return data
+
+
+async def _valenta_get_supplier_data_via_http(
+    supplier: Supplier,
+    product_code: str,
+    *,
+    run_label: str,
+    run_id: str,
+) -> dict[str, Any]:
+    code = (product_code or "").strip()
+    if not code:
+        raise ValueError("Prázdny kód produktu.")
+
+    async with ValentaHttpClient(supplier.shop_url or "") as client:
+        await client.ensure_login(supplier.username, supplier.password)
+        raw = await client.fetch_product_data(code)
+
+    form_action_abs = str(raw.get("form_action_abs") or "").strip()
+    product_id = str(raw.get("product_id") or "").strip()
+    if not form_action_abs or not product_id:
+        raise RuntimeError("Valenta: chýba form_action/product_id po vyhľadaní.")
+
+    price = raw.get("price_eur")
+    price_eur = float(price) if isinstance(price, (int, float)) else None
+    stock_raw = raw.get("stock")
+    stock = int(stock_raw) if isinstance(stock_raw, int) else None
+    raw_price = (
+        str(raw.get("raw_price") or "").strip() or None
+        if price_eur is not None
+        else None
+    )
+    raw_stock = (
+        str(raw.get("raw_stock") or "").strip() or None
+        if stock is not None
+        else None
+    )
+
+    pv: dict[str, Any] = {
+        "label": f"Valenta {code}",
+        "pack_quantity": 1,
+        "raw_pack_quantity": "1 ks",
+        "price_eur": price_eur,
+        "raw_price": raw_price,
+        "stock": stock,
+        "raw_stock": raw_stock,
+        "valenta_product_id": product_id,
+        "valenta_form_action_abs": form_action_abs,
+    }
+    data: dict[str, Any] = {
+        "price_eur": price_eur,
+        "stock": stock,
+        "raw_price": raw_price,
+        "raw_stock": raw_stock,
+        "pack_quantity": 1,
+        "raw_pack_quantity": "1 ks",
+        "packaging_variants": [pv],
+        "logged_in": True,
+        "valenta_via_http": True,
+        "valenta_product_id": product_id,
+        "valenta_form_action_abs": form_action_abs,
+        "cart_url": valenta_cart_url(supplier.shop_url or ""),
+    }
+    _log(
+        run_label,
+        supplier,
+        run_id,
+        f"get_supplier_data Valenta HTTP: code={code!r} product_id={product_id!r}",
     )
     return data
 
@@ -5919,6 +6000,34 @@ class ScraperService:
                 )
                 raise RuntimeError(f"Schachermayer HTTP zlyhalo: {exc}") from exc
 
+        if _supplier_is_valenta(supplier):
+            try:
+                val = await _valenta_get_supplier_data_via_http(
+                    supplier,
+                    product_code,
+                    run_label=run_label,
+                    run_id=run_id,
+                )
+                _log(
+                    run_label,
+                    supplier,
+                    run_id,
+                    f"get_supplier_data done (Valenta HTTP): {val}",
+                )
+                return val
+            except ScraperProductNotFoundError:
+                raise
+            except Exception as exc:
+                dev_run_log_exception(run_label, exc)
+                _log(
+                    run_label,
+                    supplier,
+                    run_id,
+                    f"Valenta HTTP zlyhalo: {exc}",
+                    "error",
+                )
+                raise RuntimeError(f"Valenta HTTP zlyhalo: {exc}") from exc
+
         if _supplier_is_mekrs(supplier):
             try:
                 data_http = await _mekrs_get_supplier_data_via_http(
@@ -6215,6 +6324,7 @@ class ScraperService:
         is_halfmann = _supplier_is_halfmann(supplier)
         is_argip = _supplier_is_argip(supplier)
         is_schachermayer = _supplier_is_schachermayer(supplier)
+        is_valenta = _supplier_is_valenta(supplier)
         hopefix_http = _supplier_is_hopefix(supplier) and _hopefix_http_enabled(config)
         inoxmare_http = _supplier_is_inoxmare(supplier)
         if (
@@ -6225,6 +6335,7 @@ class ScraperService:
             and not is_halfmann
             and not is_argip
             and not is_schachermayer
+            and not is_valenta
             and not inoxmare_http
         ):
             if not search_sel and not search_url_tmpl:
@@ -6319,21 +6430,32 @@ class ScraperService:
             return
 
         if is_mekrs:
-            vid = (mekrs_product_variant_id or "").strip()
+            vid_in = (mekrs_product_variant_id or "").strip()
             referer_path = "/"
             row: Optional[dict[str, Any]] = None
-            if not vid:
-                data = await _mekrs_get_supplier_data_via_http(
-                    supplier,
-                    product_code,
-                    run_label=run_label,
-                    run_id=run_id,
+            data_mek = await _mekrs_get_supplier_data_via_http(
+                supplier,
+                product_code,
+                run_label=run_label,
+                run_id=run_id,
+            )
+            pvars = list(data_mek.get("packaging_variants") or [])
+            if not pvars:
+                raise RuntimeError(
+                    "Mekrs: z API neprišli žiadne varianty balenia — nedá sa vybrať riadok do košíka."
                 )
-                pvars = list(data.get("packaging_variants") or [])
-                if not pvars:
+            if vid_in:
+                for cand in pvars:
+                    if str(cand.get("mekrs_variant_id") or "").strip() == vid_in:
+                        row = cand
+                        break
+                if row is None:
                     raise RuntimeError(
-                        "Mekrs: z API neprišli žiadne varianty balenia — nedá sa vybrať riadok do košíka."
+                        f"Mekrs: variant_id {vid_in!r} sa nenašiel v aktuálnom výpise produktu — "
+                        "obnov ceny alebo skontroluj výber balenia."
                     )
+                vid = vid_in
+            else:
                 idx = (
                     int(packaging_variant_index)
                     if packaging_variant_index is not None
@@ -6342,53 +6464,76 @@ class ScraperService:
                 idx = max(0, min(idx, len(pvars) - 1))
                 row = pvars[idx]
                 vid = str(row.get("mekrs_variant_id") or "").strip()
-                slug = str(row.get("mekrs_product_slug") or "").strip()
-                if slug:
-                    referer_path = f"/produkty/{slug}"
                 if not vid:
                     raise RuntimeError(
                         f"Mekrs: variant na indexe {idx} nemá mekrs_variant_id — "
                         "obnov ceny (scrape) alebo vyber iné balenie."
                     )
-            else:
-                referer_path = "/produkty"
+            slug = str(row.get("mekrs_product_slug") or "").strip()
+            if slug:
+                referer_path = f"/produkty/{slug}"
 
-            qty_requested = int(quantity)
+            pq_raw = row.get("pack_quantity")
+            pack_q = 1
+            if isinstance(pq_raw, int) and pq_raw >= 1:
+                pack_q = pq_raw
+            else:
+                try:
+                    pack_q = max(1, int(float(pq_raw)))
+                except (TypeError, ValueError):
+                    pack_q = 1
+
+            # UI posiela množstvo v **kusoch** (label „Množstvo (ks)“); Mekrs API `quantity`
+            # pri balení je počet **balení** (predajných jednotiek), nie kusov.
+            pieces_requested = max(1, int(quantity))
 
             async def _mekrs_http_cart() -> None:
                 async with MekrsHttpClient() as client:
                     await client.ensure_session(supplier.username, supplier.password)
                     vs: Optional[int] = None
-                    if row is not None:
-                        rvs = row.get("mekrs_variant_stock")
-                        if isinstance(rvs, int):
-                            vs = rvs
+                    rvs = row.get("mekrs_variant_stock")
+                    if isinstance(rvs, int):
+                        vs = rvs
                     if vs is None and (product_code or "").strip():
                         vs = await client.stock_level_for_variant(
                             product_code=product_code.strip(),
                             variant_id=vid,
                         )
-                    q = qty_requested
-                    if isinstance(vs, int) and vs >= 1 and q > vs:
+                    pieces_cap = pieces_requested
+                    if isinstance(vs, int) and vs >= 1 and pieces_cap > vs:
                         _log(
                             run_label,
                             supplier,
                             run_id,
-                            f"Mekrs: požadované množstvo {q} znížené na sklad variantu {vs} ks",
+                            f"Mekrs: požadované {pieces_cap} ks znížené na sklad variantu {vs} ks",
                             "warn",
                         )
-                        q = vs
-                    if isinstance(vs, int) and vs < 1 and q >= 1:
+                        pieces_cap = vs
+                    if isinstance(vs, int) and vs < 1 and pieces_requested >= 1:
                         raise RuntimeError(
                             "Mekrs: vybraný variant nemá sklad (0 ks) — nedá sa pridať do košíka."
+                        )
+                    max_packages = None
+                    if isinstance(vs, int) and vs >= 1 and pack_q >= 1:
+                        max_packages = vs // pack_q
+                    packages = max(
+                        1, (pieces_cap + pack_q - 1) // pack_q if pack_q >= 1 else pieces_cap
+                    )
+                    if max_packages is not None:
+                        packages = min(packages, max(0, max_packages))
+                    if packages < 1:
+                        raise RuntimeError(
+                            "Mekrs: na sklade nie je ani jedno celé balenie podľa zadaného množstva."
                         )
                     _log(
                         run_label,
                         supplier,
                         run_id,
-                        f"add_to_cart Mekrs HTTP variant_id={vid!r} qty={q} referer={referer_path!r}",
+                        "add_to_cart Mekrs HTTP "
+                        f"variant_id={vid!r} ks_požadované={pieces_requested} ks_po_orezaní={pieces_cap} "
+                        f"balenie={pack_q} ks → api_quantity(balenia)={packages} referer={referer_path!r}",
                     )
-                    await client.add_to_cart(vid, q, referer_path=referer_path)
+                    await client.add_to_cart(vid, packages, referer_path=referer_path)
 
             await _mekrs_http_cart()
             _log(run_label, supplier, run_id, "add_to_cart done (Mekrs HTTP)")
@@ -6555,6 +6700,35 @@ class ScraperService:
 
             await _schachermayer_http_cart()
             _log(run_label, supplier, run_id, "add_to_cart done (Schachermayer HTTP)")
+            return
+
+        if is_valenta:
+            code_va = (product_code or "").strip()
+            if not code_va:
+                raise ValueError("Valenta: prázdny kód produktu.")
+            _log(
+                run_label,
+                supplier,
+                run_id,
+                f"add_to_cart Valenta HTTP code={code_va!r} qty={quantity}",
+            )
+
+            async def _valenta_http_cart() -> None:
+                async with ValentaHttpClient(supplier.shop_url or "") as vclient:
+                    await vclient.ensure_login(supplier.username, supplier.password)
+                    row = await vclient.fetch_product_data(code_va)
+                    pid = str(row.get("product_id") or "").strip()
+                    action = str(row.get("form_action_abs") or "").strip()
+                    if not pid or not action:
+                        raise RuntimeError("Valenta: po vyhľadaní chýba formulár add-to-cart.")
+                    await vclient.add_to_cart(
+                        product_id=pid,
+                        form_action_abs=action,
+                        quantity=int(quantity),
+                    )
+
+            await _valenta_http_cart()
+            _log(run_label, supplier, run_id, "add_to_cart done (Valenta HTTP)")
             return
 
         if inoxmare_http:
@@ -6989,6 +7163,17 @@ class ScraperService:
                     "line_count": 0,
                     "message": None,
                 }
+            if _supplier_is_valenta(supplier):
+                async with ValentaHttpClient(supplier.shop_url or "") as client:
+                    await client.ensure_login(supplier.username, supplier.password)
+                return {
+                    **base,
+                    "remote_supported": True,
+                    "logged_in": True,
+                    "total_eur": None,
+                    "line_count": 0,
+                    "message": None,
+                }
         except Exception as exc:
             return {
                 **base,
@@ -7143,6 +7328,19 @@ class ScraperService:
                         "Prihlásenie funguje; zoznam položiek košíka cez API zatiaľ nečítame."
                     ),
                 }
+            if _supplier_is_valenta(supplier):
+                async with ValentaHttpClient(supplier.shop_url or "") as client:
+                    await client.ensure_login(supplier.username, supplier.password)
+                return {
+                    **out,
+                    "remote_supported": True,
+                    "logged_in": True,
+                    "total_eur": None,
+                    "lines": [],
+                    "message": (
+                        "Prihlásenie funguje; zoznam položiek košíka cez API zatiaľ nečítame."
+                    ),
+                }
         except Exception as exc:
             return {
                 **out,
@@ -7210,6 +7408,17 @@ def load_scraper_config(supplier: Supplier) -> ScraperConfig:
                 login_button_selector=(
                     '#kc-form-login input[type="submit"], #kc-form-login button[type="submit"]'
                 ),
+                login_expect_spring_security_post=False,
+            )
+        if _supplier_is_valenta(supplier):
+            base_va = valenta_cart_url(supplier.shop_url or "").rsplit("/", 1)[0]
+            return ScraperConfig(
+                login_url=f"{base_va}/login.php",
+                after_login_url=valenta_cart_url(supplier.shop_url or ""),
+                login_form_selector="form",
+                username_selector='input[name="areboua"]',
+                password_selector='input[name="arebopwd"]',
+                login_button_selector='input[name="arebosb"], button[type="submit"]',
                 login_expect_spring_security_post=False,
             )
         return ScraperConfig(
