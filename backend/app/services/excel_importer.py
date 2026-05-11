@@ -60,9 +60,43 @@ class ColumnProfileResult:
 
 
 def _normalize(value: Any) -> str:
+    """
+    Excel / openpyxl často vracia čísla ako float (strata presnosti pri dlhých kódoch)
+    alebo int — pre kódy musíme stabilný text bez „1.23e+15“.
+    """
     if value is None:
         return ""
+    if isinstance(value, bool):
+        return str(value).strip()
+    if isinstance(value, int):
+        return str(value).strip()
+    if isinstance(value, float):
+        if value != value:  # NaN
+            return ""
+        rounded = round(value)
+        if abs(value - rounded) < 1e-9:
+            return str(int(rounded)).strip()
+        return str(value).strip()
     return str(value).strip()
+
+
+def _row_cell(row: Any, idx: int | None) -> str:
+    if idx is None or idx < 0:
+        return ""
+    r = tuple(row) if row is not None else ()
+    if idx >= len(r):
+        return ""
+    return _normalize(r[idx])
+
+
+def _supplier_index_ci(suppliers: list[Supplier]) -> dict[str, Supplier]:
+    """casefold meno dodávateľa → záznam (prvý výskyt)."""
+    out: dict[str, Supplier] = {}
+    for s in suppliers:
+        k = (s.name or "").strip().casefold()
+        if k and k not in out:
+            out[k] = s
+    return out
 
 
 def _normalized_sheet_headers(first_row: Any) -> list[str]:
@@ -277,7 +311,7 @@ def import_gamechanger_excel(
             result.rows_scanned <= 25 or result.rows_scanned % 200 == 0
         ):
             progress_cb(result.rows_scanned, result.total_rows)
-        internal_code = _normalize(row[internal_code_idx])
+        internal_code = _row_cell(row, internal_code_idx)
         if not internal_code:
             continue
 
@@ -317,7 +351,7 @@ def import_gamechanger_excel(
         result.products_upserted += 1
 
         for col_idx, header in supplier_code_columns:
-            supplier_code = _normalize(row[col_idx])
+            supplier_code = _row_cell(row, col_idx)
             if not supplier_code:
                 continue
 
@@ -361,17 +395,19 @@ def import_gamechanger_excel(
 
     session.flush()
 
-    # 2) Dodávatelia: preload + create chýbajúcich
+    # 2) Dodávatelia: preload + create chýbajúcich (meno bez rozlišovania veľkosti písmen)
     suppliers_rows = session.exec(select(Supplier)).all()
-    supplier_by_name = {s.name: s for s in suppliers_rows}
+    supplier_by_ci = _supplier_index_ci(suppliers_rows)
     next_sort_order = (
         max((s.sort_order or 0) for s in suppliers_rows) + 10 if suppliers_rows else 0
     )
     for _, supplier_name in mapping_payloads.keys():
-        if supplier_name in supplier_by_name:
+        key_ci = (supplier_name or "").strip().casefold()
+        if not key_ci or key_ci in supplier_by_ci:
             continue
+        canonical = (supplier_name or "").strip()
         supplier = Supplier(
-            name=supplier_name,
+            name=canonical or supplier_name,
             shop_url="",
             username="",
             password="",
@@ -380,18 +416,29 @@ def import_gamechanger_excel(
         )
         next_sort_order += 10
         session.add(supplier)
-        supplier_by_name[supplier_name] = supplier
+        supplier_by_ci[key_ci] = supplier
         result.suppliers_upserted += 1
 
     session.flush()
 
+    suppliers_rows = session.exec(select(Supplier)).all()
+    supplier_by_ci = _supplier_index_ci(suppliers_rows)
+
     # 3) Mappingy: preload a následný upsert bez SELECT v slučke.
     all_mappings = session.exec(select(ProductMapping)).all()
     mapping_by_pair = {(m.product_id, m.supplier_id): m for m in all_mappings}
+    skipped_no_supplier = 0
+    skipped_no_product = 0
     for (internal_code, supplier_name), supplier_code in mapping_payloads.items():
         product = product_by_code.get(internal_code)
-        supplier = supplier_by_name.get(supplier_name)
-        if product is None or supplier is None or product.id is None or supplier.id is None:
+        supplier = supplier_by_ci.get((supplier_name or "").strip().casefold())
+        if product is None:
+            skipped_no_product += 1
+            continue
+        if supplier is None:
+            skipped_no_supplier += 1
+            continue
+        if product.id is None or supplier.id is None:
             continue
         key = (int(product.id), int(supplier.id))
         mapping = mapping_by_pair.get(key)
@@ -405,6 +452,17 @@ def import_gamechanger_excel(
             mapping_by_pair[key] = mapping
         else:
             mapping.supplier_code = supplier_code
+
+    if skipped_no_supplier:
+        result.warnings.append(
+            f"Import: {skipped_no_supplier} väzieb kódu sa neuložilo — v databáze "
+            f"nebol dodávateľ podľa mena zo stĺpca (skontroluj názvy dodávateľov vs. hlavičky „… kód“)."
+        )
+    if skipped_no_product:
+        result.warnings.append(
+            f"Import: {skipped_no_product} väzieb sa preskočilo — interný kód z Excelu "
+            f"nebol v dávke produktov (prázdny alebo nečitateľný stĺpec „Kód“?)."
+        )
 
     # Zosúladenie uloženého názvu stĺpca s hlavičkou v Exceli (viditeľné v apke pri dodávateľovi).
     for supplier in suppliers_rows:
