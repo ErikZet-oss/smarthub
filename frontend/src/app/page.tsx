@@ -11,7 +11,6 @@ import {
   type SetStateAction,
 } from "react";
 import {
-  ArrowDownUp,
   Check,
   ChevronDown,
   ChevronLeft,
@@ -27,7 +26,6 @@ import {
   History,
   ImageIcon,
   KeyRound,
-  LayoutList,
   Link2,
   List,
   Loader2,
@@ -354,108 +352,6 @@ function normalizeProductSearchRows(rows: ProductSearchRow[]): ProductSearchRow[
     ...row,
     offers: Array.isArray(row.offers) ? row.offers : [],
   }));
-}
-
-type MobileAssetsSortBy = "name" | "value" | "offers";
-type MobileAssetsSortOrder = "asc" | "desc";
-type MobileAssetsViewMode = "table" | "compact";
-
-const MOBILE_ASSETS_SORT_LS = "smart_hub_mobile_assets_sort_v1";
-const MOBILE_ASSETS_VIEW_LS = "smart_hub_mobile_assets_view_v1";
-
-function productAssetsDisplayName(p: ProductSearchRow): string {
-  const y = (p.y_money_name ?? "").trim();
-  return y || p.internal_code;
-}
-
-function productAssetsMinPriceEur(p: ProductSearchRow): number | null {
-  const offers = p.offers ?? [];
-  let min = Infinity;
-  for (const o of offers) {
-    const v = o.price_eur;
-    if (typeof v === "number" && Number.isFinite(v)) {
-      min = Math.min(min, v);
-    }
-  }
-  return min === Infinity ? null : min;
-}
-
-function productAssetsOfferCount(p: ProductSearchRow): number {
-  return p.offers?.length ?? 0;
-}
-
-function productAssetsAnyInStock(p: ProductSearchRow): boolean {
-  return (p.offers ?? []).some(
-    (o) => typeof o.stock === "number" && Number.isFinite(o.stock) && o.stock > 0,
-  );
-}
-
-function readMobileAssetsSortFromStorage(): {
-  by: MobileAssetsSortBy;
-  order: MobileAssetsSortOrder;
-} {
-  if (typeof window === "undefined") {
-    return { by: "name", order: "asc" };
-  }
-  try {
-    const raw = localStorage.getItem(MOBILE_ASSETS_SORT_LS);
-    if (!raw) {
-      return { by: "name", order: "asc" };
-    }
-    const o = JSON.parse(raw) as Record<string, unknown>;
-    const by =
-      o.by === "value" || o.by === "offers" || o.by === "name" ? o.by : "name";
-    const order = o.order === "desc" || o.order === "asc" ? o.order : "asc";
-    return { by, order };
-  } catch {
-    return { by: "name", order: "asc" };
-  }
-}
-
-function readMobileAssetsViewFromStorage(): MobileAssetsViewMode {
-  if (typeof window === "undefined") {
-    return "table";
-  }
-  try {
-    const v = localStorage.getItem(MOBILE_ASSETS_VIEW_LS);
-    return v === "compact" ? "compact" : "table";
-  } catch {
-    return "table";
-  }
-}
-
-function sortProductSearchRows(
-  rows: ProductSearchRow[],
-  by: MobileAssetsSortBy,
-  order: MobileAssetsSortOrder,
-): ProductSearchRow[] {
-  const dir = order === "asc" ? 1 : -1;
-  const out = [...rows];
-  out.sort((a, b) => {
-    if (by === "name") {
-      return (
-        productAssetsDisplayName(a).localeCompare(productAssetsDisplayName(b), "sk") *
-        dir
-      );
-    }
-    if (by === "value") {
-      const pa = productAssetsMinPriceEur(a);
-      const pb = productAssetsMinPriceEur(b);
-      const na = pa == null ? Infinity : pa;
-      const nb = pb == null ? Infinity : pb;
-      if (na !== nb) {
-        return na < nb ? -dir : dir;
-      }
-      return a.internal_code.localeCompare(b.internal_code, "sk");
-    }
-    const ca = productAssetsOfferCount(a);
-    const cb = productAssetsOfferCount(b);
-    if (ca !== cb) {
-      return ca < cb ? -dir : dir;
-    }
-    return a.internal_code.localeCompare(b.internal_code, "sk");
-  });
-  return out;
 }
 
 type FilterOptions = {
@@ -3029,21 +2925,6 @@ export default function Home() {
   const listOpenProductRef = useRef<ProductSearchRow | null>(null);
   listOpenProductRef.current = listOpenProductRow;
   const [searchMessage, setSearchMessage] = useState("");
-  const [mobileAssetsHydrated, setMobileAssetsHydrated] = useState(false);
-  const [mobileAssetsSortBy, setMobileAssetsSortBy] =
-    useState<MobileAssetsSortBy>("name");
-  const [mobileAssetsSortOrder, setMobileAssetsSortOrder] =
-    useState<MobileAssetsSortOrder>("asc");
-  const [mobileAssetsViewMode, setMobileAssetsViewMode] =
-    useState<MobileAssetsViewMode>("table");
-  const [mobileAssetsSheet, setMobileAssetsSheet] = useState<
-    null | "sort" | "view"
-  >(null);
-  const [sortSheetBy, setSortSheetBy] = useState<MobileAssetsSortBy>("name");
-  const [sortSheetOrder, setSortSheetOrder] =
-    useState<MobileAssetsSortOrder>("asc");
-  const [viewSheetMode, setViewSheetMode] =
-    useState<MobileAssetsViewMode>("table");
   const [cartFeedback, setCartFeedback] = useState<Record<string, string>>({});
   /** Po úspešnom POST /cart/add — kľúč ako pri cartFeedback; po čase sa vymaže. */
   const [cartAddSuccessByKey, setCartAddSuccessByKey] = useState<
@@ -3447,47 +3328,6 @@ export default function Home() {
   /** Class (V) + Money názov (Y) sú v tabuľke vždy (dáta z DB); mapovanie určuje Excel. */
   const searchTableColSpan =
     5 + (showSurfaceCol ? 1 : 0) + 3;
-
-  const displayedSearchResults = useMemo(
-    () =>
-      sortProductSearchRows(
-        searchResults,
-        mobileAssetsSortBy,
-        mobileAssetsSortOrder,
-      ),
-    [searchResults, mobileAssetsSortBy, mobileAssetsSortOrder],
-  );
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    const s = readMobileAssetsSortFromStorage();
-    setMobileAssetsSortBy(s.by);
-    setMobileAssetsSortOrder(s.order);
-    setMobileAssetsViewMode(readMobileAssetsViewFromStorage());
-    setMobileAssetsHydrated(true);
-  }, []);
-
-  useEffect(() => {
-    if (!mobileAssetsHydrated || typeof window === "undefined") {
-      return;
-    }
-    localStorage.setItem(
-      MOBILE_ASSETS_SORT_LS,
-      JSON.stringify({
-        by: mobileAssetsSortBy,
-        order: mobileAssetsSortOrder,
-      }),
-    );
-  }, [mobileAssetsHydrated, mobileAssetsSortBy, mobileAssetsSortOrder]);
-
-  useEffect(() => {
-    if (!mobileAssetsHydrated || typeof window === "undefined") {
-      return;
-    }
-    localStorage.setItem(MOBILE_ASSETS_VIEW_LS, mobileAssetsViewMode);
-  }, [mobileAssetsHydrated, mobileAssetsViewMode]);
 
   useEffect(() => {
     const id = window.setTimeout(() => {
@@ -5471,178 +5311,8 @@ export default function Home() {
                 </div>
               </Card>
 
-              <div className="flex items-center justify-between gap-2 pb-2 md:hidden">
-                <h2 className="text-sm font-semibold tracking-tight text-slate-900">
-                  Prehľad aktív
-                </h2>
-                <div className="flex shrink-0 items-center gap-4 text-xs font-semibold">
-                  <button
-                    type="button"
-                    className="inline-flex items-center gap-1.5 text-emerald-600 transition hover:text-emerald-500"
-                    onClick={() => {
-                      setSortSheetBy(mobileAssetsSortBy);
-                      setSortSheetOrder(mobileAssetsSortOrder);
-                      setMobileAssetsSheet("sort");
-                    }}
-                  >
-                    <ArrowDownUp className="h-3.5 w-3.5" aria-hidden />
-                    Zoradiť
-                  </button>
-                  <button
-                    type="button"
-                    className="inline-flex items-center gap-1.5 text-emerald-600 transition hover:text-emerald-500"
-                    onClick={() => {
-                      setViewSheetMode(mobileAssetsViewMode);
-                      setMobileAssetsSheet("view");
-                    }}
-                  >
-                    <LayoutList className="h-3.5 w-3.5" aria-hidden />
-                    Zobrazenie
-                  </button>
-                </div>
-              </div>
-
-              <Card className="overflow-hidden border-slate-200/90 p-0 shadow-sm ring-1 ring-slate-100/80">
-                {mobileAssetsViewMode === "compact" ? (
-                  <div className="overflow-x-auto md:hidden">
-                    <table className="w-full text-xs">
-                      <tbody>
-                        {displayedSearchResults.map((product) => {
-                          const isOpen = openProduct === product.internal_code;
-                          const productImageUrl = productImagePublicUrl(
-                            product.image_filename ?? null,
-                          );
-                          const colSpan = searchTableColSpan;
-                          const minP = productAssetsMinPriceEur(product);
-                          const nOffers = productAssetsOfferCount(product);
-                          const inStock = productAssetsAnyInStock(product);
-                          const title = productAssetsDisplayName(product);
-                          const subBits: string[] = [];
-                          if (product.diameter?.trim()) {
-                            subBits.push(`⌀ ${product.diameter.trim()}`);
-                          }
-                          if (product.length?.trim()) {
-                            subBits.push(product.length.trim());
-                          }
-                          const sub =
-                            subBits.length > 0
-                              ? subBits.join(" · ")
-                              : product.internal_code;
-                          const offerWord =
-                            nOffers === 1
-                              ? "ponuka"
-                              : nOffers >= 2 && nOffers <= 4
-                                ? "ponuky"
-                                : "ponúk";
-                          return (
-                            <Fragment key={product.internal_code}>
-                              <tr className="border-b border-zinc-800 bg-zinc-950 last:border-b-0">
-                                <td colSpan={colSpan} className="relative p-0">
-                                  <button
-                                    type="button"
-                                    className={cn(
-                                      "flex w-full items-stretch gap-3 px-3 py-3 pr-12 text-left transition-colors",
-                                      isOpen ? "bg-zinc-900/90" : "active:bg-zinc-900",
-                                    )}
-                                    aria-expanded={isOpen}
-                                    onClick={() =>
-                                      setOpenProduct(
-                                        isOpen ? null : product.internal_code,
-                                      )
-                                    }
-                                  >
-                                    <div className="relative shrink-0 self-center">
-                                      <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-lg bg-zinc-800 ring-1 ring-zinc-700">
-                                        {productImageUrl ? (
-                                          // eslint-disable-next-line @next/next/no-img-element
-                                          <img
-                                            src={productImageUrl}
-                                            alt=""
-                                            className="h-full w-full object-cover"
-                                          />
-                                        ) : (
-                                          <PackageSearch className="h-5 w-5 text-zinc-500" />
-                                        )}
-                                      </div>
-                                      <span
-                                        className={cn(
-                                          "absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-zinc-950",
-                                          inStock ? "bg-emerald-500" : "bg-zinc-600",
-                                        )}
-                                        aria-hidden
-                                      />
-                                    </div>
-                                    <div className="min-w-0 flex-1">
-                                      <div className="flex flex-wrap items-center gap-2">
-                                        <span className="truncate font-semibold text-white">
-                                          {title}
-                                        </span>
-                                        <span className="shrink-0 rounded-full bg-zinc-800 px-1.5 py-px text-[10px] font-medium uppercase tracking-wide text-zinc-300">
-                                          Produkt
-                                        </span>
-                                      </div>
-                                      <div className="mt-0.5 text-[11px] leading-snug text-zinc-400">
-                                        {nOffers} {offerWord} · {sub}
-                                      </div>
-                                    </div>
-                                    <div className="shrink-0 self-center text-right">
-                                      <div className="text-sm font-semibold tabular-nums text-white">
-                                        {minP != null
-                                          ? `${formatScrapePriceAmount(minP)} €`
-                                          : "—"}
-                                      </div>
-                                      <div className="text-[10px] font-medium text-emerald-400/90">
-                                        od najnižšej ceny
-                                      </div>
-                                    </div>
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="absolute right-2 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md border border-zinc-600 bg-zinc-800/90 text-zinc-200 hover:bg-zinc-700"
-                                    title="Pridať produkt do zoznamu"
-                                    aria-label="Pridať produkt do zoznamu"
-                                    onClick={(event) => {
-                                      event.preventDefault();
-                                      event.stopPropagation();
-                                      setListPicker({
-                                        internalCode: product.internal_code,
-                                        listId: productLists[0]?.id ?? null,
-                                      });
-                                    }}
-                                  >
-                                    <Plus className="h-4 w-4" />
-                                  </button>
-                                </td>
-                              </tr>
-                              {isOpen ? (
-                                <ProductSupplierExpandedTableRow
-                                  product={product}
-                                  colSpan={colSpan}
-                                  scrapeByKey={scrapeByKey}
-                                  cartQuantityByKey={cartQuantityByKey}
-                                  setCartQuantityByKey={setCartQuantityByKey}
-                                  packVariantIndexByKey={packVariantIndexByKey}
-                                  setPackVariantIndexByKey={setPackVariantIndexByKey}
-                                  cartFeedback={cartFeedback}
-                                  cartAddSuccessByKey={cartAddSuccessByKey}
-                                  offerNotesByKey={offerNotesByKey}
-                                  setOfferNotesByKey={setOfferNotesByKey}
-                                  addToCart={addToCart}
-                                />
-                              ) : null}
-                            </Fragment>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : null}
-                <div
-                  className={cn(
-                    "overflow-x-auto overflow-y-hidden",
-                    mobileAssetsViewMode === "compact" && "hidden md:block",
-                  )}
-                >
+              <Card className="overflow-hidden p-0">
+                <div className="overflow-x-auto overflow-y-hidden">
                 <table className="w-full text-xs sm:text-sm">
                   <thead className="bg-slate-100 text-left text-xs uppercase text-slate-500">
                     <tr>
@@ -5660,7 +5330,7 @@ export default function Home() {
                     </tr>
                   </thead>
                   <tbody>
-                    {displayedSearchResults.map((product) => {
+                    {searchResults.map((product) => {
                       const isOpen = openProduct === product.internal_code;
                       const productImageUrl = productImagePublicUrl(
                         product.image_filename ?? null,
@@ -7671,7 +7341,7 @@ export default function Home() {
           )}
           {listPicker ? (
             <div
-              className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/60 p-4"
+              className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4"
               role="dialog"
               aria-modal="true"
               aria-label="Výber zoznamu pre produkt"
@@ -7735,7 +7405,7 @@ export default function Home() {
           ) : null}
           {imagePreview ? (
             <div
-              className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/75 p-4"
+              className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/75 p-4"
               role="dialog"
               aria-modal="true"
               aria-label={`Obrázok produktu ${imagePreview.code}`}
@@ -7775,174 +7445,6 @@ export default function Home() {
                     loading="lazy"
                     className="mx-auto h-auto max-w-full rounded border border-slate-200"
                   />
-                </div>
-              </div>
-            </div>
-          ) : null}
-          {mobileAssetsSheet === "sort" ? (
-            <div
-              className="fixed inset-0 z-[60] md:hidden"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="mobile-assets-sort-title"
-            >
-              <button
-                type="button"
-                className="absolute inset-0 h-full w-full cursor-default border-0 bg-black/60 p-0"
-                aria-label="Zavrieť"
-                onClick={() => setMobileAssetsSheet(null)}
-              />
-              <div className="absolute inset-x-0 bottom-0 max-h-[88vh] overflow-y-auto rounded-t-2xl bg-zinc-900 px-4 pb-6 pt-2 text-white shadow-[0_-8px_40px_rgba(0,0,0,0.45)]">
-                <div className="mx-auto mb-3 mt-1 h-1 w-10 shrink-0 rounded-full bg-zinc-600" />
-                <h3
-                  id="mobile-assets-sort-title"
-                  className="mb-1 text-lg font-semibold tracking-tight"
-                >
-                  Zoradiť podľa
-                </h3>
-                <div className="divide-y divide-zinc-800 border-b border-zinc-800">
-                  {(
-                    [
-                      ["name", "Názov", "Money názov alebo interný kód"] as const,
-                      ["value", "Hodnota", "Najnižšia cena ponuky (€)"] as const,
-                      ["offers", "Počet ponúk", "Počet dodávateľských riadkov"] as const,
-                    ] as const
-                  ).map(([id, label, hint]) => (
-                    <label
-                      key={id}
-                      className="flex cursor-pointer items-start gap-3 py-3.5"
-                    >
-                      <input
-                        type="radio"
-                        name="mobile-assets-sort-by"
-                        checked={sortSheetBy === id}
-                        onChange={() => setSortSheetBy(id)}
-                        className="mt-1 h-4 w-4 shrink-0 border-zinc-600 bg-zinc-800 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-zinc-900"
-                      />
-                      <span>
-                        <span className="block font-medium">{label}</span>
-                        <span className="mt-0.5 block text-xs text-zinc-400">{hint}</span>
-                      </span>
-                    </label>
-                  ))}
-                </div>
-                <p className="mb-2 mt-5 text-sm font-semibold text-white">Poradie</p>
-                <div className="divide-y divide-zinc-800 border-b border-zinc-800">
-                  <label className="flex cursor-pointer items-center gap-3 py-3.5">
-                    <input
-                      type="radio"
-                      name="mobile-assets-sort-order"
-                      checked={sortSheetOrder === "asc"}
-                      onChange={() => setSortSheetOrder("asc")}
-                      className="h-4 w-4 shrink-0 border-zinc-600 bg-zinc-800 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-zinc-900"
-                    />
-                    <span className="font-medium">Vzostupne</span>
-                  </label>
-                  <label className="flex cursor-pointer items-center gap-3 py-3.5">
-                    <input
-                      type="radio"
-                      name="mobile-assets-sort-order"
-                      checked={sortSheetOrder === "desc"}
-                      onChange={() => setSortSheetOrder("desc")}
-                      className="h-4 w-4 shrink-0 border-zinc-600 bg-zinc-800 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-zinc-900"
-                    />
-                    <span className="font-medium">Zostupne</span>
-                  </label>
-                </div>
-                <div className="mt-6 space-y-2">
-                  <button
-                    type="button"
-                    className="w-full rounded-xl bg-emerald-500 py-3.5 text-sm font-bold text-white shadow-lg shadow-emerald-900/30 transition hover:bg-emerald-400 active:scale-[0.99]"
-                    onClick={() => {
-                      setMobileAssetsSortBy(sortSheetBy);
-                      setMobileAssetsSortOrder(sortSheetOrder);
-                      setMobileAssetsSheet(null);
-                    }}
-                  >
-                    Použiť
-                  </button>
-                  <button
-                    type="button"
-                    className="w-full rounded-xl bg-zinc-800 py-3.5 text-sm font-semibold text-white transition hover:bg-zinc-700"
-                    onClick={() => setMobileAssetsSheet(null)}
-                  >
-                    Zrušiť
-                  </button>
-                </div>
-              </div>
-            </div>
-          ) : null}
-          {mobileAssetsSheet === "view" ? (
-            <div
-              className="fixed inset-0 z-[60] md:hidden"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="mobile-assets-view-title"
-            >
-              <button
-                type="button"
-                className="absolute inset-0 h-full w-full cursor-default border-0 bg-black/60 p-0"
-                aria-label="Zavrieť"
-                onClick={() => setMobileAssetsSheet(null)}
-              />
-              <div className="absolute inset-x-0 bottom-0 max-h-[88vh] overflow-y-auto rounded-t-2xl bg-zinc-900 px-4 pb-6 pt-2 text-white shadow-[0_-8px_40px_rgba(0,0,0,0.45)]">
-                <div className="mx-auto mb-3 mt-1 h-1 w-10 shrink-0 rounded-full bg-zinc-600" />
-                <h3
-                  id="mobile-assets-view-title"
-                  className="mb-4 text-lg font-semibold tracking-tight"
-                >
-                  Zobrazenie
-                </h3>
-                <div className="divide-y divide-zinc-800 border-b border-zinc-800">
-                  <label className="flex cursor-pointer items-start gap-3 py-3.5">
-                    <input
-                      type="radio"
-                      name="mobile-assets-view-mode"
-                      checked={viewSheetMode === "table"}
-                      onChange={() => setViewSheetMode("table")}
-                      className="mt-1 h-4 w-4 shrink-0 border-zinc-600 bg-zinc-800 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-zinc-900"
-                    />
-                    <span>
-                      <span className="block font-medium">Tabuľka</span>
-                      <span className="mt-0.5 block text-xs text-zinc-400">
-                        Klasické stĺpce ako na desktope (predvolené).
-                      </span>
-                    </span>
-                  </label>
-                  <label className="flex cursor-pointer items-start gap-3 py-3.5">
-                    <input
-                      type="radio"
-                      name="mobile-assets-view-mode"
-                      checked={viewSheetMode === "compact"}
-                      onChange={() => setViewSheetMode("compact")}
-                      className="mt-1 h-4 w-4 shrink-0 border-zinc-600 bg-zinc-800 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-zinc-900"
-                    />
-                    <span>
-                      <span className="block font-medium">Kompaktný zoznam</span>
-                      <span className="mt-0.5 block text-xs text-zinc-400">
-                        Tmavý jednoriadkový prehľad (štýl podobný XTB).
-                      </span>
-                    </span>
-                  </label>
-                </div>
-                <div className="mt-6 space-y-2">
-                  <button
-                    type="button"
-                    className="w-full rounded-xl bg-emerald-500 py-3.5 text-sm font-bold text-white shadow-lg shadow-emerald-900/30 transition hover:bg-emerald-400 active:scale-[0.99]"
-                    onClick={() => {
-                      setMobileAssetsViewMode(viewSheetMode);
-                      setMobileAssetsSheet(null);
-                    }}
-                  >
-                    Použiť
-                  </button>
-                  <button
-                    type="button"
-                    className="w-full rounded-xl bg-zinc-800 py-3.5 text-sm font-semibold text-white transition hover:bg-zinc-700"
-                    onClick={() => setMobileAssetsSheet(null)}
-                  >
-                    Zrušiť
-                  </button>
                 </div>
               </div>
             </div>
