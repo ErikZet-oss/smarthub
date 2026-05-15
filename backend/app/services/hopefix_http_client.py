@@ -335,8 +335,15 @@ def _hopefix_cart_product_code_from_cell(text: str) -> str:
     plain = _strip_tags(text)
     if not plain:
         return ""
-    first = plain.split()[0].strip()
-    return hopefix_norm_code(first)
+    m = re.match(r"([A-Za-z0-9]+)", plain)
+    if not m:
+        return ""
+    code = hopefix_norm_code(m.group(1))
+    if len(code) < 8:
+        return ""
+    if not re.search(r"[A-Z]", code) or not re.search(r"\d", code):
+        return ""
+    return code
 
 
 def hopefix_parse_cart_html(html: str) -> dict[str, Any]:
