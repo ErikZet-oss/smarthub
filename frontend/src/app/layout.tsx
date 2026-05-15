@@ -10,6 +10,10 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "Smarthub",
   description: "Interný porovnávač cien a skladov",
+  icons: {
+    icon: [{ url: "/icon.svg", type: "image/svg+xml", sizes: "any" }],
+    apple: [{ url: "/apple-icon.svg", sizes: "180x180", type: "image/svg+xml" }],
+  },
 };
 
 export const viewport: Viewport = {
