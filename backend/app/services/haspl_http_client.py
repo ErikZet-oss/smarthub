@@ -64,6 +64,10 @@ def supplier_shop_cart_url(shop_url: str) -> str:
         from app.services.halfmann_http_client import halfmann_cart_url
 
         return halfmann_cart_url(raw)
+    if "fabory.com" in raw.lower():
+        from app.services.fabory_http_client import fabory_cart_url
+
+        return fabory_cart_url(raw)
     return f"{haspl_base_url(raw)}/kosik"
 
 

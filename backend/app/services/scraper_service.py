@@ -41,6 +41,11 @@ from app.services.halfmann_http_client import (
     halfmann_norm_artid,
     halfmann_parse_cart_json,
 )
+from app.services.fabory_http_client import (
+    FaboryHttpClient,
+    fabory_cart_url,
+    fabory_parse_cart_html,
+)
 from app.services.haspl_http_client import (
     HasplHttpClient,
     haspl_base_url,
@@ -111,6 +116,7 @@ _remote_argip_cart_snapshot: RemoteCartCacheStore = {}
 _remote_schachermayer_cart_snapshot: RemoteCartCacheStore = {}
 _remote_valenta_cart_snapshot: RemoteCartCacheStore = {}
 _remote_halfmann_cart_snapshot: RemoteCartCacheStore = {}
+_remote_fabory_cart_snapshot: RemoteCartCacheStore = {}
 
 
 class ScraperProductNotFoundError(ValueError):
@@ -177,6 +183,7 @@ def _invalidate_remote_cart_cache(
         _remote_schachermayer_cart_snapshot.pop(key, None)
         _remote_valenta_cart_snapshot.pop(key, None)
         _remote_halfmann_cart_snapshot.pop(key, None)
+        _remote_fabory_cart_snapshot.pop(key, None)
         return
     suffix = f":{sid}"
     for store in (
@@ -188,6 +195,7 @@ def _invalidate_remote_cart_cache(
         _remote_schachermayer_cart_snapshot,
         _remote_valenta_cart_snapshot,
         _remote_halfmann_cart_snapshot,
+        _remote_fabory_cart_snapshot,
     ):
         for k in list(store.keys()):
             if k.endswith(suffix):
@@ -204,6 +212,7 @@ def _clear_all_remote_cart_caches() -> None:
     _remote_schachermayer_cart_snapshot.clear()
     _remote_valenta_cart_snapshot.clear()
     _remote_halfmann_cart_snapshot.clear()
+    _remote_fabory_cart_snapshot.clear()
 
 
 def _session_reuse_enabled() -> bool:
@@ -356,7 +365,9 @@ def _supplier_is_inoxmare(supplier: Supplier) -> bool:
 
 
 def _supplier_is_fabory(supplier: Supplier) -> bool:
-    return "fabory" in (supplier.name or "").lower()
+    if "fabory" in (supplier.name or "").lower():
+        return True
+    return "fabory.com" in (supplier.shop_url or "").lower()
 
 
 def supplier_allows_empty_cart_config(supplier: Supplier) -> bool:
@@ -369,6 +380,7 @@ def supplier_allows_empty_cart_config(supplier: Supplier) -> bool:
         or _supplier_is_argip(supplier)
         or _supplier_is_schachermayer(supplier)
         or _supplier_is_valenta(supplier)
+        or _supplier_is_fabory(supplier)
     ):
         return True
     u = (supplier.shop_url or "").lower()
@@ -386,6 +398,8 @@ def supplier_allows_empty_cart_config(supplier: Supplier) -> bool:
     if "schachermayer.com" in u:
         return True
     if "valentazt.cz" in u:
+        return True
+    if "fabory.com" in u:
         return True
     return False
 
@@ -7044,6 +7058,7 @@ class ScraperService:
                 or _supplier_is_schachermayer(supplier)
                 or _supplier_is_valenta(supplier)
                 or _supplier_is_halfmann(supplier)
+                or _supplier_is_fabory(supplier)
             )
         ):
             hit = _remote_cart_cache_get(_remote_cart_overview_cache, uid, sid)
@@ -7293,6 +7308,48 @@ class ScraperService:
                         },
                     )
                 return result
+            if _supplier_is_fabory(supplier):
+                async with FaboryHttpClient(supplier.shop_url or "") as client:
+                    await client.ensure_login(supplier.username, supplier.password)
+                    snap = await client.fetch_cart_snapshot()
+                    parsed = fabory_parse_cart_html(
+                        snap.get("simulation_html") or "",
+                        cart_html=snap.get("cart_html") or "",
+                    )
+                result = {
+                    **base,
+                    "remote_supported": True,
+                    "logged_in": True,
+                    "total_eur": parsed["total_eur"],
+                    "line_count": parsed["line_count"],
+                    "message": None,
+                    "web_cart_url": fabory_cart_url(supplier.shop_url or ""),
+                }
+                if sid is not None:
+                    _remote_cart_cache_set(
+                        _remote_cart_overview_cache, uid, sid, result
+                    )
+                    _remote_cart_cache_set(
+                        _remote_fabory_cart_snapshot, uid, sid, snap
+                    )
+                    _remote_cart_cache_set(
+                        _remote_cart_detail_cache,
+                        uid,
+                        sid,
+                        {
+                            "supplier_id": supplier.id,
+                            "name": supplier.name,
+                            "logo_url": supplier_logo_public_url(
+                                supplier.logo_path
+                            ),
+                            "remote_supported": True,
+                            "logged_in": True,
+                            "total_eur": parsed["total_eur"],
+                            "lines": parsed["lines"],
+                            "message": None,
+                        },
+                    )
+                return result
         except Exception as exc:
             return {
                 **base,
@@ -7301,7 +7358,7 @@ class ScraperService:
                 "message": str(exc),
             }
         base["message"] = (
-            "Košík cez API je zatiaľ pre Haspl, Mekrs, Argip, Schachermayer, Valenta a Halfmann. "
+            "Košík cez API je zatiaľ pre Haspl, Mekrs, Argip, Schachermayer, Valenta, Halfmann a Fabory. "
             "U ostatných sa položky pridávajú v prehliadači — obsah tu nevieme načítať."
         )
         return base
@@ -7538,6 +7595,35 @@ class ScraperService:
                         _remote_cart_detail_cache, uid, sid, result
                     )
                 return result
+            if _supplier_is_fabory(supplier):
+                snap = (
+                    _remote_cart_cache_get(_remote_fabory_cart_snapshot, uid, sid)
+                    if sid is not None
+                    else None
+                )
+                async with FaboryHttpClient(supplier.shop_url or "") as client:
+                    await client.ensure_login(supplier.username, supplier.password)
+                    if not isinstance(snap, dict):
+                        snap = await client.fetch_cart_snapshot()
+                    parsed = fabory_parse_cart_html(
+                        (snap or {}).get("simulation_html") or "",
+                        cart_html=(snap or {}).get("cart_html") or "",
+                    )
+                result = {
+                    **out,
+                    "remote_supported": True,
+                    "logged_in": True,
+                    "total_eur": parsed["total_eur"],
+                    "lines": parsed["lines"],
+                }
+                if sid is not None and isinstance(snap, dict):
+                    _remote_cart_cache_set(
+                        _remote_fabory_cart_snapshot, uid, sid, snap
+                    )
+                    _remote_cart_cache_set(
+                        _remote_cart_detail_cache, uid, sid, result
+                    )
+                return result
         except Exception as exc:
             return {
                 **out,
@@ -7546,7 +7632,7 @@ class ScraperService:
                 "message": str(exc),
             }
         out["message"] = (
-            "Detail košíka cez API je zatiaľ len pre Haspl, Mekrs, Argip, Schachermayer, Valenta a Halfmann."
+            "Detail košíka cez API je zatiaľ len pre Haspl, Mekrs, Argip, Schachermayer, Valenta, Halfmann a Fabory."
         )
         return out
 
