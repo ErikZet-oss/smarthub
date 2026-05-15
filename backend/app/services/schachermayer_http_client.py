@@ -4,9 +4,12 @@ Schachermayer webshop (webshop.schachermayer.com): Keycloak OIDC + REST API z HA
 - GET  /sso/oauth2/authorization/keycloak — prihlasovací formulár Keycloak
 - POST login-actions/authenticate — meno/heslo
 - GET  /cat/api/extranet/cas/storeUserInfo — kunnr, branch, vkorg, …
+- GET  /cat/api/_auth/session — extranetSessionId (horný panel / košík)
 - POST /cat/api/extranet/catalogCore/search?catalog=… — vyhľadanie artiklu
 - GET  /cat/api/private/extranet/webshopCore/price-and-availability — cena/sklad
-- POST /cat/api/private/extranet/webshopCore/add-article-to-basket — košík
+- GET  /cat/api/private/extranet/webshopCore/basket — obsah košíka (JSON)
+- POST /cat/api/private/extranet/webshopCore/add-article-to-basket — pridanie do košíka
+- GET  /app-bar/get-basket-summary-content — súhrn košíka (HTML fallback)
 """
 
 from __future__ import annotations
@@ -54,8 +57,8 @@ def schachermayer_base_url(shop_url: str) -> str:
 
 
 def schachermayer_web_cart_url(shop_url: str) -> str:
-    """Verejná vstupná stránka katalógu (košík je v hornom paneli)."""
-    return f"{schachermayer_base_url(shop_url)}/cat/sk-SK"
+    """Stránka nákupného košíka na eshope."""
+    return f"{schachermayer_base_url(shop_url)}/webshop/basket"
 
 
 def schachermayer_norm_code(text: str) -> str:
@@ -117,6 +120,7 @@ class SchachermayerHttpClient:
         self._login_ok = False
         self._user: dict[str, Any] = {}
         self._catalog_id: str = ""
+        self._extranet_session_id: str = ""
 
     async def __aenter__(self) -> SchachermayerHttpClient:
         return self
@@ -145,6 +149,7 @@ class SchachermayerHttpClient:
             if probe.get("kunnr") or probe.get("username"):
                 self._user = probe
                 self._login_ok = True
+                await self._refresh_auth_session()
                 return
         except httpx.HTTPStatusError:
             pass
@@ -163,6 +168,7 @@ class SchachermayerHttpClient:
                     if probe2.get("kunnr") or probe2.get("username"):
                         self._user = probe2
                         self._login_ok = True
+                        await self._refresh_auth_session()
                         return
                 except Exception:
                     pass
@@ -185,6 +191,77 @@ class SchachermayerHttpClient:
         if not (self._user.get("kunnr") or self._user.get("username")):
             raise RuntimeError("Schachermayer: prihlásenie zlyhalo (prázdny profil po OAuth).")
         self._login_ok = True
+        await self._refresh_auth_session()
+
+    async def _refresh_auth_session(self) -> dict[str, Any]:
+        r = await self._client.get(
+            f"{self._shop}/cat/api/_auth/session",
+            headers={
+                "Accept": "application/json",
+                "Referer": f"{self._shop}/cat/sk-SK",
+            },
+        )
+        r.raise_for_status()
+        data = r.json()
+        if not isinstance(data, dict):
+            return {}
+        sid = str(data.get("extranetSessionId") or "").strip()
+        if not sid and isinstance(data.get("user"), dict):
+            sid = str(data["user"].get("extranetSessionId") or "").strip()
+        if sid:
+            self._extranet_session_id = sid
+        return data
+
+    def _api_headers(self) -> dict[str, str]:
+        return {
+            "Origin": self._shop,
+            "Referer": f"{self._shop}/cat/sk-SK",
+            "Accept": "application/json",
+        }
+
+    async def fetch_basket(self) -> dict[str, Any]:
+        """Načíta JSON košíka (štandardný košík webshopu)."""
+        if not self._login_ok:
+            raise RuntimeError("Schachermayer: nie ste prihlásení.")
+        paths = (
+            f"{self._shop}/cat/api/private/extranet/webshopCore/basket",
+            f"{self._shop}/cat/api/private/extranet/webshopCore/basket-items",
+        )
+        last_err: Optional[Exception] = None
+        for url in paths:
+            try:
+                r = await self._client.get(url, headers=self._api_headers())
+                r.raise_for_status()
+                data = r.json()
+                if isinstance(data, dict):
+                    return data
+            except Exception as exc:
+                last_err = exc
+        if last_err:
+            raise last_err
+        raise RuntimeError("Schachermayer: košík sa nepodarilo načítať.")
+
+    async def fetch_basket_summary_html(self) -> str:
+        """HTML súhrn z app-bar (fallback ak JSON neobsahuje riadky)."""
+        if not self._extranet_session_id:
+            await self._refresh_auth_session()
+        sid = self._extranet_session_id
+        if not sid:
+            return ""
+        locale = str(self._user.get("locale") or "sk_SK").strip() or "sk_SK"
+        url = (
+            f"{self._shop}/app-bar/get-basket-summary-content"
+            f"?locale={locale}&publicKey=cat&extranetSessionId={sid}"
+        )
+        r = await self._client.get(
+            url,
+            headers={
+                "Accept": "text/html,*/*",
+                "Referer": f"{self._shop}/cat/sk-SK",
+            },
+        )
+        r.raise_for_status()
+        return r.text or ""
 
     def _resolve_catalog(self, catalog_override: str | None) -> str:
         cid = _catalog_id_from_user(self._user, catalog_override)
@@ -352,9 +429,7 @@ class SchachermayerHttpClient:
             f"{self._shop}/cat/api/private/extranet/webshopCore/add-article-to-basket",
             json=[{"articleNr": nr, "amount": q}],
             headers={
-                "Origin": self._shop,
-                "Referer": f"{self._shop}/cat/sk-SK",
-                "Accept": "application/json",
+                **self._api_headers(),
                 "Content-Type": "application/json",
             },
         )
@@ -429,3 +504,214 @@ class SchachermayerHttpClient:
             "price_unit": "per_100_ks",
             "supplier_product_url": search_href,
         }
+
+
+def _schach_item_quantity(item: dict[str, Any]) -> int:
+    for key in ("amount", "quantity", "orderAmount", "orderUnits", "qty"):
+        q = _parse_int(item.get(key))
+        if q is not None and q > 0:
+            return q
+    return 0
+
+
+def _schach_item_article_nr(item: dict[str, Any]) -> str:
+    for key in ("articleNr", "articleNumber", "articleId", "id", "idTrim"):
+        val = str(item.get(key) or "").strip()
+        if val:
+            return val
+    article = item.get("article")
+    if isinstance(article, dict):
+        for key in ("id", "idTrim", "articleNr", "articleNumber"):
+            val = str(article.get(key) or "").strip()
+            if val:
+                return val
+    return ""
+
+
+def _schach_item_label(item: dict[str, Any], article_nr: str) -> str:
+    for key in ("title", "name", "description", "articleTitle"):
+        val = str(item.get(key) or "").strip()
+        if val:
+            return val
+    article = item.get("article")
+    if isinstance(article, dict):
+        val = str(article.get("title") or article.get("name") or "").strip()
+        if val:
+            return val
+    return article_nr or "—"
+
+
+def _schach_collect_item_lists(node: Any, out: list[dict[str, Any]]) -> None:
+    if isinstance(node, list):
+        for el in node:
+            if isinstance(el, dict) and _schach_item_article_nr(el):
+                out.append(el)
+            elif isinstance(el, dict):
+                _schach_collect_item_lists(el, out)
+        return
+    if not isinstance(node, dict):
+        return
+    for key in (
+        "articles",
+        "items",
+        "lineItems",
+        "basketItems",
+        "basketLines",
+        "positions",
+        "orderPositions",
+    ):
+        raw = node.get(key)
+        if isinstance(raw, list):
+            for el in raw:
+                if isinstance(el, dict) and _schach_item_article_nr(el):
+                    out.append(el)
+    for key in ("baskets", "standardBaskets", "shoppingBaskets"):
+        raw = node.get(key)
+        if isinstance(raw, list):
+            for el in raw:
+                if isinstance(el, dict):
+                    _schach_collect_item_lists(el, out)
+        elif isinstance(raw, dict):
+            _schach_collect_item_lists(raw, out)
+    basket = node.get("basket")
+    if isinstance(basket, dict):
+        _schach_collect_item_lists(basket, out)
+
+
+def _schach_total_from_node(node: dict[str, Any]) -> Optional[float]:
+    for key in (
+        "total",
+        "totalPrice",
+        "totalNet",
+        "netTotal",
+        "grandTotal",
+        "sum",
+        "basketTotal",
+        "totalAmount",
+    ):
+        val = _parse_decimal(node.get(key))
+        if val is not None:
+            return round(float(val), 4)
+    prices = node.get("prices")
+    if isinstance(prices, dict):
+        for key in ("grand_total", "subtotal_excluding_tax", "total"):
+            sub = prices.get(key)
+            if isinstance(sub, dict):
+                val = _parse_decimal(sub.get("value"))
+                if val is not None:
+                    return round(float(val), 4)
+            else:
+                val = _parse_decimal(sub)
+                if val is not None:
+                    return round(float(val), 4)
+    return None
+
+
+def schachermayer_parse_basket_summary_html(html: str) -> dict[str, Any]:
+    """Z HTML app-bar súhrnu — počet položiek a súčet EUR."""
+    text = html or ""
+    total_eur: Optional[float] = None
+    for m in re.finditer(
+        r"([\d]{1,6}[,\.][\d]{1,4})\s*(?:&nbsp;|\s)*EUR",
+        text,
+        re.I,
+    ):
+        total_eur = _parse_decimal(m.group(1))
+    line_count = 0
+    for m in re.finditer(
+        r'data-cy="appbar-shoppingcart-count-span"[^>]*>\s*(\d+)\s*<',
+        text,
+        re.I,
+    ):
+        line_count = max(line_count, int(m.group(1)))
+    if line_count <= 0:
+        for m in re.finditer(r'class="appbar-badge[^"]*"[^>]*>\s*(\d+)\s*<', text):
+            line_count = max(line_count, int(m.group(1)))
+    return {
+        "total_eur": total_eur,
+        "line_count": line_count,
+    }
+
+
+def schachermayer_parse_cart_json(
+    basket: dict[str, Any],
+    *,
+    summary_html: str = "",
+) -> dict[str, Any]:
+    """
+    Z JSON ``webshopCore/basket`` (a prípadne HTML súhrnu) — riadky a súčet v EUR.
+    """
+    raw_items: list[dict[str, Any]] = []
+    _schach_collect_item_lists(basket, raw_items)
+    seen: set[str] = set()
+    lines: list[dict[str, Any]] = []
+    for it in raw_items:
+        article_nr = _schach_item_article_nr(it)
+        if not article_nr:
+            continue
+        dedupe_key = article_nr
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        qn = _schach_item_quantity(it)
+        if qn <= 0:
+            qn = 1
+        label = _schach_item_label(it, article_nr)
+        unit_eur = None
+        line_total = None
+        for uk in ("unitPrice", "netPrice", "price", "salesPrice"):
+            unit_eur = _parse_decimal(it.get(uk))
+            if unit_eur is not None:
+                break
+        for tk in (
+            "lineTotal",
+            "totalPrice",
+            "rowTotal",
+            "netLineTotal",
+            "positionTotal",
+        ):
+            line_total = _parse_decimal(it.get(tk))
+            if line_total is not None:
+                break
+        if unit_eur is None and line_total is not None and qn > 0:
+            unit_eur = round(line_total / qn, 4)
+        if line_total is None and unit_eur is not None:
+            line_total = round(unit_eur * qn, 4)
+        lines.append(
+            {
+                "label": label,
+                "quantity": qn,
+                "unit_price_eur": unit_eur,
+                "line_total_eur": line_total,
+                "variant_code": article_nr,
+            }
+        )
+
+    total_eur = _schach_total_from_node(basket)
+    if total_eur is None:
+        for sub in basket.values():
+            if isinstance(sub, dict):
+                total_eur = _schach_total_from_node(sub)
+                if total_eur is not None:
+                    break
+    if total_eur is None and lines:
+        total_eur = round(
+            sum((ln.get("line_total_eur") or 0.0) for ln in lines),
+            4,
+        )
+    summary = schachermayer_parse_basket_summary_html(summary_html)
+    line_count = len(lines)
+    if summary.get("line_count"):
+        line_count = max(line_count, int(summary["line_count"]))
+    if total_eur is None and summary.get("total_eur") is not None:
+        total_eur = summary["total_eur"]
+    if not lines and line_count <= 0 and not summary.get("line_count"):
+        line_count = 0
+    elif not lines and summary.get("line_count"):
+        line_count = int(summary["line_count"])
+
+    return {
+        "lines": lines,
+        "total_eur": total_eur,
+        "line_count": line_count,
+    }

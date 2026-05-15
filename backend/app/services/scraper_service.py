@@ -56,7 +56,11 @@ from app.services.argip_http_client import (
     argip_cart_url,
     argip_parse_cart_json,
 )
-from app.services.schachermayer_http_client import SchachermayerHttpClient
+from app.services.schachermayer_http_client import (
+    SchachermayerHttpClient,
+    schachermayer_parse_cart_json,
+    schachermayer_web_cart_url,
+)
 from app.services.valenta_http_client import ValentaHttpClient, valenta_cart_url
 from app.services.inoxmare_http_client import (
     InoxmareHttpClient,
@@ -98,6 +102,7 @@ _remote_cart_detail_cache: RemoteCartCacheStore = {}
 _remote_haspl_order_snapshot: RemoteCartCacheStore = {}
 _remote_mekrs_cart_snapshot: RemoteCartCacheStore = {}
 _remote_argip_cart_snapshot: RemoteCartCacheStore = {}
+_remote_schachermayer_cart_snapshot: RemoteCartCacheStore = {}
 
 
 class ScraperProductNotFoundError(ValueError):
@@ -161,6 +166,7 @@ def _invalidate_remote_cart_cache(
         _remote_haspl_order_snapshot.pop(key, None)
         _remote_mekrs_cart_snapshot.pop(key, None)
         _remote_argip_cart_snapshot.pop(key, None)
+        _remote_schachermayer_cart_snapshot.pop(key, None)
         return
     suffix = f":{sid}"
     for store in (
@@ -169,6 +175,7 @@ def _invalidate_remote_cart_cache(
         _remote_haspl_order_snapshot,
         _remote_mekrs_cart_snapshot,
         _remote_argip_cart_snapshot,
+        _remote_schachermayer_cart_snapshot,
     ):
         for k in list(store.keys()):
             if k.endswith(suffix):
@@ -182,6 +189,7 @@ def _clear_all_remote_cart_caches() -> None:
     _remote_haspl_order_snapshot.clear()
     _remote_mekrs_cart_snapshot.clear()
     _remote_argip_cart_snapshot.clear()
+    _remote_schachermayer_cart_snapshot.clear()
 
 
 def _session_reuse_enabled() -> bool:
@@ -4324,8 +4332,8 @@ async def _login_and_search(
                 run_id,
                 f"goto {wu}: {exc!s}, fallback domcontentloaded",
                 "warn",
-    )
-    await page.goto(start_url, wait_until="domcontentloaded")
+            )
+            await page.goto(start_url, wait_until="domcontentloaded")
             _log(run_label, supplier, run_id, "page loaded (domcontentloaded)")
     await _save_step_screenshot(
         page,
@@ -4408,14 +4416,14 @@ async def _login_and_search(
 
     if not reuse_skip_login:
         await _playwright_human_action_pause(config)
-    if config.open_login_form_selector:
+        if config.open_login_form_selector:
             _log(
-            run_label,
+                run_label,
                 supplier,
                 run_id,
-            f"open login form click: {config.open_login_form_selector!r}",
-        )
-        await page.click(config.open_login_form_selector)
+                f"open login form click: {config.open_login_form_selector!r}",
+            )
+            await page.click(config.open_login_form_selector)
             await _playwright_human_action_pause(config)
             # Odkaz na /sk/login spôsobí navigáciu — počkáme na polia formulára, nie len fixný sleep.
             try:
@@ -4432,7 +4440,7 @@ async def _login_and_search(
                     "wait_for_selector(username) after open_login timed out, using open_login_form_wait_ms",
                     "warn",
                 )
-        await asyncio.sleep(config.open_login_form_wait_ms / 1000.0)
+                await asyncio.sleep(config.open_login_form_wait_ms / 1000.0)
             else:
                 await asyncio.sleep(min(0.35, config.open_login_form_wait_ms / 1000.0))
 
@@ -4454,7 +4462,7 @@ async def _login_and_search(
 
         form_sel = (config.login_form_selector or "").strip()
         _log(
-        run_label,
+            run_label,
             supplier,
             run_id,
             f"fill username selector={config.username_selector!r} (form={form_sel!r})",
@@ -4626,7 +4634,7 @@ async def _login_and_search(
             step="02_after_submit",
         )
 
-    await asyncio.sleep(config.post_login_wait_ms / 1000.0)
+        await asyncio.sleep(config.post_login_wait_ms / 1000.0)
         _log(run_label, supplier, run_id, "post-login wait done")
         if _supplier_is_inoxmare(supplier):
             await _inoxmare_raise_if_login_temporarily_locked(page)
@@ -4636,7 +4644,7 @@ async def _login_and_search(
     if config.after_login_url:
         _log(run_label, supplier, run_id, f"goto after_login_url={config.after_login_url!r}")
         try:
-        await page.goto(config.after_login_url, wait_until="domcontentloaded")
+            await page.goto(config.after_login_url, wait_until="domcontentloaded")
         except Exception as exc:
             if _supplier_is_hopefix(supplier) and _is_navigation_interrupted_by_redirect(exc):
                 _log(
@@ -4814,7 +4822,7 @@ async def _login_and_search(
 
         if _supplier_is_hopefix(supplier):
             await loc_search.fill(code)
-    if config.search_pick_first_suggestion:
+            if config.search_pick_first_suggestion:
                 await _hopefix_pick_search_autocomplete(
                     page,
                     code,
@@ -4874,19 +4882,19 @@ async def _login_and_search(
                     run_id,
                     "search_pick_first_suggestion: ArrowDown + Enter",
                 )
-        await asyncio.sleep(config.search_suggestion_wait_ms / 1000.0)
-        await page.keyboard.press("ArrowDown")
-        await asyncio.sleep(0.15)
-        await page.keyboard.press("Enter")
-        await asyncio.sleep(0.25)
+                await asyncio.sleep(config.search_suggestion_wait_ms / 1000.0)
+                await page.keyboard.press("ArrowDown")
+                await asyncio.sleep(0.15)
+                await page.keyboard.press("Enter")
+                await asyncio.sleep(0.25)
 
             if (config.search_submit_selector or "").strip():
                 _log(
-            run_label,
+                    run_label,
                     supplier,
                     run_id,
-            f"search submit click: {config.search_submit_selector!r}",
-        )
+                    f"search submit click: {config.search_submit_selector!r}",
+                )
                 await _submit_search_click(config.search_submit_selector)
             elif (config.search_submit_key or "").strip():
                 _log(
@@ -4895,7 +4903,7 @@ async def _login_and_search(
                     run_id,
                     f"search submit key: {config.search_submit_key!r}",
                 )
-        await page.keyboard.press(config.search_submit_key)
+                await page.keyboard.press(config.search_submit_key)
 
     # SPA: namiesto dlhého pevného sleepu čakáme na prvý produkt alebo aspoň domcontentloaded.
     fp_sel = (config.first_product_link_selector or "").strip()
@@ -4926,7 +4934,7 @@ async def _login_and_search(
                     else (2_350 if _supplier_is_hopefix(supplier) else 8_000)
                 ),
             )
-    except Exception:
+        except Exception:
             pass
         tail = min(
             config.post_search_wait_ms,
@@ -6057,8 +6065,8 @@ class ScraperService:
                 )
 
         async def _playwright_flow() -> dict[str, Any]:
-        try:
-            async with async_playwright() as p:
+            try:
+                async with async_playwright() as p:
                     browser = await p.chromium.launch(
                         **_chromium_launch_kwargs(config, supplier)
                     )
@@ -6073,16 +6081,16 @@ class ScraperService:
                             supplier=supplier,
                             run_id=run_id,
                         )
-                    page = await context.new_page()
-                    page.set_default_timeout(config.navigation_timeout_ms)
+                        page = await context.new_page()
+                        page.set_default_timeout(config.navigation_timeout_ms)
                         if _should_block_heavy_assets(config):
                             await _install_heavy_asset_blocker(page)
                         login_diagnostic: dict[str, Any] = {}
                         logged_in = await _login_and_search(
-                        page,
-                        supplier,
-                        config,
-                        product_code,
+                            page,
+                            supplier,
+                            config,
+                            product_code,
                             run_label=run_label,
                             run_id=run_id,
                             login_diagnostic=login_diagnostic,
@@ -6235,16 +6243,16 @@ class ScraperService:
                         if (
                             logged_in
                             and
-                        data.get("price_eur") is None
-                        and data.get("stock") is None
-                        and (config.price_selector or config.stock_selector)
-                        and not config.first_product_link_selector
-                    ):
-                        data["hint"] = (
-                            "Cena/sklad sa nenašli – po vyhľadávaní si často treba otvoriť detail produktu. "
-                            "Doplň do JSON pole „first_product_link_selector“ (napr. prvý odkaz v zozname výsledkov). "
-                            "Prípadne skús „search_pick_first_suggestion“: true pri comboboxe."
-                        )
+                            data.get("price_eur") is None
+                            and data.get("stock") is None
+                            and (config.price_selector or config.stock_selector)
+                            and not config.first_product_link_selector
+                        ):
+                            data["hint"] = (
+                                "Cena/sklad sa nenašli – po vyhľadávaní si často treba otvoriť detail produktu. "
+                                "Doplň do JSON pole „first_product_link_selector“ (napr. prvý odkaz v zozname výsledkov). "
+                                "Prípadne skús „search_pick_first_suggestion“: true pri comboboxe."
+                            )
                         elif (
                             logged_in
                             and
@@ -6284,12 +6292,12 @@ class ScraperService:
                             logged_in=bool(logged_in),
                             automation_user_id=automation_user_id,
                         )
-                    return data
-                finally:
-                    await browser.close()
-        except Exception as exc:
+                        return data
+                    finally:
+                        await browser.close()
+            except Exception as exc:
                 dev_run_log_exception(run_label, exc)
-            raise
+                raise
 
         if sys.platform == "win32":
 
@@ -6774,8 +6782,8 @@ class ScraperService:
             return
 
         async def _playwright_flow() -> None:
-        try:
-            async with async_playwright() as p:
+            try:
+                async with async_playwright() as p:
                     browser = await p.chromium.launch(
                         **_chromium_launch_kwargs(config, supplier)
                     )
@@ -6790,15 +6798,15 @@ class ScraperService:
                             supplier=supplier,
                             run_id=run_id,
                         )
-                    page = await context.new_page()
-                    page.set_default_timeout(config.navigation_timeout_ms)
+                        page = await context.new_page()
+                        page.set_default_timeout(config.navigation_timeout_ms)
                         if _should_block_heavy_assets(config):
                             await _install_heavy_asset_blocker(page)
                         logged_in = await _login_and_search(
-                        page,
-                        supplier,
-                        config,
-                        product_code,
+                            page,
+                            supplier,
+                            config,
+                            product_code,
                             run_label=run_label,
                             run_id=run_id,
                             storage_user_id=automation_user_id,
@@ -6869,7 +6877,7 @@ class ScraperService:
                             purpose="add_to_cart otvorenie modalu",
                             product_code=product_code,
                         )
-                    await asyncio.sleep(config.post_modal_open_wait_ms / 1000.0)
+                        await asyncio.sleep(config.post_modal_open_wait_ms / 1000.0)
 
                         if packaging_variant_index is not None:
                             vis = (config.packaging_modal_visible_selector or "").strip()
@@ -6938,7 +6946,7 @@ class ScraperService:
                             run_id=run_id,
                         )
 
-                    if config.add_to_cart_confirm_selector:
+                        if config.add_to_cart_confirm_selector:
                             await _click_confirm_add_to_cart(
                                 page,
                                 config,
@@ -6947,7 +6955,7 @@ class ScraperService:
                                 run_id=run_id,
                             )
 
-                    await asyncio.sleep(config.post_add_wait_ms / 1000.0)
+                        await asyncio.sleep(config.post_add_wait_ms / 1000.0)
                         await _save_step_screenshot(
                             page,
                             run_label=run_label,
@@ -6959,8 +6967,8 @@ class ScraperService:
                             run_label,
                             supplier,
                             run_id,
-                        f"add_to_cart finished OK url={page.url!r}",
-                    )
+                            f"add_to_cart finished OK url={page.url!r}",
+                        )
                         await _persist_scraper_storage_state(
                             context,
                             supplier,
@@ -6969,11 +6977,11 @@ class ScraperService:
                             logged_in=True,
                             automation_user_id=automation_user_id,
                         )
-                finally:
-                    await browser.close()
-        except Exception as exc:
+                    finally:
+                        await browser.close()
+            except Exception as exc:
                 dev_run_log_exception(run_label, exc)
-            raise
+                raise
 
         if sys.platform == "win32":
 
@@ -7019,6 +7027,7 @@ class ScraperService:
                 _supplier_is_haspl(supplier)
                 or _supplier_is_mekrs(supplier)
                 or _supplier_is_argip(supplier)
+                or _supplier_is_schachermayer(supplier)
             )
         ):
             hit = _remote_cart_cache_get(_remote_cart_overview_cache, uid, sid)
@@ -7137,22 +7146,58 @@ class ScraperService:
                         },
                     )
                 return result
-            if _supplier_is_halfmann(supplier):
-                base_hf = halfmann_base_url(supplier.shop_url or "")
-                async with HalfmannHttpClient(base_hf) as client:
-                    await client.ensure_login(supplier.username, supplier.password)
-                return {
-                    **base,
-                    "remote_supported": True,
-                    "logged_in": True,
-                    "total_eur": None,
-                    "line_count": 0,
-                    "message": None,
-                }
             if _supplier_is_schachermayer(supplier):
                 async with SchachermayerHttpClient(
                     supplier.shop_url or ""
                 ) as client:
+                    await client.ensure_login(supplier.username, supplier.password)
+                    basket = await client.fetch_basket()
+                    summary_html = await client.fetch_basket_summary_html()
+                    parsed = schachermayer_parse_cart_json(
+                        basket, summary_html=summary_html
+                    )
+                result = {
+                    **base,
+                    "remote_supported": True,
+                    "logged_in": True,
+                    "total_eur": parsed["total_eur"],
+                    "line_count": parsed["line_count"],
+                    "message": None,
+                    "web_cart_url": schachermayer_web_cart_url(
+                        supplier.shop_url or ""
+                    ),
+                }
+                if sid is not None:
+                    _remote_cart_cache_set(
+                        _remote_cart_overview_cache, uid, sid, result
+                    )
+                    _remote_cart_cache_set(
+                        _remote_schachermayer_cart_snapshot,
+                        uid,
+                        sid,
+                        {"basket": basket, "summary_html": summary_html},
+                    )
+                    _remote_cart_cache_set(
+                        _remote_cart_detail_cache,
+                        uid,
+                        sid,
+                        {
+                            "supplier_id": supplier.id,
+                            "name": supplier.name,
+                            "logo_url": supplier_logo_public_url(
+                                supplier.logo_path
+                            ),
+                            "remote_supported": True,
+                            "logged_in": True,
+                            "total_eur": parsed["total_eur"],
+                            "lines": parsed["lines"],
+                            "message": None,
+                        },
+                    )
+                return result
+            if _supplier_is_halfmann(supplier):
+                base_hf = halfmann_base_url(supplier.shop_url or "")
+                async with HalfmannHttpClient(base_hf) as client:
                     await client.ensure_login(supplier.username, supplier.password)
                 return {
                     **base,
@@ -7181,7 +7226,7 @@ class ScraperService:
                 "message": str(exc),
             }
         base["message"] = (
-            "Košík cez API je zatiaľ pre Haspl, Mekrs a Argip. "
+            "Košík cez API je zatiaľ pre Haspl, Mekrs, Argip a Schachermayer. "
             "U ostatných sa položky pridávajú v prehliadači — obsah tu nevieme načítať."
         )
         return base
@@ -7192,7 +7237,7 @@ class ScraperService:
         *,
         automation_user_id: int = 0,
     ) -> dict[str, Any]:
-        """Detail košíka: zoznam položiek (Haspl / Mekrs / Argip HTTP)."""
+        """Detail košíka: zoznam položiek (Haspl / Mekrs HTTP)."""
         uid = int(automation_user_id)
         logo = supplier_logo_public_url(supplier.logo_path)
         out: dict[str, Any] = {
@@ -7219,6 +7264,7 @@ class ScraperService:
                 _supplier_is_haspl(supplier)
                 or _supplier_is_mekrs(supplier)
                 or _supplier_is_argip(supplier)
+                or _supplier_is_schachermayer(supplier)
             )
         ):
             hit = _remote_cart_cache_get(_remote_cart_detail_cache, uid, sid)
@@ -7315,24 +7361,50 @@ class ScraperService:
                         _remote_cart_detail_cache, uid, sid, result
                     )
                 return result
-            if _supplier_is_halfmann(supplier):
-                base_hf = halfmann_base_url(supplier.shop_url or "")
-                async with HalfmannHttpClient(base_hf) as client:
-                    await client.ensure_login(supplier.username, supplier.password)
-                return {
-                    **out,
-                    "remote_supported": True,
-                    "logged_in": True,
-                    "total_eur": None,
-                    "lines": [],
-                    "message": (
-                        "Prihlásenie funguje; zoznam položiek košíka cez API zatiaľ nečítame."
-                    ),
-                }
             if _supplier_is_schachermayer(supplier):
+                snap = (
+                    _remote_cart_cache_get(
+                        _remote_schachermayer_cart_snapshot, uid, sid
+                    )
+                    if sid is not None
+                    else None
+                )
                 async with SchachermayerHttpClient(
                     supplier.shop_url or ""
                 ) as client:
+                    await client.ensure_login(supplier.username, supplier.password)
+                    if isinstance(snap, dict) and isinstance(
+                        snap.get("basket"), dict
+                    ):
+                        basket = snap["basket"]
+                        summary_html = str(snap.get("summary_html") or "")
+                    else:
+                        basket = await client.fetch_basket()
+                        summary_html = await client.fetch_basket_summary_html()
+                    parsed = schachermayer_parse_cart_json(
+                        basket, summary_html=summary_html
+                    )
+                result = {
+                    **out,
+                    "remote_supported": True,
+                    "logged_in": True,
+                    "total_eur": parsed["total_eur"],
+                    "lines": parsed["lines"],
+                }
+                if sid is not None:
+                    _remote_cart_cache_set(
+                        _remote_schachermayer_cart_snapshot,
+                        uid,
+                        sid,
+                        {"basket": basket, "summary_html": summary_html},
+                    )
+                    _remote_cart_cache_set(
+                        _remote_cart_detail_cache, uid, sid, result
+                    )
+                return result
+            if _supplier_is_halfmann(supplier):
+                base_hf = halfmann_base_url(supplier.shop_url or "")
+                async with HalfmannHttpClient(base_hf) as client:
                     await client.ensure_login(supplier.username, supplier.password)
                 return {
                     **out,
@@ -7365,7 +7437,7 @@ class ScraperService:
                 "message": str(exc),
             }
         out["message"] = (
-            "Detail košíka cez API je zatiaľ len pre Haspl, Mekrs a Argip."
+            "Detail košíka cez API je zatiaľ len pre Haspl, Mekrs, Argip a Schachermayer."
         )
         return out
 
@@ -7443,6 +7515,6 @@ def load_scraper_config(supplier: Supplier) -> ScraperConfig:
             login_button_selector="body",
             login_expect_spring_security_post=False,
         )
-        raise ValueError(
+    raise ValueError(
         "Chýba cart_config_json u dodávateľa (aspoň selektory prihlásenia)."
-        )
+    )
