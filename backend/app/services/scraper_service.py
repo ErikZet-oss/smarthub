@@ -34,7 +34,9 @@ from app.services.hopefix_http_client import (
 from app.services.bmkco_http_client import (
     BmkcoHttpClient,
     bmkco_base_url,
+    bmkco_cart_url,
     bmkco_norm_code,
+    bmkco_parse_cart_datatable,
 )
 from app.services.halfmann_http_client import (
     HalfmannHttpClient,
@@ -120,6 +122,7 @@ _remote_valenta_cart_snapshot: RemoteCartCacheStore = {}
 _remote_halfmann_cart_snapshot: RemoteCartCacheStore = {}
 _remote_fabory_cart_snapshot: RemoteCartCacheStore = {}
 _remote_hopefix_cart_snapshot: RemoteCartCacheStore = {}
+_remote_bmkco_cart_snapshot: RemoteCartCacheStore = {}
 
 
 class ScraperProductNotFoundError(ValueError):
@@ -188,6 +191,7 @@ def _invalidate_remote_cart_cache(
         _remote_halfmann_cart_snapshot.pop(key, None)
         _remote_fabory_cart_snapshot.pop(key, None)
         _remote_hopefix_cart_snapshot.pop(key, None)
+        _remote_bmkco_cart_snapshot.pop(key, None)
         return
     suffix = f":{sid}"
     for store in (
@@ -201,6 +205,7 @@ def _invalidate_remote_cart_cache(
         _remote_halfmann_cart_snapshot,
         _remote_fabory_cart_snapshot,
         _remote_hopefix_cart_snapshot,
+        _remote_bmkco_cart_snapshot,
     ):
         for k in list(store.keys()):
             if k.endswith(suffix):
@@ -219,6 +224,7 @@ def _clear_all_remote_cart_caches() -> None:
     _remote_halfmann_cart_snapshot.clear()
     _remote_fabory_cart_snapshot.clear()
     _remote_hopefix_cart_snapshot.clear()
+    _remote_bmkco_cart_snapshot.clear()
 
 
 def _session_reuse_enabled() -> bool:
@@ -7071,6 +7077,7 @@ class ScraperService:
                 or _supplier_is_halfmann(supplier)
                 or _supplier_is_fabory(supplier)
                 or _supplier_is_hopefix(supplier)
+                or _supplier_is_bmkco(supplier)
             )
         ):
             hit = _remote_cart_cache_get(_remote_cart_overview_cache, uid, sid)
@@ -7408,6 +7415,53 @@ class ScraperService:
                         },
                     )
                 return result
+            if _supplier_is_bmkco(supplier):
+                bm_base = bmkco_base_url(supplier.shop_url or "")
+                async with BmkcoHttpClient(bm_base) as client:
+                    await client.ensure_login(supplier.username, supplier.password)
+                    snap = await client.fetch_cart_snapshot()
+                    parsed = bmkco_parse_cart_datatable(
+                        snap.get("datatable") or {},
+                        total_eur=snap.get("total_eur"),
+                        line_count=snap.get("line_count"),
+                    )
+                bmkco_msg = (
+                    "Košík je prázdny." if parsed.get("empty_cart") else None
+                )
+                result = {
+                    **base,
+                    "remote_supported": True,
+                    "logged_in": True,
+                    "total_eur": parsed["total_eur"],
+                    "line_count": parsed["line_count"],
+                    "message": bmkco_msg,
+                    "web_cart_url": bmkco_cart_url(supplier.shop_url or ""),
+                }
+                if sid is not None:
+                    _remote_cart_cache_set(
+                        _remote_cart_overview_cache, uid, sid, result
+                    )
+                    _remote_cart_cache_set(
+                        _remote_bmkco_cart_snapshot, uid, sid, snap
+                    )
+                    _remote_cart_cache_set(
+                        _remote_cart_detail_cache,
+                        uid,
+                        sid,
+                        {
+                            "supplier_id": supplier.id,
+                            "name": supplier.name,
+                            "logo_url": supplier_logo_public_url(
+                                supplier.logo_path
+                            ),
+                            "remote_supported": True,
+                            "logged_in": True,
+                            "total_eur": parsed["total_eur"],
+                            "lines": parsed["lines"],
+                            "message": bmkco_msg,
+                        },
+                    )
+                return result
         except Exception as exc:
             return {
                 **base,
@@ -7417,7 +7471,7 @@ class ScraperService:
             }
         base["message"] = (
             "Košík cez API je zatiaľ pre Haspl, Mekrs, Argip, Schachermayer, Valenta, "
-            "Halfmann, Fabory a Hopefix. "
+            "Halfmann, Fabory, Hopefix a BMKCO. "
             "U ostatných sa položky pridávajú v prehliadači — obsah tu nevieme načítať."
         )
         return base
@@ -7722,6 +7776,41 @@ class ScraperService:
                         _remote_cart_detail_cache, uid, sid, result
                     )
                 return result
+            if _supplier_is_bmkco(supplier):
+                snap = (
+                    _remote_cart_cache_get(_remote_bmkco_cart_snapshot, uid, sid)
+                    if sid is not None
+                    else None
+                )
+                bm_base = bmkco_base_url(supplier.shop_url or "")
+                async with BmkcoHttpClient(bm_base) as client:
+                    await client.ensure_login(supplier.username, supplier.password)
+                    if not isinstance(snap, dict):
+                        snap = await client.fetch_cart_snapshot()
+                    parsed = bmkco_parse_cart_datatable(
+                        (snap or {}).get("datatable") or {},
+                        total_eur=(snap or {}).get("total_eur"),
+                        line_count=(snap or {}).get("line_count"),
+                    )
+                bmkco_detail_msg = (
+                    "Košík je prázdny." if parsed.get("empty_cart") else None
+                )
+                result = {
+                    **out,
+                    "remote_supported": True,
+                    "logged_in": True,
+                    "total_eur": parsed["total_eur"],
+                    "lines": parsed["lines"],
+                    "message": bmkco_detail_msg,
+                }
+                if sid is not None and isinstance(snap, dict):
+                    _remote_cart_cache_set(
+                        _remote_bmkco_cart_snapshot, uid, sid, snap
+                    )
+                    _remote_cart_cache_set(
+                        _remote_cart_detail_cache, uid, sid, result
+                    )
+                return result
         except Exception as exc:
             return {
                 **out,
@@ -7731,7 +7820,7 @@ class ScraperService:
             }
         out["message"] = (
             "Detail košíka cez API je zatiaľ len pre Haspl, Mekrs, Argip, Schachermayer, Valenta, "
-            "Halfmann, Fabory a Hopefix."
+            "Halfmann, Fabory, Hopefix a BMKCO."
         )
         return out
 
