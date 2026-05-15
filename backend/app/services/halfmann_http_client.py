@@ -29,6 +29,11 @@ def halfmann_norm_artid(text: str) -> str:
     return re.sub(r"\D+", "", (text or "").strip())
 
 
+def halfmann_cart_url(shop_url: str) -> str:
+    """Odkaz na webshop (košík je v SPA — po prihlásení rovnaká doména)."""
+    return f"{halfmann_base_url(shop_url)}/"
+
+
 def _parse_decimal(text: Any) -> Optional[float]:
     if text is None:
         return None
@@ -113,6 +118,8 @@ class HalfmannHttpClient:
     - POST /session/get_data
     - POST /lbpserver/findpreis (artid, menge)
     - POST /lbpserver/verfbest (artid, menge)
+    - POST /warenkorb/get_data
+    - POST /warenkorb/get_korbwert_data (korbid)
     - POST /warenkorb/update_korb (aktion=u, artid, menge)
     """
 
@@ -157,18 +164,24 @@ class HalfmannHttpClient:
             raise RuntimeError("Halfmann: prihlásenie zlyhalo (session/get_data bez používateľa).")
         self._login_ok = True
 
-    async def find_price_per_100(self, artid: str) -> dict[str, Any]:
+    async def find_price(self, artid: str, quantity: int) -> dict[str, Any]:
         code = halfmann_norm_artid(artid)
+        q = int(quantity)
         if not code:
             raise ValueError("Halfmann: prázdne artid.")
+        if q < 1:
+            raise ValueError("Halfmann: množstvo musí byť aspoň 1.")
         r = await self._client.post(
             "/lbpserver/findpreis",
-            data={"artid": code, "menge": "100"},
+            data={"artid": code, "menge": str(q)},
             headers={"Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"},
         )
         r.raise_for_status()
         blob = r.json()
         return blob.get("erg") if isinstance(blob, dict) else {}
+
+    async def find_price_per_100(self, artid: str) -> dict[str, Any]:
+        return await self.find_price(artid, 100)
 
     async def find_stock(self, artid: str) -> dict[str, Any]:
         code = halfmann_norm_artid(artid)
@@ -199,6 +212,56 @@ class HalfmannHttpClient:
         blob = r.json() if r.text else {}
         if isinstance(blob, dict) and int(blob.get("success") or 0) != 1:
             raise RuntimeError(f"Halfmann košík zlyhal: {blob!r}")
+
+    async def fetch_cart_snapshot(self) -> dict[str, Any]:
+        """
+        Načíta súhrn košíka a riadky (HAR: get_data → get_korbwert_data; ceny cez findpreis).
+        """
+        r = await self._client.post(
+            "/warenkorb/get_data",
+            headers={"Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"},
+        )
+        r.raise_for_status()
+        get_data = r.json() if r.text else {}
+        gesamt = ((get_data or {}).get("korb_gesamt") or {}).get("gesamt") or {}
+        korbid = gesamt.get("korbid")
+        anzpos = _parse_int(gesamt.get("anzpos")) or 0
+        korbwert: dict[str, Any] = {}
+        warenkorb_list: list[dict[str, Any]] = []
+        if korbid is not None and anzpos > 0:
+            r2 = await self._client.post(
+                "/warenkorb/get_korbwert_data",
+                data={"korbid": str(korbid)},
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
+                },
+            )
+            r2.raise_for_status()
+            korbwert = r2.json() if r2.text else {}
+            raw = korbwert.get("warenkorb_list")
+            if isinstance(raw, list):
+                warenkorb_list = [x for x in raw if isinstance(x, dict)]
+        line_prices: dict[str, dict[str, Any]] = {}
+        for entry in warenkorb_list:
+            artikel = entry.get("artikel") if isinstance(entry.get("artikel"), dict) else {}
+            korb = entry.get("korb") if isinstance(entry.get("korb"), dict) else {}
+            artid = halfmann_norm_artid(
+                str(entry.get("artid") or artikel.get("artid") or korb.get("artid") or "")
+            )
+            if not artid or artid in line_prices:
+                continue
+            menge = _parse_int(korb.get("menge")) or 1
+            try:
+                line_prices[artid] = await self.find_price(artid, menge)
+            except Exception:
+                line_prices[artid] = {}
+        return {
+            "get_data": get_data if isinstance(get_data, dict) else {},
+            "korbwert": korbwert,
+            "gesamt": gesamt if isinstance(gesamt, dict) else {},
+            "warenkorb_list": warenkorb_list,
+            "line_prices": line_prices,
+        }
 
     @staticmethod
     def parse_supplier_data(*, artid: str, price_row: dict[str, Any], stock_row: dict[str, Any]) -> dict[str, Any]:
@@ -242,3 +305,66 @@ class HalfmannHttpClient:
         if ptitle:
             out["product_title"] = ptitle
         return out
+
+
+def halfmann_parse_cart_json(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """
+    Z ``fetch_cart_snapshot()`` — súčet, počet riadkov a položky pre remote cart UI.
+    """
+    gesamt = snapshot.get("gesamt") if isinstance(snapshot.get("gesamt"), dict) else {}
+    total_eur = _parse_decimal(gesamt.get("wert"))
+    line_count = _parse_int(gesamt.get("anzpos")) or 0
+    prices = snapshot.get("line_prices") if isinstance(snapshot.get("line_prices"), dict) else {}
+    raw_list = snapshot.get("warenkorb_list")
+    entries: list[dict[str, Any]] = (
+        [x for x in raw_list if isinstance(x, dict)] if isinstance(raw_list, list) else []
+    )
+    lines: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for entry in entries:
+        artikel = entry.get("artikel") if isinstance(entry.get("artikel"), dict) else {}
+        korb = entry.get("korb") if isinstance(entry.get("korb"), dict) else {}
+        artid = halfmann_norm_artid(
+            str(entry.get("artid") or artikel.get("artid") or korb.get("artid") or "")
+        )
+        if not artid or artid in seen:
+            continue
+        seen.add(artid)
+        qty = _parse_int(korb.get("menge")) or 1
+        label = str(artikel.get("artkubez") or artikel.get("artnr") or "").strip()
+        if not label:
+            label = f"Halfmann artid {artid}"
+        price_row = prices.get(artid) if isinstance(prices.get(artid), dict) else {}
+        line_total = _parse_decimal(price_row.get("netwert"))
+        if line_total is None:
+            line_total = _parse_decimal(price_row.get("wert"))
+        if line_total is None:
+            line_total = _parse_decimal(price_row.get("rechwert"))
+        unit_eur = None
+        if line_total is not None and qty > 0:
+            unit_eur = round(line_total / qty, 6)
+        pe = _parse_int(price_row.get("pe")) or _parse_int(artikel.get("pe")) or 100
+        lines.append(
+            {
+                "label": label,
+                "quantity": qty,
+                "unit_price_eur": unit_eur,
+                "line_total_eur": line_total,
+                "variant_code": artid,
+                "pack_quantity": pe if pe > 0 else 100,
+            }
+        )
+    if line_count <= 0:
+        line_count = len(lines)
+    elif lines and line_count < len(lines):
+        line_count = len(lines)
+    if total_eur is None and lines:
+        total_eur = round(
+            sum((ln.get("line_total_eur") or 0.0) for ln in lines),
+            4,
+        )
+    return {
+        "lines": lines,
+        "total_eur": total_eur,
+        "line_count": line_count,
+    }

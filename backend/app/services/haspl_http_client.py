@@ -56,6 +56,14 @@ def supplier_shop_cart_url(shop_url: str) -> str:
         from app.services.schachermayer_http_client import schachermayer_web_cart_url
 
         return schachermayer_web_cart_url(raw)
+    if "valentazt.cz" in raw.lower():
+        from app.services.valenta_http_client import valenta_cart_url
+
+        return valenta_cart_url(raw)
+    if "halfmann-schrauben.de" in raw.lower():
+        from app.services.halfmann_http_client import halfmann_cart_url
+
+        return halfmann_cart_url(raw)
     return f"{haspl_base_url(raw)}/kosik"
 
 
