@@ -43,6 +43,7 @@ import {
   X,
 } from "lucide-react";
 
+import { HubMark } from "@/components/HubMark";
 import { SearchableSelect } from "@/components/SearchableSelect";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -4982,7 +4983,7 @@ export default function Home() {
 
           {!navCollapsed ? (
             <div className="mb-2 hidden items-center gap-2 md:mb-8 md:flex">
-              <DatabaseZap className="h-5 w-5 shrink-0 text-sky-400" />
+              <HubMark size={22} className="shrink-0" title="Smarthub" />
               <div className="min-w-0">
                 <p className="text-sm font-semibold">Smarthub</p>
                 <p className="text-xs text-slate-400">Interny porovnavac cien</p>

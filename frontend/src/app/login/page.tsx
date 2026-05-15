@@ -1,9 +1,10 @@
 "use client";
 
-import { DatabaseZap, Lock, User } from "lucide-react";
+import { Lock, User } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useSyncExternalStore } from "react";
 
+import { HubMark } from "@/components/HubMark";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -83,8 +84,8 @@ export default function LoginPage() {
       <div className="relative mx-auto flex min-h-screen max-w-6xl flex-col gap-10 px-4 py-10 sm:flex-row sm:items-center sm:justify-center sm:gap-16 sm:px-8 lg:gap-24">
         <div className="max-w-xl flex-1 space-y-6 text-slate-800">
           <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-900 text-sky-400 shadow-lg shadow-slate-900/25">
-              <DatabaseZap className="h-6 w-6" aria-hidden />
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-900 shadow-lg shadow-slate-900/25">
+              <HubMark size={28} title="Smarthub" />
             </div>
             <div>
               <h1 className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">
