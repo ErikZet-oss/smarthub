@@ -31,7 +31,7 @@ FIELD_HEADER_ALIASES: dict[str, list[str]] = {
     "length": ["Length [mm]", "Length"],
     "v_class": ["Class"],
     "y_money_name": ["Money názov", "Money nazov"],
-    "code": ["číslo Smart", "cislo Smart"],
+    "code": ["číslo Smart", "cislo Smart", "cislo smart"],
 }
 
 _FIELD_ATTR_MAP: dict[str, str] = {
@@ -175,6 +175,25 @@ def _resolve_header_col_index(headers: list[str], mapped_name: str | None) -> in
             n = n * 26 + (ord(ch) - 64)
         idx = n - 1
         if 0 <= idx < len(headers):
+            return idx
+    return None
+
+
+def _cislo_smart_col_index(headers: list[str]) -> int | None:
+    for alt in FIELD_HEADER_ALIASES.get("code", []) + [FIELD_DEFAULTS["code"]]:
+        idx = _resolve_header_col_index(headers, alt)
+        if idx is not None:
+            return idx
+    return None
+
+
+def _money_short_catalog_col_index(headers: list[str]) -> int | None:
+    """Money Katalóg / Money Kód — krátky katalógový kód, nie interné číslo Smart."""
+    for idx, h in enumerate(headers):
+        low = h.strip().casefold()
+        if "money" not in low:
+            continue
+        if "katal" in low or " kód" in low or low.endswith(" kód") or low.endswith(" kod"):
             return idx
     return None
 
@@ -337,6 +356,17 @@ def import_gamechanger_excel(
             f"Stĺpec pre interný kód sa nenašiel (očakávaná hlavička: {expected!r})."
         )
 
+    smart_code_idx = _cislo_smart_col_index(headers)
+    money_catalog_idx = _money_short_catalog_col_index(headers)
+    if smart_code_idx is not None and internal_code_idx == money_catalog_idx:
+        internal_code_idx = smart_code_idx
+        col_by_field["code"] = smart_code_idx
+        resolved_hdr_by_field["code"] = headers[smart_code_idx]
+        mapping_warnings.append(
+            f"Mapovanie Kód: v databáze bol krátky stĺpec „{headers[money_catalog_idx]}“, "
+            f"import použije „{headers[smart_code_idx]}“ (dlhé interné číslo Smart)."
+        )
+
     leading_idx = _resolve_header_col_index(headers, "Leading standard")
     stn_idx = _resolve_header_col_index(headers, "STN")
     if leading_idx is not None and stn_idx is not None and norma_idx == stn_idx:
@@ -374,11 +404,15 @@ def import_gamechanger_excel(
 
     code_hdr = headers[internal_code_idx]
     ch_low = code_hdr.casefold()
-    if "katalóg" in ch_low or "katalog" in ch_low:
+    if smart_code_idx is not None and internal_code_idx != smart_code_idx:
         result.warnings.append(
-            f"Stĺpec „Kód“ je mapovaný na „{code_hdr}“. Pre riadky ako v Gamechangeri "
-            f"mapuj pole Kód na hlavičku „{FIELD_DEFAULTS['code']}“ (dlhé interné číslo), "
-            "nie na katalógový stĺpec — inak sa Class / Money názov neprepoja na kód v tabuľke."
+            f"Stĺpec „Kód“ je mapovaný na „{code_hdr}“, nie na „{FIELD_DEFAULTS['code']}“. "
+            "V tabuľke môžu byť krátke katalógové kódy namiesto dlhého čísla Smart."
+        )
+    elif money_catalog_idx is not None and internal_code_idx == money_catalog_idx:
+        result.warnings.append(
+            f"Stĺpec „Kód“ je stále mapovaný na „{code_hdr}“. Nastav v Párovaní Kód → "
+            f"„{FIELD_DEFAULTS['code']}“ (nie Money Katalóg / Money Kód)."
         )
 
     # Stĺpce s kódmi dodávateľov: z DB (code_column) + doplnenie stĺpcov končiacich na " kód".
