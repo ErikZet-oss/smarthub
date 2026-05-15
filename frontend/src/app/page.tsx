@@ -71,7 +71,7 @@ const CART_HISTORY_MAX = 500;
 const DEFAULT_GAMECHANGER_XLSX_PATH =
   (typeof process !== "undefined" &&
     process.env.NEXT_PUBLIC_GAMECHANGER_XLSX_PATH?.trim()) ||
-  "/opt/render/project/src/data/Smart_data_Gamechanger.xlsx";
+  "data/Smart_data_Gamechanger.xlsx";
 
 /** Poznámka k konkrétnej ponuke: interný kód produktu + id dodávateľa. */
 function offerNoteStorageKey(internalCode: string, supplierId: number): string {
@@ -2864,16 +2864,23 @@ export default function Home() {
   const [excelFilePath, setExcelFilePath] = useState(DEFAULT_GAMECHANGER_XLSX_PATH);
   const [sheetName, setSheetName] = useState("DIN");
 
-  /** Nahradí zastaranú relatívnu cestu (napr. z copy-paste) absolútnou predvolenou. */
+  /** Nahradí zastarané / Render-only cesty lokálnou predvolenou. */
   useEffect(() => {
     if (typeof window === "undefined") return;
     setExcelFilePath((prev) => {
-      const norm = prev.trim().replace(/\//g, "\\");
-      const base = norm.split("\\").pop() ?? "";
+      const norm = prev.trim();
+      if (!norm) {
+        return DEFAULT_GAMECHANGER_XLSX_PATH;
+      }
+      if (norm.includes("/opt/render/project")) {
+        return DEFAULT_GAMECHANGER_XLSX_PATH;
+      }
+      const normWin = norm.replace(/\//g, "\\");
+      const base = normWin.split("\\").pop() ?? "";
       const looksLegacy =
-        (norm.includes("..") &&
+        (normWin.includes("..") &&
           base.toLowerCase() === "smart_data_gamechanger.xlsx") ||
-        norm.toLowerCase() === "smart_data_gamechanger.xlsx";
+        normWin.toLowerCase() === "smart_data_gamechanger.xlsx";
       return looksLegacy ? DEFAULT_GAMECHANGER_XLSX_PATH : prev;
     });
   }, []);
@@ -4758,6 +4765,7 @@ export default function Home() {
           mappings_upserted?: number;
           rows_scanned?: number;
           total_rows?: number;
+          file_resolved?: string;
           warnings?: string[];
         };
       };
@@ -4797,11 +4805,13 @@ export default function Home() {
         mappings_upserted?: number;
         rows_scanned?: number;
         total_rows?: number;
+        file_resolved?: string;
         warnings?: string[];
       };
       const prods = payload.products_upserted ?? 0;
       const scanned = payload.rows_scanned ?? 0;
       const total = payload.total_rows ?? 0;
+      const fileUsed = (payload.file_resolved || path).trim();
       setExcelImportProgressPct(100);
       const warnBlock =
         payload.warnings?.length ?
@@ -4809,14 +4819,15 @@ export default function Home() {
         : "";
       setMappingStatus(
         prods === 0
-          ? `Import z listu „${sheet}“: 0 produktov (naskenovaných riadkov: ${scanned}/${total || "?"}). Skontroluj, či v tomto liste sú dáta, či mapovanie „Kód“ ukazuje na správnu hlavičku a či prvý stĺpec kódu nie je prázdny v riadkoch.`
+          ? `Import z listu „${sheet}“: 0 produktov (naskenovaných riadkov: ${scanned}/${total || "?"}). Súbor: ${fileUsed}. Skontroluj list, mapovanie „Kód“ a či riadky majú vyplnený interný kód.`
           : `Import z listu „${sheet}“ hotový: ${prods} produktov, ` +
               `${payload.suppliers_upserted ?? 0} dodávateľov, ` +
               `${payload.mappings_upserted ?? 0} väzieb kódom, ` +
-              `riadkov: ${scanned}/${total || "?"}.${warnBlock}`,
+              `riadkov: ${scanned}/${total || "?"}. Súbor: ${fileUsed}.${warnBlock}`,
       );
       setSearchTick((t) => t + 1);
       void refetchSuppliersList();
+      void loadMappingProfile();
     } catch (error) {
       const raw = error instanceof Error ? error.message : "";
       const isNetwork =

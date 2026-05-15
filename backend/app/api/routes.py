@@ -1176,7 +1176,7 @@ async def upload_supplier_logo(
     data = await file.read()
     try:
         basename = save_supplier_logo_upload(
-            supplier_id, file.content_type, data
+            supplier_id, file.content_type, data, file.filename
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1247,6 +1247,7 @@ def _run_excel_import_task(task_id: str, file_path: str, sheet_name: str) -> Non
                 "mappings_upserted": result.mappings_upserted,
                 "rows_scanned": result.rows_scanned,
                 "total_rows": result.total_rows,
+                "file_resolved": result.file_resolved,
                 "warnings": result.warnings,
             },
             rows_scanned=result.rows_scanned,
@@ -1341,6 +1342,7 @@ def import_excel(
             "mappings_upserted": result.mappings_upserted,
             "rows_scanned": result.rows_scanned,
             "total_rows": result.total_rows,
+            "file_resolved": result.file_resolved,
             "warnings": result.warnings,
         }
     except FileNotFoundError as exc:

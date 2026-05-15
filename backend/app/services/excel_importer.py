@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 import re
 from typing import Any, Callable
 
@@ -21,6 +22,39 @@ FIELD_DEFAULTS: dict[str, str] = {
     # Používateľ môže mapovať aj priamo písmenom stĺpca (W).
     "image_filename": "W",
 }
+
+_BACKEND_ROOT = Path(__file__).resolve().parent.parent.parent
+_REPO_ROOT = _BACKEND_ROOT.parent
+_DEFAULT_XLSX = _REPO_ROOT / "data" / "Smart_data_Gamechanger.xlsx"
+
+
+def resolve_gamechanger_xlsx_path(file_path: str) -> Path:
+    """
+    Nájde XLSX na disku (absolútna cesta alebo relatívne koreň repa / backend / cwd).
+  """
+    raw = (file_path or "").strip() or "data/Smart_data_Gamechanger.xlsx"
+    p = Path(raw).expanduser()
+    candidates: list[Path] = [_DEFAULT_XLSX.resolve()]
+    if p.is_absolute():
+        candidates.insert(0, p)
+    else:
+        candidates[:0] = [
+            (_REPO_ROOT / p).resolve(),
+            (_BACKEND_ROOT / p).resolve(),
+            (Path.cwd() / p).resolve(),
+        ]
+    seen: set[str] = set()
+    for c in candidates:
+        key = str(c)
+        if key in seen:
+            continue
+        seen.add(key)
+        if c.is_file():
+            return c
+    tried = "\n".join(f"  • {x}" for x in seen)
+    raise FileNotFoundError(
+        f"Súbor Excel sa nenašiel ({raw!r}). Skúšané cesty:\n{tried}"
+    )
 
 
 def _field_column_name(field_key: str, fm: FieldMapping | None) -> str | None:
@@ -48,6 +82,7 @@ class ImportResult:
     mappings_upserted: int = 0
     rows_scanned: int = 0
     total_rows: int = 0
+    file_resolved: str = ""
     warnings: list[str] = field(default_factory=list)
 
 
@@ -198,6 +233,8 @@ def import_gamechanger_excel(
     sheet_name: str = "DIN",
     progress_cb: Callable[[int, int], None] | None = None,
 ) -> ImportResult:
+    resolved = resolve_gamechanger_xlsx_path(file_path)
+    file_path = str(resolved)
     name = (sheet_name or "DIN").strip() or "DIN"
     wb = load_workbook(file_path, read_only=True, data_only=True)
     if name not in wb.sheetnames:
@@ -234,6 +271,7 @@ def import_gamechanger_excel(
         )
 
     result = ImportResult()
+    result.file_resolved = file_path
     result.total_rows = total_rows
     code_hdr = headers[internal_code_idx]
     ch_low = code_hdr.casefold()
@@ -484,6 +522,7 @@ def profile_excel_columns(
     max_scan_rows: int = 500_000,
     preview_row_count: int = 8,
 ) -> ColumnProfileResult:
+    file_path = str(resolve_gamechanger_xlsx_path(file_path))
     wb = load_workbook(file_path, read_only=True, data_only=True)
     if sheet_name not in wb.sheetnames:
         raise ValueError(f"Sheet '{sheet_name}' was not found in workbook.")
