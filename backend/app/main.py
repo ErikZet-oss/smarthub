@@ -26,7 +26,7 @@ from app.db import DATABASE_FILE, create_db_and_tables, engine, migrate_sqlite_s
 from app.services.dev_run_log import dev_run_log, dev_screens_dir
 from app.services.product_images import product_images_dir
 from app.services.smarthub_bootstrap import seed_initial_admin_if_empty
-from app.services.supplier_logos import supplier_logos_dir
+from app.services.supplier_logos import seed_supplier_logos_from_repo, supplier_logos_dir
 
 app = FastAPI(title="Smarthub API")
 # Lokálna sieť (192.168…): inak prehliadač pri fetch z Nextu na IP zobrazí „Failed to fetch“ (CORS).
@@ -109,6 +109,7 @@ def on_startup():
     migrate_sqlite_schema()
     with Session(engine) as session:
         seed_initial_admin_if_empty(session)
+        seed_supplier_logos_from_repo(session)
         session.commit()
     dev_run_log(
         "api",
