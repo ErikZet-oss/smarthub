@@ -14,6 +14,7 @@ Schachermayer webshop (webshop.schachermayer.com): Keycloak OIDC + REST API z HA
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any, Optional
 from urllib.parse import urljoin, urlparse
@@ -91,6 +92,21 @@ def _parse_int(val: Any) -> Optional[int]:
         return int(round(x))
     except (TypeError, ValueError):
         return None
+
+
+def _http_json_dict(response: httpx.Response) -> dict[str, Any] | None:
+    """Bezpečné parsovanie JSON objektu (prázdna/HTML odpoveď → None)."""
+    body = (response.text or "").strip()
+    if not body:
+        return None
+    try:
+        parsed = response.json()
+    except (json.JSONDecodeError, ValueError):
+        try:
+            parsed = json.loads(body)
+        except json.JSONDecodeError:
+            return None
+    return parsed if isinstance(parsed, dict) else None
 
 
 def _catalog_id_from_user(user: dict[str, Any], override: str | None) -> str:
@@ -202,9 +218,7 @@ class SchachermayerHttpClient:
             },
         )
         r.raise_for_status()
-        data = r.json()
-        if not isinstance(data, dict):
-            return {}
+        data = _http_json_dict(r) or {}
         sid = str(data.get("extranetSessionId") or "").strip()
         if not sid and isinstance(data.get("user"), dict):
             sid = str(data["user"].get("extranetSessionId") or "").strip()
@@ -223,30 +237,13 @@ class SchachermayerHttpClient:
         """Načíta JSON košíka (štandardný košík webshopu)."""
         if not self._login_ok:
             raise RuntimeError("Schachermayer: nie ste prihlásení.")
-        # basket-items vracia 404 — používame len basket (+ voliteľný webshop API).
-        candidates = (
-            f"{self._shop}/cat/api/private/extranet/webshopCore/basket",
-            f"{self._shop}/webshop/api/basket",
-        )
-        last_err: Optional[Exception] = None
-        for url in candidates:
-            try:
-                r = await self._client.get(url, headers=self._api_headers())
-                if r.status_code == 404:
-                    continue
-                r.raise_for_status()
-                data = r.json()
-                if isinstance(data, dict):
-                    return data
-            except httpx.HTTPStatusError as exc:
-                if exc.response.status_code == 404:
-                    continue
-                last_err = exc
-            except Exception as exc:
-                last_err = exc
-        if last_err:
-            raise last_err
-        return {}
+        url = f"{self._shop}/cat/api/private/extranet/webshopCore/basket"
+        r = await self._client.get(url, headers=self._api_headers())
+        if r.status_code == 404:
+            return {}
+        r.raise_for_status()
+        data = _http_json_dict(r)
+        return data if data is not None else {}
 
     async def fetch_basket_summary_html(self) -> str:
         """HTML súhrn z app-bar (fallback ak JSON neobsahuje riadky)."""

@@ -1,7 +1,20 @@
+import httpx
+
 from app.services.schachermayer_http_client import (
+    _http_json_dict,
     schachermayer_parse_basket_summary_html,
     schachermayer_parse_cart_json,
 )
+
+
+def test_http_json_dict_empty_body():
+    r = httpx.Response(200, text="")
+    assert _http_json_dict(r) is None
+
+
+def test_http_json_dict_html_body():
+    r = httpx.Response(200, text="<html><body>košík</body></html>")
+    assert _http_json_dict(r) is None
 
 
 def test_parse_basket_summary_html():
