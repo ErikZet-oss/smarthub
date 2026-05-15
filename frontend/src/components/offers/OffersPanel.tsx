@@ -81,6 +81,7 @@ const EMPTY_DETAIL: OfferDetail = {
   client_phone: null,
   notes_client: null,
   notes_internal: null,
+  default_margin_percent: 0,
   created_at: null,
   updated_at: null,
   lines: [],
@@ -184,6 +185,7 @@ export function OffersPanel({
           notes_client: detail.notes_client,
           notes_internal: detail.notes_internal,
           valid_until: detail.valid_until,
+          default_margin_percent: detail.default_margin_percent,
         }),
       });
       if (!res.ok) {
@@ -226,6 +228,7 @@ export function OffersPanel({
           notes_client: detail.notes_client,
           notes_internal: detail.notes_internal,
           valid_until: detail.valid_until,
+          default_margin_percent: detail.default_margin_percent,
         }),
       });
       if (!res.ok) {
@@ -239,6 +242,49 @@ export function OffersPanel({
       setError(e instanceof Error ? e.message : "Chyba.");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const applyBulkMargin = async () => {
+    if (!detail?.id) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await apiFetch(`${apiBase}/api/offers/${detail.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          default_margin_percent: detail.default_margin_percent,
+          apply_margin_to_all_lines: true,
+        }),
+      });
+      if (!res.ok) {
+        const d = (await res.json().catch(() => ({}))) as { detail?: string };
+        throw new Error(d.detail ?? "Aplikovanie marže zlyhalo.");
+      }
+      setDetail((await res.json()) as OfferDetail);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Chyba.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const updateLineMargin = async (lineId: number, marginPercent: number) => {
+    if (!detail?.id) return;
+    try {
+      const res = await apiFetch(
+        `${apiBase}/api/offers/${detail.id}/lines/${lineId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ margin_percent: marginPercent }),
+        },
+      );
+      if (!res.ok) throw new Error("Úprava marže zlyhala.");
+      await loadDetail(detail.id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Chyba.");
     }
   };
 
@@ -373,6 +419,8 @@ export function OffersPanel({
           onDeleteLine={(id) => void deleteLine(id)}
           onExportPdf={() => void exportFile("pdf")}
           onExportCsv={() => void exportFile("csv")}
+          onApplyBulkMargin={() => void applyBulkMargin()}
+          onUpdateLineMargin={(lineId, margin) => void updateLineMargin(lineId, margin)}
         />
       </Card>
     </section>
@@ -443,6 +491,8 @@ function OffersLayout(props: {
   onDeleteLine: (id: number) => void;
   onExportPdf: () => void;
   onExportCsv: () => void;
+  onApplyBulkMargin: () => void;
+  onUpdateLineMargin: (lineId: number, marginPercent: number) => void;
 }) {
   const {
     loadingList,
@@ -468,6 +518,8 @@ function OffersLayout(props: {
     onDeleteLine,
     onExportPdf,
     onExportCsv,
+    onApplyBulkMargin,
+    onUpdateLineMargin,
   } = props;
 
   return (
@@ -551,10 +603,12 @@ function OffersLayout(props: {
             onDeleteLine={onDeleteLine}
             onExportPdf={onExportPdf}
             onExportCsv={onExportCsv}
+            onApplyBulkMargin={onApplyBulkMargin}
+            onUpdateLineMargin={onUpdateLineMargin}
           />
         ) : null}
       </div>
-      </div>
+    </div>
   );
 }
 
@@ -580,6 +634,8 @@ function OfferEditor(props: {
   onDeleteLine: (id: number) => void;
   onExportPdf: () => void;
   onExportCsv: () => void;
+  onApplyBulkMargin: () => void;
+  onUpdateLineMargin: (lineId: number, marginPercent: number) => void;
 }) {
   const {
     detail,
@@ -597,6 +653,8 @@ function OfferEditor(props: {
     onDeleteLine,
     onExportPdf,
     onExportCsv,
+    onApplyBulkMargin,
+    onUpdateLineMargin,
   } = props;
 
   return (
@@ -763,21 +821,55 @@ function OfferEditor(props: {
 
       {!isNew ? (
         <>
+          <div className="rounded-xl border border-sky-200/80 bg-sky-50/40 p-4">
+            <p className="text-sm font-semibold text-slate-900">Marža ponuky</p>
+            <p className="mt-1 text-xs text-slate-600">
+              Nastavte predvolenú maržu a aplikujte ju na všetky položky s nákupnou cenou.
+            </p>
+            <div className="mt-3 flex flex-wrap items-end gap-3">
+              <Field label="Hromadná marža (%)">
+                <Input
+                  type="number"
+                  step="0.1"
+                  min={0}
+                  className="w-28"
+                  value={detail.default_margin_percent}
+                  onChange={(e) =>
+                    onPatch({
+                      default_margin_percent: parseFloat(e.target.value) || 0,
+                    })
+                  }
+                />
+              </Field>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={saving}
+                onClick={onApplyBulkMargin}
+              >
+                Aplikovať na všetky položky
+              </Button>
+            </div>
+          </div>
+
           <div className="rounded-xl border border-slate-200/90 p-4">
             <p className="mb-3 text-sm font-semibold text-slate-900">Položky ponuky</p>
             <p className="mb-3 text-xs text-slate-500">
-              Produktov z katalógu doplníme v ďalšom kroku — zatiaľ pridávajte riadky manuálne.
+              Pridajte položky z vyhľadávania (ikona + pri dodávateľovi) alebo manuálne nižšie.
             </p>
             {detail.lines.length > 0 ? (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[520px] text-left text-sm">
+                <table className="w-full min-w-[720px] text-left text-sm">
                   <thead>
                     <tr className="border-b border-slate-200 text-xs text-slate-500">
                       <th className="py-2 pr-2">#</th>
                       <th className="py-2 pr-2">Popis</th>
+                      <th className="py-2 pr-2">Dodávateľ</th>
                       <th className="py-2 pr-2 text-right">Množ.</th>
-                      <th className="py-2 pr-2">MJ</th>
-                      <th className="py-2 pr-2 text-right">Cena</th>
+                      <th className="py-2 pr-2 text-right">Nákup</th>
+                      <th className="py-2 pr-2 text-right">Marža %</th>
+                      <th className="py-2 pr-2 text-right">Predaj</th>
                       <th className="py-2 pr-2 text-right">Spolu</th>
                       <th className="py-2" />
                     </tr>
@@ -786,10 +878,37 @@ function OfferEditor(props: {
                     {detail.lines.map((ln) => (
                       <tr key={ln.id} className="border-b border-slate-100">
                         <td className="py-2 pr-2 text-slate-500">{ln.position}</td>
-                        <td className="py-2 pr-2">{ln.description}</td>
+                        <td className="max-w-[200px] py-2 pr-2 text-xs">{ln.description}</td>
+                        <td className="py-2 pr-2 text-xs text-slate-600">
+                          {ln.supplier_name ?? "—"}
+                        </td>
                         <td className="py-2 pr-2 text-right">{ln.quantity}</td>
-                        <td className="py-2 pr-2">{ln.unit}</td>
+                        <td className="py-2 pr-2 text-right text-slate-600">
+                          {ln.purchase_unit_price_eur != null
+                            ? fmtEur(ln.purchase_unit_price_eur)
+                            : "—"}
+                        </td>
                         <td className="py-2 pr-2 text-right">
+                          {ln.purchase_unit_price_eur != null ? (
+                            <Input
+                              key={`m-${ln.id}-${ln.margin_percent}`}
+                              type="number"
+                              step="0.1"
+                              min={0}
+                              className="ml-auto h-7 w-16 text-right text-xs"
+                              defaultValue={ln.margin_percent}
+                              onBlur={(e) => {
+                                const v = parseFloat(e.target.value);
+                                if (Number.isFinite(v)) {
+                                  onUpdateLineMargin(ln.id, v);
+                                }
+                              }}
+                            />
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="py-2 pr-2 text-right font-medium text-sky-800">
                           {fmtEur(ln.unit_price_eur)}
                         </td>
                         <td className="py-2 pr-2 text-right font-medium">

@@ -44,6 +44,10 @@ import {
   X,
 } from "lucide-react";
 
+import {
+  AddToOfferDialog,
+  type AddToOfferPayload,
+} from "@/components/offers/AddToOfferDialog";
 import { CompanySettingsAdmin } from "@/components/offers/CompanySettingsAdmin";
 import { OffersPanel } from "@/components/offers/OffersPanel";
 import { SearchableSelect } from "@/components/SearchableSelect";
@@ -357,6 +361,7 @@ type MappingProfile = {
 };
 
 type ProductSearchRow = {
+  product_id?: number | null;
   internal_code: string;
   norma: string | null;
   diameter: string | null;
@@ -1322,6 +1327,7 @@ type ProductSupplierExpandedTableRowProps = {
   cartAddSuccessByKey: Record<string, boolean>;
   offerNotesByKey: Record<string, string>;
   setOfferNotesByKey: Dispatch<SetStateAction<Record<string, string>>>;
+  onRequestAddToOffer?: (payload: AddToOfferPayload) => void;
   addToCart: (
     supplierId: number,
     supplierCode: string,
@@ -1350,6 +1356,7 @@ function ProductSupplierExpandedTableRow({
   cartAddSuccessByKey,
   offerNotesByKey,
   setOfferNotesByKey,
+  onRequestAddToOffer,
   addToCart,
 }: ProductSupplierExpandedTableRowProps) {
   return (
@@ -1852,7 +1859,31 @@ function ProductSupplierExpandedTableRow({
                                             </div>
                                           </div>
                                           {sid != null ? (
-                                            <div className="ml-auto flex w-auto shrink-0 justify-end self-center">
+                                            <div className="ml-auto flex w-auto shrink-0 items-center justify-end gap-1 self-center">
+                                              {onRequestAddToOffer &&
+                                              displayPrice != null &&
+                                              Number.isFinite(displayPrice) &&
+                                              displayPrice > 0 ? (
+                                                <button
+                                                  type="button"
+                                                  title="Pridať do cenovej ponuky"
+                                                  className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border border-sky-300/90 bg-sky-50 text-sky-700 transition hover:bg-sky-100 sm:h-6 sm:w-6"
+                                                  onClick={(event) => {
+                                                    event.stopPropagation();
+                                                    onRequestAddToOffer({
+                                                      internal_code: product.internal_code,
+                                                      product_id: product.product_id,
+                                                      supplier_id: sid,
+                                                      supplier_name: offer.supplier,
+                                                      supplier_code:
+                                                        offer.supplier_code ?? null,
+                                                      purchase_price_eur: displayPrice,
+                                                    });
+                                                  }}
+                                                >
+                                                  <Plus className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                                                </button>
+                                              ) : null}
                                               <label
                                                 className="sr-only"
                                                 htmlFor={`offer-note-${product.internal_code}-${sid}-${offerIndex}`}
@@ -3054,6 +3085,11 @@ export default function Home() {
   const [newBranchLabel, setNewBranchLabel] = useState("");
   const [adminUserSubmitting, setAdminUserSubmitting] = useState(false);
   const [companyConfigured, setCompanyConfigured] = useState<boolean | null>(null);
+  const [addToOfferOpen, setAddToOfferOpen] = useState(false);
+  const [addToOfferPayload, setAddToOfferPayload] = useState<AddToOfferPayload | null>(
+    null,
+  );
+  const [addToOfferFeedback, setAddToOfferFeedback] = useState<string | null>(null);
 
   const apiFetch = useCallback(
     (input: RequestInfo | URL, init?: RequestInit) => {
@@ -5295,6 +5331,14 @@ export default function Home() {
         </aside>
 
         <main className="min-w-0 p-2.5 pb-24 sm:p-4 sm:pb-24 md:p-8 md:pb-8">
+          {addToOfferFeedback ? (
+            <p
+              className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900"
+              role="status"
+            >
+              {addToOfferFeedback}
+            </p>
+          ) : null}
           {activeView === "vyhladavanie" && (
             <section className="space-y-3 sm:space-y-4">
               <Card className="relative z-20 overflow-visible p-0 shadow-sm ring-1 ring-slate-100/80">
@@ -5611,6 +5655,10 @@ export default function Home() {
                             cartAddSuccessByKey={cartAddSuccessByKey}
                             offerNotesByKey={offerNotesByKey}
                             setOfferNotesByKey={setOfferNotesByKey}
+                            onRequestAddToOffer={(p) => {
+                              setAddToOfferPayload(p);
+                              setAddToOfferOpen(true);
+                            }}
                             addToCart={addToCart}
                           />
                         ) : null}
@@ -5844,6 +5892,10 @@ export default function Home() {
                                 cartAddSuccessByKey={cartAddSuccessByKey}
                                 offerNotesByKey={offerNotesByKey}
                                 setOfferNotesByKey={setOfferNotesByKey}
+                                onRequestAddToOffer={(p) => {
+                                  setAddToOfferPayload(p);
+                                  setAddToOfferOpen(true);
+                                }}
                                 addToCart={addToCart}
                               />
                             ) : null}
@@ -7800,6 +7852,20 @@ export default function Home() {
           </div>
         </div>
       ) : null}
+      <AddToOfferDialog
+        open={addToOfferOpen}
+        payload={addToOfferPayload}
+        apiBase={API_BASE}
+        apiFetch={apiFetch}
+        onClose={() => {
+          setAddToOfferOpen(false);
+          setAddToOfferPayload(null);
+        }}
+        onAdded={() => {
+          setAddToOfferFeedback("Položka bola pridaná do vybranej ponuky.");
+          window.setTimeout(() => setAddToOfferFeedback(null), 5000);
+        }}
+      />
     </div>
   );
 }

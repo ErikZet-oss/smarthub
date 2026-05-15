@@ -15,9 +15,14 @@ export type OfferLine = {
   quantity: number;
   unit: string;
   unit_price_eur: number;
+  purchase_unit_price_eur: number | null;
+  margin_percent: number;
   discount_percent: number;
   line_total_eur: number;
   product_id: number | null;
+  supplier_id: number | null;
+  supplier_name: string | null;
+  supplier_code: string | null;
 };
 
 export type OfferDetail = {
@@ -39,6 +44,7 @@ export type OfferDetail = {
   client_phone: string | null;
   notes_client: string | null;
   notes_internal: string | null;
+  default_margin_percent: number;
   created_at: string | null;
   updated_at: string | null;
   lines: OfferLine[];

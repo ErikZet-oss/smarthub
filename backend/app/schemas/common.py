@@ -27,6 +27,7 @@ class SupplierOffer(BaseModel):
 
 
 class ProductComparison(BaseModel):
+    product_id: Optional[int] = None
     internal_code: str
     norma: Optional[str]
     diameter: Optional[str]

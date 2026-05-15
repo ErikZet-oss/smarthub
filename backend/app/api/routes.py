@@ -58,6 +58,7 @@ from app.services.offer_export import (
     build_offer_pdf,
     offer_lines_subtotal,
 )
+from app.services.offer_pricing import selling_unit_price
 from app.services.supplier_logos import (
     remove_supplier_logo_files,
     save_supplier_logo_upload,
@@ -260,6 +261,7 @@ class OfferCreatePayload(BaseModel):
     notes_client: str | None = None
     notes_internal: str | None = None
     valid_until: str | None = None
+    default_margin_percent: float | None = None
 
 
 class OfferUpdatePayload(BaseModel):
@@ -279,6 +281,8 @@ class OfferUpdatePayload(BaseModel):
     notes_client: str | None = None
     notes_internal: str | None = None
     valid_until: str | None = None
+    default_margin_percent: float | None = None
+    apply_margin_to_all_lines: bool = False
 
 
 class OfferLinePayload(BaseModel):
@@ -288,6 +292,23 @@ class OfferLinePayload(BaseModel):
     unit_price_eur: float = 0.0
     discount_percent: float = 0.0
     position: int | None = None
+    purchase_unit_price_eur: float | None = None
+    margin_percent: float | None = None
+    supplier_id: int | None = None
+    supplier_name: str | None = None
+    supplier_code: str | None = None
+    product_id: int | None = None
+
+
+class OfferLineFromCatalogPayload(BaseModel):
+    internal_code: str
+    supplier_id: int
+    supplier_name: str | None = None
+    supplier_code: str | None = None
+    purchase_price_eur: float
+    quantity: float = 1.0
+    description: str | None = None
+    product_id: int | None = None
 
 
 class OfferLineUpdatePayload(BaseModel):
@@ -297,6 +318,8 @@ class OfferLineUpdatePayload(BaseModel):
     unit_price_eur: float | None = None
     discount_percent: float | None = None
     position: int | None = None
+    purchase_unit_price_eur: float | None = None
+    margin_percent: float | None = None
 
 
 def _get_user_product_list_or_404(
@@ -540,6 +563,7 @@ async def search_products(
 
         response.append(
             ProductComparison(
+                product_id=product.id,
                 internal_code=product.internal_code,
                 norma=product.norma,
                 diameter=product.diameter,
@@ -1582,10 +1606,51 @@ def _offer_line_api(line: OfferLine) -> dict:
         "quantity": line.quantity,
         "unit": line.unit,
         "unit_price_eur": line.unit_price_eur,
+        "purchase_unit_price_eur": line.purchase_unit_price_eur,
+        "margin_percent": line.margin_percent,
         "discount_percent": line.discount_percent,
         "line_total_eur": _offer_line_total(line),
         "product_id": line.product_id,
+        "supplier_id": line.supplier_id,
+        "supplier_name": line.supplier_name,
+        "supplier_code": line.supplier_code,
     }
+
+
+def _apply_line_margin(line: OfferLine, margin_percent: float | None = None) -> None:
+    if margin_percent is not None:
+        line.margin_percent = float(margin_percent)
+    line.unit_price_eur = selling_unit_price(
+        line.purchase_unit_price_eur,
+        line.margin_percent,
+        fallback_unit_price_eur=line.unit_price_eur,
+    )
+
+
+def _apply_margin_to_all_lines(session: Session, offer: Offer) -> None:
+    lines = session.exec(select(OfferLine).where(OfferLine.offer_id == offer.id)).all()
+    for line in lines:
+        if line.purchase_unit_price_eur is not None and line.purchase_unit_price_eur > 0:
+            line.margin_percent = float(offer.default_margin_percent or 0)
+            _apply_line_margin(line)
+            session.add(line)
+
+
+def _catalog_line_description(
+    product: Product,
+    supplier_name: str,
+    supplier_code: str | None,
+) -> str:
+    parts = [product.internal_code]
+    if product.y_money_name:
+        parts.append(product.y_money_name)
+    elif product.norma:
+        parts.append(product.norma)
+    desc = " · ".join(parts)
+    code = (supplier_code or "").strip()
+    if code:
+        return f"{desc} ({supplier_name}, {code})"
+    return f"{desc} ({supplier_name})"
 
 
 def _offer_api(offer: Offer, lines: list[OfferLine] | None = None) -> dict:
@@ -1612,6 +1677,7 @@ def _offer_api(offer: Offer, lines: list[OfferLine] | None = None) -> dict:
         "client_phone": offer.client_phone,
         "notes_client": offer.notes_client,
         "notes_internal": offer.notes_internal,
+        "default_margin_percent": float(offer.default_margin_percent or 0),
         "created_at": offer.created_at.isoformat() if offer.created_at else None,
         "updated_at": offer.updated_at.isoformat() if offer.updated_at else None,
     }
@@ -1734,6 +1800,7 @@ def create_offer(
         notes_client=(payload.notes_client or "").strip() or None,
         notes_internal=(payload.notes_internal or "").strip() or None,
         valid_until=_parse_optional_datetime(payload.valid_until),
+        default_margin_percent=float(payload.default_margin_percent or 0),
         created_at=now,
         updated_at=now,
     )
@@ -1765,6 +1832,7 @@ def patch_offer(
 ):
     offer = _get_user_offer_or_404(session, offer_id, user.id)
     data = payload.model_dump(exclude_unset=True)
+    apply_all = bool(data.pop("apply_margin_to_all_lines", False))
     if "valid_until" in data:
         data["valid_until"] = _parse_optional_datetime(data.pop("valid_until"))
     for key, value in data.items():
@@ -1775,6 +1843,8 @@ def patch_offer(
         raise HTTPException(status_code=400, detail="Vyplň názov firmy odberateľa.")
     offer.updated_at = datetime.utcnow()
     session.add(offer)
+    if apply_all:
+        _apply_margin_to_all_lines(session, offer)
     session.commit()
     session.refresh(offer)
     lines = session.exec(
@@ -1816,14 +1886,93 @@ def add_offer_line(
     position = payload.position
     if position is None:
         position = max((ln.position for ln in existing), default=0) + 1
+    purchase = payload.purchase_unit_price_eur
+    margin = (
+        float(payload.margin_percent)
+        if payload.margin_percent is not None
+        else float(offer.default_margin_percent or 0)
+    )
+    unit = selling_unit_price(
+        purchase,
+        margin,
+        fallback_unit_price_eur=float(payload.unit_price_eur),
+    )
     line = OfferLine(
         offer_id=offer_id,
         position=position,
         description=desc,
         quantity=float(payload.quantity),
         unit=(payload.unit or "ks").strip() or "ks",
-        unit_price_eur=float(payload.unit_price_eur),
+        unit_price_eur=unit,
+        purchase_unit_price_eur=purchase,
+        margin_percent=margin,
         discount_percent=float(payload.discount_percent),
+        product_id=payload.product_id,
+        supplier_id=payload.supplier_id,
+        supplier_name=(payload.supplier_name or "").strip() or None,
+        supplier_code=(payload.supplier_code or "").strip() or None,
+    )
+    session.add(line)
+    offer.updated_at = datetime.utcnow()
+    session.add(offer)
+    session.commit()
+    session.refresh(line)
+    return _offer_line_api(line)
+
+
+@router.post("/offers/{offer_id}/lines/from-catalog")
+def add_offer_line_from_catalog(
+    offer_id: int,
+    payload: OfferLineFromCatalogPayload,
+    session: Session = Depends(get_session),
+    user: AuthUserContext = Depends(get_current_user),
+):
+    offer = _get_user_offer_or_404(session, offer_id, user.id)
+    purchase = float(payload.purchase_price_eur)
+    if purchase < 0:
+        raise HTTPException(status_code=400, detail="Neplatná nákupná cena.")
+    code = (payload.internal_code or "").strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="Chýba interný kód produktu.")
+    prod = None
+    if payload.product_id:
+        prod = session.get(Product, payload.product_id)
+    if prod is None:
+        prod = session.exec(
+            select(Product).where(Product.internal_code == code)
+        ).first()
+    if prod is None:
+        raise HTTPException(status_code=404, detail="Produkt sa nenašiel v katalógu.")
+    supplier = session.get(Supplier, payload.supplier_id)
+    supplier_name = (
+        (payload.supplier_name or "").strip()
+        or (supplier.name if supplier else "")
+        or "Dodávateľ"
+    )
+    desc = (payload.description or "").strip() or _catalog_line_description(
+        prod,
+        supplier_name,
+        payload.supplier_code,
+    )
+    margin = float(offer.default_margin_percent or 0)
+    unit = selling_unit_price(purchase, margin, fallback_unit_price_eur=purchase)
+    existing = session.exec(
+        select(OfferLine).where(OfferLine.offer_id == offer_id)
+    ).all()
+    position = max((ln.position for ln in existing), default=0) + 1
+    line = OfferLine(
+        offer_id=offer_id,
+        position=position,
+        description=desc,
+        quantity=float(payload.quantity or 1),
+        unit="ks",
+        unit_price_eur=unit,
+        purchase_unit_price_eur=purchase,
+        margin_percent=margin,
+        product_id=prod.id,
+        supplier_id=payload.supplier_id,
+        supplier_name=supplier_name,
+        supplier_code=(payload.supplier_code or "").strip() or None,
     )
     session.add(line)
     offer.updated_at = datetime.utcnow()
@@ -1846,12 +1995,18 @@ def patch_offer_line(
     if line is None or line.offer_id != offer_id:
         raise HTTPException(status_code=404, detail="Položka sa nenašla.")
     data = payload.model_dump(exclude_unset=True)
+    recalc_margin = "margin_percent" in data or "purchase_unit_price_eur" in data
     for key, value in data.items():
         if key == "description" and isinstance(value, str):
             value = value.strip()
             if not value:
                 raise HTTPException(status_code=400, detail="Vyplň popis položky.")
         setattr(line, key, value)
+    if recalc_margin:
+        _apply_line_margin(
+            line,
+            data.get("margin_percent") if "margin_percent" in data else None,
+        )
     offer.updated_at = datetime.utcnow()
     session.add(line)
     session.add(offer)

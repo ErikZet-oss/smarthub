@@ -97,6 +97,25 @@ def migrate_sqlite_schema() -> None:
             )
             conn.commit()
 
+        offer_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(offer)"))}
+        if "default_margin_percent" not in offer_cols:
+            conn.execute(
+                text("ALTER TABLE offer ADD COLUMN default_margin_percent REAL DEFAULT 0")
+            )
+            conn.commit()
+
+        ol_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(offerline)"))}
+        for col, ddl in (
+            ("purchase_unit_price_eur", "REAL"),
+            ("margin_percent", "REAL DEFAULT 0"),
+            ("supplier_id", "INTEGER"),
+            ("supplier_name", "VARCHAR"),
+            ("supplier_code", "VARCHAR"),
+        ):
+            if col not in ol_cols:
+                conn.execute(text(f"ALTER TABLE offerline ADD COLUMN {col} {ddl}"))
+                conn.commit()
+
 
 def get_session():
     with Session(engine) as session:

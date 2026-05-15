@@ -72,7 +72,17 @@ def build_offer_csv(
     writer.writerow(["Dátum", _fmt_date(offer.created_at)])
     writer.writerow([])
     writer.writerow(
-        ["Poz.", "Popis", "Množstvo", "MJ", "Jedn. cena EUR", "Zľava %", "Spolu EUR"]
+        [
+            "Poz.",
+            "Popis",
+            "Množstvo",
+            "MJ",
+            "Nákup EUR",
+            "Marža %",
+            "Predaj EUR",
+            "Zľava %",
+            "Spolu EUR",
+        ]
     )
     for ln in sorted(lines, key=lambda x: (x.position, x.id or 0)):
         writer.writerow(
@@ -81,6 +91,8 @@ def build_offer_csv(
                 ln.description,
                 ln.quantity,
                 ln.unit,
+                ln.purchase_unit_price_eur if ln.purchase_unit_price_eur is not None else "",
+                ln.margin_percent,
                 ln.unit_price_eur,
                 ln.discount_percent,
                 _line_total(ln),

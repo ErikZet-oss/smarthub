@@ -143,6 +143,7 @@ class Offer(SQLModel, table=True):
     client_phone: Optional[str] = None
     notes_client: Optional[str] = None
     notes_internal: Optional[str] = None
+    default_margin_percent: float = Field(default=0.0)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -158,5 +159,10 @@ class OfferLine(SQLModel, table=True):
     unit: str = Field(default="ks")
     unit_price_eur: float = Field(default=0.0)
     discount_percent: float = Field(default=0.0)
+    purchase_unit_price_eur: Optional[float] = None
+    margin_percent: float = Field(default=0.0)
+    supplier_id: Optional[int] = Field(default=None, foreign_key="supplier.id")
+    supplier_name: Optional[str] = None
+    supplier_code: Optional[str] = None
     product_id: Optional[int] = Field(default=None, foreign_key="product.id")
     created_at: datetime = Field(default_factory=datetime.utcnow)
