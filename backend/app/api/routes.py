@@ -963,6 +963,42 @@ async def cart_remote_overview(
     return {"suppliers": list(rows)}
 
 
+@router.get("/cart/remote/{supplier_id}/overview")
+async def cart_remote_overview_single(
+    supplier_id: int,
+    refresh: bool = Query(
+        False,
+        description="Zahodiť cache pre tohto dodávateľa a načítať súhrn košíka znova.",
+    ),
+    session: Session = Depends(get_session),
+    user: AuthUserContext = Depends(get_current_user),
+):
+    """Súhrn košíka jedného dodávateľa — pre postupné načítanie v UI."""
+    supplier = session.get(Supplier, supplier_id)
+    if supplier is None:
+        raise HTTPException(status_code=404, detail="Dodávateľ neexistuje.")
+    if refresh:
+        ScraperService.invalidate_remote_cart_cache(supplier_id, user_id=user.id)
+    try:
+        eff = effective_supplier_for_user(session, supplier, user.id)
+        return await ScraperService.fetch_remote_cart_overview_row(
+            eff, automation_user_id=user.id
+        )
+    except Exception as exc:
+        return {
+            "supplier_id": supplier.id,
+            "name": supplier.name,
+            "logo_url": supplier_logo_public_url(supplier.logo_path),
+            "remote_supported": False,
+            "logged_in": False,
+            "total_eur": None,
+            "line_count": 0,
+            "message": str(exc).strip() or type(exc).__name__,
+            "web_cart_url": supplier_shop_cart_url(supplier.shop_url or ""),
+            "free_shipping_threshold_eur": supplier.free_shipping_threshold_eur,
+        }
+
+
 @router.get("/cart/remote/{supplier_id}")
 async def cart_remote_detail(
     supplier_id: int,

@@ -132,6 +132,52 @@ type RemoteCartOverviewRow = {
   free_shipping_threshold_eur: number | null;
 };
 
+type RemoteCartOverviewUiRow = RemoteCartOverviewRow & {
+  overviewLoading: boolean;
+};
+
+function normalizeRemoteCartOverviewRow(
+  raw: Partial<RemoteCartOverviewRow> & { supplier_id: number },
+  overviewLoading: boolean,
+): RemoteCartOverviewUiRow {
+  return {
+    supplier_id: raw.supplier_id,
+    name: raw.name ?? "",
+    logo_url: raw.logo_url ?? null,
+    remote_supported: Boolean(raw.remote_supported),
+    logged_in: raw.logged_in ?? null,
+    total_eur: raw.total_eur ?? null,
+    line_count: raw.line_count ?? 0,
+    message: raw.message ?? null,
+    web_cart_url: raw.web_cart_url ?? "",
+    free_shipping_threshold_eur: raw.free_shipping_threshold_eur ?? null,
+    overviewLoading,
+  };
+}
+
+function supplierListItemToRemoteCartPlaceholder(s: {
+  id: number;
+  name: string;
+  logo_url?: string | null;
+  free_shipping_threshold_eur?: number | null;
+}): RemoteCartOverviewUiRow {
+  return normalizeRemoteCartOverviewRow(
+    {
+      supplier_id: s.id,
+      name: s.name,
+      logo_url: s.logo_url ?? null,
+      remote_supported: false,
+      logged_in: null,
+      total_eur: null,
+      line_count: 0,
+      message: null,
+      web_cart_url: "",
+      free_shipping_threshold_eur: s.free_shipping_threshold_eur ?? null,
+    },
+    true,
+  );
+}
+
 type RemoteCartLineRow = {
   label: string;
   quantity: number;
@@ -2967,7 +3013,8 @@ export default function Home() {
   /** Len do refreshu stránky — neukladá sa (história košíka poznámku stále uloží pri kliku). */
   const [offerNotesByKey, setOfferNotesByKey] = useState<Record<string, string>>({});
   const [cartHistoryNotesOnly, setCartHistoryNotesOnly] = useState(false);
-  const [remoteCartRows, setRemoteCartRows] = useState<RemoteCartOverviewRow[]>([]);
+  const [remoteCartRows, setRemoteCartRows] = useState<RemoteCartOverviewUiRow[]>([]);
+  /** Načítanie zoznamu dodávateľov z DB (rýchle). */
   const [remoteCartLoading, setRemoteCartLoading] = useState(false);
   const [remoteCartFetchError, setRemoteCartFetchError] = useState<string | null>(
     null,
@@ -2982,6 +3029,8 @@ export default function Home() {
     null,
   );
   const [remoteCartRefreshTick, setRemoteCartRefreshTick] = useState(0);
+  const remoteCartRowsRef = useRef<RemoteCartOverviewUiRow[]>([]);
+  remoteCartRowsRef.current = remoteCartRows;
   /** Ďalší fetch prehľadu košíka obíde serverovú cache (`?refresh=1`). */
   const remoteCartNextFetchBypassCacheRef = useRef(false);
 
@@ -3117,59 +3166,148 @@ export default function Home() {
     return cartHistory.filter((e) => Boolean(e.offerNote?.trim()));
   }, [cartHistory, cartHistoryNotesOnly]);
 
+  const fetchRemoteCartOverviewForSupplier = useCallback(
+    async (supplierId: number, bypassCache: boolean) => {
+      const url = bypassCache
+        ? `${API_BASE}/api/cart/remote/${supplierId}/overview?refresh=1`
+        : `${API_BASE}/api/cart/remote/${supplierId}/overview`;
+      const response = await apiFetch(url);
+      const payload = (await response.json()) as Partial<RemoteCartOverviewRow> & {
+        detail?: unknown;
+      };
+      if (!response.ok) {
+        throw new Error(formatApiDetail(payload.detail));
+      }
+      return normalizeRemoteCartOverviewRow(
+        payload as RemoteCartOverviewRow & { supplier_id: number },
+        false,
+      );
+    },
+    [apiFetch],
+  );
+
+  const loadRemoteCartOverviews = useCallback(
+    (supplierIds: number[], bypassCache: boolean, cancelled: () => boolean) => {
+      for (const supplierId of supplierIds) {
+        void (async () => {
+          try {
+            const row = await fetchRemoteCartOverviewForSupplier(
+              supplierId,
+              bypassCache,
+            );
+            if (cancelled()) {
+              return;
+            }
+            setRemoteCartRows((prev) =>
+              prev.map((r) => (r.supplier_id === supplierId ? row : r)),
+            );
+          } catch (err) {
+            if (cancelled()) {
+              return;
+            }
+            setRemoteCartRows((prev) =>
+              prev.map((r) =>
+                r.supplier_id === supplierId
+                  ? {
+                      ...r,
+                      overviewLoading: false,
+                      remote_supported: false,
+                      logged_in: false,
+                      message:
+                        err instanceof Error
+                          ? err.message
+                          : "Chyba načítania košíka.",
+                    }
+                  : r,
+              ),
+            );
+          }
+        })();
+      }
+    },
+    [fetchRemoteCartOverviewForSupplier],
+  );
+
   useEffect(() => {
     if (activeView !== "kosik") {
       return;
     }
     let cancelled = false;
-    setRemoteCartLoading(true);
+    const isCancelled = () => cancelled;
+    const bypassCache = remoteCartNextFetchBypassCacheRef.current;
     setRemoteCartFetchError(null);
+
+    const existing = remoteCartRowsRef.current;
+    if (existing.length > 0) {
+      setRemoteCartRows(
+        existing.map((r) => ({ ...r, overviewLoading: true })),
+      );
+      loadRemoteCartOverviews(
+        existing.map((r) => r.supplier_id),
+        bypassCache,
+        isCancelled,
+      );
+      if (bypassCache) {
+        remoteCartNextFetchBypassCacheRef.current = false;
+      }
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setRemoteCartLoading(true);
     void (async () => {
-      const bypassCache = remoteCartNextFetchBypassCacheRef.current;
       try {
-        const response = await apiFetch(
-          bypassCache
-            ? `${API_BASE}/api/cart/remote?refresh=1`
-            : `${API_BASE}/api/cart/remote`,
-        );
-        const payload = (await response.json()) as {
-          suppliers?: RemoteCartOverviewRow[];
-          detail?: unknown;
-        };
+        const response = await apiFetch(`${API_BASE}/api/suppliers`);
+        const payload = (await response.json()) as
+          | Array<{
+              id: number;
+              name: string;
+              logo_url?: string | null;
+              free_shipping_threshold_eur?: number | null;
+            }>
+          | { detail?: unknown };
         if (!response.ok) {
-          throw new Error(formatApiDetail(payload.detail));
-        }
-        if (!cancelled) {
-          const rows = payload.suppliers ?? [];
-          setRemoteCartRows(
-            rows.map((r) => ({
-              ...r,
-              web_cart_url: r.web_cart_url ?? "",
-              free_shipping_threshold_eur:
-                r.free_shipping_threshold_eur ?? null,
-            })),
+          throw new Error(
+            formatApiDetail(
+              !Array.isArray(payload) ? payload.detail : "Chyba načítania dodávateľov.",
+            ),
           );
         }
+        if (cancelled || !Array.isArray(payload)) {
+          return;
+        }
+        const suppliers = payload;
+        setRemoteCartRows(suppliers.map(supplierListItemToRemoteCartPlaceholder));
+        setRemoteCartLoading(false);
+        loadRemoteCartOverviews(
+          suppliers.map((s) => s.id),
+          bypassCache,
+          isCancelled,
+        );
       } catch (err) {
         if (!cancelled) {
           setRemoteCartFetchError(
             err instanceof Error ? err.message : "Chyba načítania košíkov.",
           );
           setRemoteCartRows([]);
+          setRemoteCartLoading(false);
         }
       } finally {
         if (bypassCache) {
           remoteCartNextFetchBypassCacheRef.current = false;
-        }
-        if (!cancelled) {
-          setRemoteCartLoading(false);
         }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [activeView, remoteCartRefreshTick, apiFetch]);
+  }, [
+    activeView,
+    remoteCartRefreshTick,
+    apiFetch,
+    loadRemoteCartOverviews,
+  ]);
 
   const toggleRemoteSupplierCart = (supplierId: number) => {
     if (expandedRemoteSupplierId === supplierId) {
@@ -5718,10 +5856,9 @@ export default function Home() {
                       Košík u dodávateľov
                     </div>
                     <p className="max-w-2xl text-xs text-slate-600">
-                      Načítanie reálneho obsahu košíka cez API (Haspl, Mekrs). U ostatných
-                      dodávateľov zatiaľ nie je čítanie košíka napojené — zobrazí sa informácia v
-                      stĺpci stavu. Tlačidlo Obnoviť znovu stiahne košíky z e-shopov (preskočí
-                      dočasnú cache na serveri).
+                      Zoznam dodávateľov sa zobrazí hneď; súhrn košíka (Haspl, Mekrs) sa načíta
+                      postupne pre každého. U ostatných dodávateľov zatiaľ nie je čítanie košíka
+                      napojené. Tlačidlo Obnoviť znovu stiahne košíky z e-shopov (preskočí cache).
                     </p>
                   </div>
                   <Button
@@ -5733,6 +5870,9 @@ export default function Home() {
                       remoteCartNextFetchBypassCacheRef.current = true;
                       setExpandedRemoteSupplierId(null);
                       setRemoteDetailBySupplierId({});
+                      setRemoteCartRows((prev) =>
+                        prev.map((r) => ({ ...r, overviewLoading: true })),
+                      );
                       setRemoteCartRefreshTick((t) => t + 1);
                     }}
                   >
@@ -5747,7 +5887,7 @@ export default function Home() {
                 {remoteCartLoading ? (
                   <p className="flex items-center gap-2 text-sm text-slate-600">
                     <Loader2 className="h-4 w-4 animate-spin text-sky-600" />
-                    Načítavam košíky…
+                    Načítavam zoznam dodávateľov…
                   </p>
                 ) : remoteCartRows.length === 0 ? (
                   <p className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-600">
@@ -5819,16 +5959,29 @@ export default function Home() {
                                 <td
                                   className={cn(
                                     "max-w-[280px] px-3 py-2 align-middle text-xs",
-                                    row.remote_supported &&
+                                    !row.overviewLoading &&
+                                      row.remote_supported &&
                                       row.logged_in === true &&
                                       "text-emerald-800",
-                                    row.remote_supported &&
+                                    !row.overviewLoading &&
+                                      row.remote_supported &&
                                       row.logged_in === false &&
                                       "text-rose-700",
-                                    !row.remote_supported && "text-slate-600",
+                                    !row.overviewLoading &&
+                                      !row.remote_supported &&
+                                      "text-slate-600",
+                                    row.overviewLoading && "text-slate-500",
                                   )}
                                 >
-                                  {row.remote_supported && row.logged_in === true
+                                  {row.overviewLoading ? (
+                                    <span className="inline-flex items-center gap-1.5">
+                                      <Loader2
+                                        className="h-3.5 w-3.5 shrink-0 animate-spin text-sky-600"
+                                        aria-hidden
+                                      />
+                                      Načítavam košík…
+                                    </span>
+                                  ) : row.remote_supported && row.logged_in === true
                                     ? row.message?.trim() || "Prihlásený"
                                     : row.remote_supported && row.logged_in === false
                                       ? row.message?.trim() || "Chyba prihlásenia / API"
@@ -5836,13 +5989,25 @@ export default function Home() {
                                         "Čítanie košíka nie je pre tohto dodávateľa k dispozícii."}
                                 </td>
                                 <td className="whitespace-nowrap px-3 py-2 align-middle text-right tabular-nums text-slate-700">
-                                  {row.line_count}
+                                  {row.overviewLoading ? (
+                                    <Loader2
+                                      className="ml-auto h-3.5 w-3.5 animate-spin text-sky-600"
+                                      aria-label="Načítavam"
+                                    />
+                                  ) : (
+                                    row.line_count
+                                  )}
                                 </td>
                                 <td className="whitespace-nowrap px-3 py-2 align-middle text-right tabular-nums font-medium text-slate-900">
-                                  {row.total_eur != null &&
-                                  Number.isFinite(row.total_eur)
-                                    ? `${formatScrapePriceAmount(row.total_eur)} €`
-                                    : "—"}
+                                  {row.overviewLoading ? (
+                                    <Loader2
+                                      className="ml-auto h-3.5 w-3.5 animate-spin text-sky-600"
+                                      aria-label="Načítavam"
+                                    />
+                                  ) : row.total_eur != null &&
+                                      Number.isFinite(row.total_eur) ?
+                                    `${formatScrapePriceAmount(row.total_eur)} €`
+                                  : "—"}
                                 </td>
                                 <td className="px-2 py-2 align-middle text-center">
                                   <Button
@@ -5856,7 +6021,10 @@ export default function Home() {
                                         row.free_shipping_threshold_eur,
                                       ),
                                     )}
-                                    disabled={!(row.web_cart_url ?? "").trim()}
+                                    disabled={
+                                      row.overviewLoading ||
+                                      !(row.web_cart_url ?? "").trim()
+                                    }
                                     title={
                                       (row.free_shipping_threshold_eur != null &&
                                         Number.isFinite(row.free_shipping_threshold_eur)
