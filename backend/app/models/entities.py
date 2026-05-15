@@ -97,3 +97,66 @@ class ProductListItem(SQLModel, table=True):
     list_id: int = Field(foreign_key="productlist.id", index=True)
     product_id: int = Field(foreign_key="product.id", index=True)
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class CompanySettings(SQLModel, table=True):
+    """Singleton (id=1): údaje našej firmy na ponukách a v PDF."""
+
+    id: int = Field(default=1, primary_key=True)
+    company_name: str = ""
+    street: Optional[str] = None
+    city: Optional[str] = None
+    zip_code: Optional[str] = None
+    country: Optional[str] = "Slovensko"
+    ico: Optional[str] = None
+    dic: Optional[str] = None
+    ic_dph: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    web: Optional[str] = None
+    iban: Optional[str] = None
+    bank_name: Optional[str] = None
+    logo_path: Optional[str] = None
+    pdf_accent_color: Optional[str] = "#0284c7"
+    offer_footer_note: Optional[str] = None
+
+
+class Offer(SQLModel, table=True):
+    """Cenová ponuka pre klienta (per-user)."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="smarthubuser.id", index=True)
+    offer_number: str = Field(index=True)
+    title: Optional[str] = None
+    status: str = Field(default="draft", index=True)
+    valid_until: Optional[datetime] = None
+    client_name: str = ""
+    client_street: Optional[str] = None
+    client_city: Optional[str] = None
+    client_zip: Optional[str] = None
+    client_country: Optional[str] = None
+    client_ico: Optional[str] = None
+    client_dic: Optional[str] = None
+    client_ic_dph: Optional[str] = None
+    client_contact: Optional[str] = None
+    client_email: Optional[str] = None
+    client_phone: Optional[str] = None
+    notes_client: Optional[str] = None
+    notes_internal: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class OfferLine(SQLModel, table=True):
+    """Riadok ponuky (manuálny alebo neskôr z katalógu)."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    offer_id: int = Field(foreign_key="offer.id", index=True)
+    position: int = Field(default=0, index=True)
+    description: str = ""
+    quantity: float = Field(default=1.0)
+    unit: str = Field(default="ks")
+    unit_price_eur: float = Field(default=0.0)
+    discount_percent: float = Field(default=0.0)
+    product_id: Optional[int] = Field(default=None, foreign_key="product.id")
+    created_at: datetime = Field(default_factory=datetime.utcnow)

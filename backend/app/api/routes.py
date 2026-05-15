@@ -6,13 +6,19 @@ from urllib.parse import quote
 from uuid import uuid4
 
 from pydantic import BaseModel
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import Response
 from sqlmodel import Session, select
 
 from app.api.deps import AuthUserContext, get_current_user, require_admin
 from app.db import engine, get_session
 from app.models.entities import (
+    CompanySettings,
     FieldMapping,
+    Offer,
+    OfferLine,
     Product,
     ProductList,
     ProductListItem,
@@ -41,6 +47,16 @@ from app.services.smarthub_bootstrap import (
     ensure_credentials_for_supplier,
     hash_password,
     verify_password,
+)
+from app.services.company_logos import (
+    company_logo_public_url,
+    remove_company_logo_files,
+    save_company_logo_upload,
+)
+from app.services.offer_export import (
+    build_offer_csv,
+    build_offer_pdf,
+    offer_lines_subtotal,
 )
 from app.services.supplier_logos import (
     remove_supplier_logo_files,
@@ -208,6 +224,79 @@ class ProductListRenamePayload(BaseModel):
 
 class ProductListAddItemPayload(BaseModel):
     internal_code: str
+
+
+class CompanySettingsPayload(BaseModel):
+    company_name: str | None = None
+    street: str | None = None
+    city: str | None = None
+    zip_code: str | None = None
+    country: str | None = None
+    ico: str | None = None
+    dic: str | None = None
+    ic_dph: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    web: str | None = None
+    iban: str | None = None
+    bank_name: str | None = None
+    pdf_accent_color: str | None = None
+    offer_footer_note: str | None = None
+
+
+class OfferCreatePayload(BaseModel):
+    title: str | None = None
+    client_name: str
+    client_street: str | None = None
+    client_city: str | None = None
+    client_zip: str | None = None
+    client_country: str | None = None
+    client_ico: str | None = None
+    client_dic: str | None = None
+    client_ic_dph: str | None = None
+    client_contact: str | None = None
+    client_email: str | None = None
+    client_phone: str | None = None
+    notes_client: str | None = None
+    notes_internal: str | None = None
+    valid_until: str | None = None
+
+
+class OfferUpdatePayload(BaseModel):
+    title: str | None = None
+    status: str | None = None
+    client_name: str | None = None
+    client_street: str | None = None
+    client_city: str | None = None
+    client_zip: str | None = None
+    client_country: str | None = None
+    client_ico: str | None = None
+    client_dic: str | None = None
+    client_ic_dph: str | None = None
+    client_contact: str | None = None
+    client_email: str | None = None
+    client_phone: str | None = None
+    notes_client: str | None = None
+    notes_internal: str | None = None
+    valid_until: str | None = None
+
+
+class OfferLinePayload(BaseModel):
+    description: str
+    quantity: float = 1.0
+    unit: str = "ks"
+    unit_price_eur: float = 0.0
+    discount_percent: float = 0.0
+    position: int | None = None
+
+
+class OfferLineUpdatePayload(BaseModel):
+    description: str | None = None
+    quantity: float | None = None
+    unit: str | None = None
+    unit_price_eur: float | None = None
+    discount_percent: float | None = None
+    position: int | None = None
 
 
 def _get_user_product_list_or_404(
@@ -1406,3 +1495,428 @@ def mapping_profile(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _ensure_company_settings(session: Session) -> CompanySettings:
+    row = session.get(CompanySettings, 1)
+    if row is None:
+        row = CompanySettings(id=1)
+        session.add(row)
+        session.commit()
+        session.refresh(row)
+    return row
+
+
+def _company_settings_api(row: CompanySettings) -> dict:
+    return {
+        "company_name": row.company_name or "",
+        "street": row.street,
+        "city": row.city,
+        "zip_code": row.zip_code,
+        "country": row.country,
+        "ico": row.ico,
+        "dic": row.dic,
+        "ic_dph": row.ic_dph,
+        "email": row.email,
+        "phone": row.phone,
+        "web": row.web,
+        "iban": row.iban,
+        "bank_name": row.bank_name,
+        "logo_url": company_logo_public_url(row.logo_path),
+        "pdf_accent_color": row.pdf_accent_color or "#0284c7",
+        "offer_footer_note": row.offer_footer_note,
+    }
+
+
+def _parse_optional_datetime(raw: str | None) -> datetime | None:
+    if raw is None or not str(raw).strip():
+        return None
+    text = str(raw).strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400, detail="Neplatný formát dátumu (očakávané ISO)."
+        ) from exc
+
+
+def _next_offer_number(session: Session) -> str:
+    year = datetime.utcnow().year
+    prefix = f"PON-{year}-"
+    offers = session.exec(select(Offer)).all()
+    max_n = 0
+    for offer in offers:
+        num = offer.offer_number or ""
+        if not num.startswith(prefix):
+            continue
+        try:
+            max_n = max(max_n, int(num.split("-")[-1]))
+        except ValueError:
+            pass
+    return f"{prefix}{max_n + 1:04d}"
+
+
+def _get_user_offer_or_404(session: Session, offer_id: int, user_id: int) -> Offer:
+    row = session.exec(
+        select(Offer).where(Offer.id == offer_id, Offer.user_id == user_id)
+    ).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Ponuka sa nenašla.")
+    return row
+
+
+def _offer_line_total(line: OfferLine) -> float:
+    qty = float(line.quantity or 0)
+    price = float(line.unit_price_eur or 0)
+    disc = float(line.discount_percent or 0)
+    return round(qty * price * (1.0 - disc / 100.0), 2)
+
+
+def _offer_line_api(line: OfferLine) -> dict:
+    return {
+        "id": line.id,
+        "position": line.position,
+        "description": line.description,
+        "quantity": line.quantity,
+        "unit": line.unit,
+        "unit_price_eur": line.unit_price_eur,
+        "discount_percent": line.discount_percent,
+        "line_total_eur": _offer_line_total(line),
+        "product_id": line.product_id,
+    }
+
+
+def _offer_api(offer: Offer, lines: list[OfferLine] | None = None) -> dict:
+    sorted_lines = (
+        sorted(lines, key=lambda x: (x.position, x.id or 0)) if lines is not None else None
+    )
+    subtotal = offer_lines_subtotal(sorted_lines) if sorted_lines is not None else None
+    payload = {
+        "id": offer.id,
+        "offer_number": offer.offer_number,
+        "title": offer.title,
+        "status": offer.status,
+        "valid_until": offer.valid_until.isoformat() if offer.valid_until else None,
+        "client_name": offer.client_name,
+        "client_street": offer.client_street,
+        "client_city": offer.client_city,
+        "client_zip": offer.client_zip,
+        "client_country": offer.client_country,
+        "client_ico": offer.client_ico,
+        "client_dic": offer.client_dic,
+        "client_ic_dph": offer.client_ic_dph,
+        "client_contact": offer.client_contact,
+        "client_email": offer.client_email,
+        "client_phone": offer.client_phone,
+        "notes_client": offer.notes_client,
+        "notes_internal": offer.notes_internal,
+        "created_at": offer.created_at.isoformat() if offer.created_at else None,
+        "updated_at": offer.updated_at.isoformat() if offer.updated_at else None,
+    }
+    if sorted_lines is not None:
+        payload["lines"] = [_offer_line_api(ln) for ln in sorted_lines]
+        payload["subtotal_eur"] = subtotal
+        payload["vat_eur"] = round((subtotal or 0) * 0.21, 2)
+        payload["total_eur"] = round((subtotal or 0) * 1.21, 2)
+    return payload
+
+
+@router.get("/company-settings")
+def get_company_settings(
+    session: Session = Depends(get_session),
+    _: AuthUserContext = Depends(get_current_user),
+):
+    return _company_settings_api(_ensure_company_settings(session))
+
+
+@router.patch("/admin/company-settings")
+def patch_company_settings(
+    payload: CompanySettingsPayload,
+    session: Session = Depends(get_session),
+    _: AuthUserContext = Depends(require_admin),
+):
+    row = _ensure_company_settings(session)
+    data = payload.model_dump(exclude_unset=True)
+    for key, value in data.items():
+        if value is not None and isinstance(value, str):
+            value = value.strip() or None
+        setattr(row, key, value)
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return _company_settings_api(row)
+
+
+@router.post("/admin/company-settings/logo")
+async def upload_company_logo(
+    session: Session = Depends(get_session),
+    file: UploadFile = File(...),
+    _: AuthUserContext = Depends(require_admin),
+):
+    data = await file.read()
+    try:
+        basename = save_company_logo_upload(file.content_type, data, file.filename)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    row = _ensure_company_settings(session)
+    row.logo_path = basename
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return {"ok": True, "logo_url": company_logo_public_url(row.logo_path)}
+
+
+@router.delete("/admin/company-settings/logo")
+def delete_company_logo(
+    session: Session = Depends(get_session),
+    _: AuthUserContext = Depends(require_admin),
+):
+    remove_company_logo_files()
+    row = _ensure_company_settings(session)
+    row.logo_path = None
+    session.add(row)
+    session.commit()
+    return {"ok": True}
+
+
+@router.get("/offers")
+def list_offers(
+    session: Session = Depends(get_session),
+    user: AuthUserContext = Depends(get_current_user),
+):
+    offers = session.exec(
+        select(Offer)
+        .where(Offer.user_id == user.id)
+        .order_by(Offer.updated_at.desc())
+    ).all()
+    return [
+        {
+            "id": o.id,
+            "offer_number": o.offer_number,
+            "title": o.title,
+            "status": o.status,
+            "client_name": o.client_name,
+            "created_at": o.created_at.isoformat() if o.created_at else None,
+            "updated_at": o.updated_at.isoformat() if o.updated_at else None,
+        }
+        for o in offers
+    ]
+
+
+@router.post("/offers")
+def create_offer(
+    payload: OfferCreatePayload,
+    session: Session = Depends(get_session),
+    user: AuthUserContext = Depends(get_current_user),
+):
+    name = (payload.client_name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Vyplň názov firmy odberateľa.")
+    now = datetime.utcnow()
+    offer = Offer(
+        user_id=user.id,
+        offer_number=_next_offer_number(session),
+        title=(payload.title or "").strip() or None,
+        status="draft",
+        client_name=name,
+        client_street=(payload.client_street or "").strip() or None,
+        client_city=(payload.client_city or "").strip() or None,
+        client_zip=(payload.client_zip or "").strip() or None,
+        client_country=(payload.client_country or "").strip() or None,
+        client_ico=(payload.client_ico or "").strip() or None,
+        client_dic=(payload.client_dic or "").strip() or None,
+        client_ic_dph=(payload.client_ic_dph or "").strip() or None,
+        client_contact=(payload.client_contact or "").strip() or None,
+        client_email=(payload.client_email or "").strip() or None,
+        client_phone=(payload.client_phone or "").strip() or None,
+        notes_client=(payload.notes_client or "").strip() or None,
+        notes_internal=(payload.notes_internal or "").strip() or None,
+        valid_until=_parse_optional_datetime(payload.valid_until),
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(offer)
+    session.commit()
+    session.refresh(offer)
+    return _offer_api(offer, [])
+
+
+@router.get("/offers/{offer_id}")
+def get_offer(
+    offer_id: int,
+    session: Session = Depends(get_session),
+    user: AuthUserContext = Depends(get_current_user),
+):
+    offer = _get_user_offer_or_404(session, offer_id, user.id)
+    lines = session.exec(
+        select(OfferLine).where(OfferLine.offer_id == offer_id)
+    ).all()
+    return _offer_api(offer, list(lines))
+
+
+@router.patch("/offers/{offer_id}")
+def patch_offer(
+    offer_id: int,
+    payload: OfferUpdatePayload,
+    session: Session = Depends(get_session),
+    user: AuthUserContext = Depends(get_current_user),
+):
+    offer = _get_user_offer_or_404(session, offer_id, user.id)
+    data = payload.model_dump(exclude_unset=True)
+    if "valid_until" in data:
+        data["valid_until"] = _parse_optional_datetime(data.pop("valid_until"))
+    for key, value in data.items():
+        if isinstance(value, str):
+            value = value.strip() or (None if key != "client_name" else "")
+        setattr(offer, key, value)
+    if not (offer.client_name or "").strip():
+        raise HTTPException(status_code=400, detail="Vyplň názov firmy odberateľa.")
+    offer.updated_at = datetime.utcnow()
+    session.add(offer)
+    session.commit()
+    session.refresh(offer)
+    lines = session.exec(
+        select(OfferLine).where(OfferLine.offer_id == offer_id)
+    ).all()
+    return _offer_api(offer, list(lines))
+
+
+@router.delete("/offers/{offer_id}")
+def delete_offer(
+    offer_id: int,
+    session: Session = Depends(get_session),
+    user: AuthUserContext = Depends(get_current_user),
+):
+    offer = _get_user_offer_or_404(session, offer_id, user.id)
+    for line in session.exec(
+        select(OfferLine).where(OfferLine.offer_id == offer_id)
+    ).all():
+        session.delete(line)
+    session.delete(offer)
+    session.commit()
+    return {"ok": True}
+
+
+@router.post("/offers/{offer_id}/lines")
+def add_offer_line(
+    offer_id: int,
+    payload: OfferLinePayload,
+    session: Session = Depends(get_session),
+    user: AuthUserContext = Depends(get_current_user),
+):
+    offer = _get_user_offer_or_404(session, offer_id, user.id)
+    desc = (payload.description or "").strip()
+    if not desc:
+        raise HTTPException(status_code=400, detail="Vyplň popis položky.")
+    existing = session.exec(
+        select(OfferLine).where(OfferLine.offer_id == offer_id)
+    ).all()
+    position = payload.position
+    if position is None:
+        position = max((ln.position for ln in existing), default=0) + 1
+    line = OfferLine(
+        offer_id=offer_id,
+        position=position,
+        description=desc,
+        quantity=float(payload.quantity),
+        unit=(payload.unit or "ks").strip() or "ks",
+        unit_price_eur=float(payload.unit_price_eur),
+        discount_percent=float(payload.discount_percent),
+    )
+    session.add(line)
+    offer.updated_at = datetime.utcnow()
+    session.add(offer)
+    session.commit()
+    session.refresh(line)
+    return _offer_line_api(line)
+
+
+@router.patch("/offers/{offer_id}/lines/{line_id}")
+def patch_offer_line(
+    offer_id: int,
+    line_id: int,
+    payload: OfferLineUpdatePayload,
+    session: Session = Depends(get_session),
+    user: AuthUserContext = Depends(get_current_user),
+):
+    offer = _get_user_offer_or_404(session, offer_id, user.id)
+    line = session.get(OfferLine, line_id)
+    if line is None or line.offer_id != offer_id:
+        raise HTTPException(status_code=404, detail="Položka sa nenašla.")
+    data = payload.model_dump(exclude_unset=True)
+    for key, value in data.items():
+        if key == "description" and isinstance(value, str):
+            value = value.strip()
+            if not value:
+                raise HTTPException(status_code=400, detail="Vyplň popis položky.")
+        setattr(line, key, value)
+    offer.updated_at = datetime.utcnow()
+    session.add(line)
+    session.add(offer)
+    session.commit()
+    session.refresh(line)
+    return _offer_line_api(line)
+
+
+@router.delete("/offers/{offer_id}/lines/{line_id}")
+def delete_offer_line(
+    offer_id: int,
+    line_id: int,
+    session: Session = Depends(get_session),
+    user: AuthUserContext = Depends(get_current_user),
+):
+    offer = _get_user_offer_or_404(session, offer_id, user.id)
+    line = session.get(OfferLine, line_id)
+    if line is None or line.offer_id != offer_id:
+        raise HTTPException(status_code=404, detail="Položka sa nenašla.")
+    session.delete(line)
+    offer.updated_at = datetime.utcnow()
+    session.add(offer)
+    session.commit()
+    return {"ok": True}
+
+
+@router.get("/offers/{offer_id}/export/pdf")
+def export_offer_pdf(
+    offer_id: int,
+    session: Session = Depends(get_session),
+    user: AuthUserContext = Depends(get_current_user),
+):
+    offer = _get_user_offer_or_404(session, offer_id, user.id)
+    lines = list(
+        session.exec(select(OfferLine).where(OfferLine.offer_id == offer_id)).all()
+    )
+    company = _ensure_company_settings(session)
+    pdf = build_offer_pdf(offer, lines, company)
+    safe_num = offer.offer_number.replace("/", "-")
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="ponuka-{safe_num}.pdf"'
+        },
+    )
+
+
+@router.get("/offers/{offer_id}/export/csv")
+def export_offer_csv(
+    offer_id: int,
+    session: Session = Depends(get_session),
+    user: AuthUserContext = Depends(get_current_user),
+):
+    offer = _get_user_offer_or_404(session, offer_id, user.id)
+    lines = list(
+        session.exec(select(OfferLine).where(OfferLine.offer_id == offer_id)).all()
+    )
+    company = _ensure_company_settings(session)
+    csv_bytes = build_offer_csv(offer, lines, company)
+    safe_num = offer.offer_number.replace("/", "-")
+    return Response(
+        content=csv_bytes,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="ponuka-{safe_num}.csv"'
+        },
+    )

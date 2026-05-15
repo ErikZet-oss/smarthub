@@ -23,6 +23,7 @@ import {
   Eye,
   EyeOff,
   FileSpreadsheet,
+  FileText,
   History,
   ImageIcon,
   KeyRound,
@@ -43,6 +44,8 @@ import {
   X,
 } from "lucide-react";
 
+import { CompanySettingsAdmin } from "@/components/offers/CompanySettingsAdmin";
+import { OffersPanel } from "@/components/offers/OffersPanel";
 import { SearchableSelect } from "@/components/SearchableSelect";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -56,6 +59,7 @@ type View =
   | "zoznamy"
   | "kosik"
   | "historia"
+  | "ponuky"
   | "dodavatelia"
   | "parovanie"
   | "admin"
@@ -3049,6 +3053,7 @@ export default function Home() {
   const [newBranchPassword, setNewBranchPassword] = useState("");
   const [newBranchLabel, setNewBranchLabel] = useState("");
   const [adminUserSubmitting, setAdminUserSubmitting] = useState(false);
+  const [companyConfigured, setCompanyConfigured] = useState<boolean | null>(null);
 
   const apiFetch = useCallback(
     (input: RequestInfo | URL, init?: RequestInit) => {
@@ -3929,6 +3934,22 @@ export default function Home() {
       cancelled = true;
     };
   }, [activeView, isAppAdmin, apiToken, apiFetch]);
+
+  useEffect(() => {
+    if (
+      (activeView !== "ponuky" && activeView !== "admin") ||
+      !apiToken ||
+      !authSessionReady
+    ) {
+      return;
+    }
+    void apiFetch(`${API_BASE}/api/company-settings`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { company_name?: string } | null) => {
+        setCompanyConfigured(Boolean(d?.company_name?.trim()));
+      })
+      .catch(() => setCompanyConfigured(null));
+  }, [activeView, apiToken, authSessionReady, apiFetch]);
 
   const refreshDevLogs = async () => {
     try {
@@ -5153,6 +5174,7 @@ export default function Home() {
               { id: "zoznamy", label: "Zoznamy", icon: List },
               { id: "kosik", label: "Košík", icon: ShoppingCart },
               { id: "historia", label: "História", icon: History },
+              { id: "ponuky", label: "Ponuky", icon: FileText },
             ].map((item) => {
               const Icon = item.icon;
               const active = activeView === item.id;
@@ -7282,8 +7304,24 @@ export default function Home() {
             </section>
           )}
 
+          {activeView === "ponuky" && (
+            <OffersPanel
+              apiBase={API_BASE}
+              apiFetch={apiFetch}
+              apiToken={apiToken}
+              authReady={authSessionReady}
+              companyConfigured={companyConfigured}
+            />
+          )}
+
           {activeView === "admin" && (
             <section className="space-y-4">
+              <CompanySettingsAdmin
+                apiBase={API_BASE}
+                apiFetch={apiFetch}
+                apiToken={apiToken}
+                assetUrl={publicApiAssetUrl}
+              />
               <Card className="overflow-hidden border-violet-200/80 p-0 shadow-sm ring-1 ring-violet-100/60">
                 <div className="border-b border-violet-200/60 bg-gradient-to-r from-violet-50 via-white to-slate-50 px-5 py-4">
                   <h2 className="text-base font-semibold text-slate-900">

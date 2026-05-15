@@ -10,3 +10,4 @@ openpyxl
 bcrypt
 PyJWT
 psycopg[binary]
+reportlab>=4.0,<5
