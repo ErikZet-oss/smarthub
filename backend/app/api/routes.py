@@ -1243,6 +1243,7 @@ def _run_excel_import_task(task_id: str, file_path: str, sheet_name: str) -> Non
             state="done",
             result={
                 "products_upserted": result.products_upserted,
+                "products_legacy_removed": result.products_legacy_removed,
                 "suppliers_upserted": result.suppliers_upserted,
                 "mappings_upserted": result.mappings_upserted,
                 "rows_scanned": result.rows_scanned,
@@ -1338,6 +1339,7 @@ def import_excel(
         session.commit()
         return {
             "products_upserted": result.products_upserted,
+            "products_legacy_removed": result.products_legacy_removed,
             "suppliers_upserted": result.suppliers_upserted,
             "mappings_upserted": result.mappings_upserted,
             "rows_scanned": result.rows_scanned,

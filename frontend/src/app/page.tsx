@@ -4762,6 +4762,7 @@ export default function Home() {
         error?: string;
         result?: {
           products_upserted?: number;
+          products_legacy_removed?: number;
           suppliers_upserted?: number;
           mappings_upserted?: number;
           rows_scanned?: number;
@@ -4802,6 +4803,7 @@ export default function Home() {
       }
       const payload = (finalPayload?.result ?? {}) as {
         products_upserted?: number;
+        products_legacy_removed?: number;
         suppliers_upserted?: number;
         mappings_upserted?: number;
         rows_scanned?: number;
@@ -4810,6 +4812,7 @@ export default function Home() {
         warnings?: string[];
       };
       const prods = payload.products_upserted ?? 0;
+      const legacyRemoved = payload.products_legacy_removed ?? 0;
       const scanned = payload.rows_scanned ?? 0;
       const total = payload.total_rows ?? 0;
       const fileUsed = (payload.file_resolved || path).trim();
@@ -4821,8 +4824,11 @@ export default function Home() {
       setMappingStatus(
         prods === 0
           ? `Import z listu „${sheet}“: 0 produktov (naskenovaných riadkov: ${scanned}/${total || "?"}). Súbor: ${fileUsed}. Skontroluj list, mapovanie „Kód“ a či riadky majú vyplnený interný kód.`
-          : `Import z listu „${sheet}“ hotový: ${prods} produktov, ` +
-              `${payload.suppliers_upserted ?? 0} dodávateľov, ` +
+          : `Import z listu „${sheet}“ hotový: ${prods} produktov` +
+              (legacyRemoved > 0
+                ? `, odstránených ${legacyRemoved} starých krátkych kódov`
+                : "") +
+              `, ${payload.suppliers_upserted ?? 0} dodávateľov, ` +
               `${payload.mappings_upserted ?? 0} väzieb kódom, ` +
               `riadkov: ${scanned}/${total || "?"}. Súbor: ${fileUsed}.${warnBlock}`,
       );

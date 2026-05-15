@@ -8,7 +8,13 @@ from typing import Any, Callable
 from openpyxl import load_workbook
 from sqlmodel import Session, select
 
-from app.models.entities import FieldMapping, Product, ProductMapping, Supplier
+from app.models.entities import (
+    FieldMapping,
+    Product,
+    ProductListItem,
+    ProductMapping,
+    Supplier,
+)
 
 FIELD_DEFAULTS: dict[str, str] = {
     "code": "číslo Smart",
@@ -91,6 +97,7 @@ def _field_column_name(field_key: str, fm: FieldMapping | None) -> str | None:
 @dataclass
 class ImportResult:
     products_upserted: int = 0
+    products_legacy_removed: int = 0
     suppliers_upserted: int = 0
     mappings_upserted: int = 0
     rows_scanned: int = 0
@@ -475,6 +482,7 @@ def import_gamechanger_excel(
     # Akumulácia z Excelu (jeden prechod), potom batch zápis do DB.
     product_payloads: dict[str, dict[str, str | None]] = {}
     mapping_payloads: dict[tuple[str, str], str] = {}
+    legacy_short_codes: set[str] = set()
 
     for row in rows:
         result.rows_scanned += 1
@@ -485,6 +493,15 @@ def import_gamechanger_excel(
         internal_code = _row_cell(row, internal_code_idx)
         if not internal_code:
             continue
+
+        if (
+            money_catalog_idx is not None
+            and smart_code_idx is not None
+            and internal_code_idx == smart_code_idx
+        ):
+            short_code = _row_cell(row, money_catalog_idx)
+            if short_code and short_code != internal_code:
+                legacy_short_codes.add(short_code)
 
         payload = product_payloads.get(internal_code)
         if payload is None:
@@ -565,6 +582,32 @@ def import_gamechanger_excel(
             )
 
     session.flush()
+
+    if legacy_short_codes:
+        for short_code in legacy_short_codes:
+            if short_code in product_payloads:
+                continue
+            legacy = product_by_code.get(short_code)
+            if legacy is None or legacy.id is None:
+                continue
+            pid = int(legacy.id)
+            for mapping in session.exec(
+                select(ProductMapping).where(ProductMapping.product_id == pid)
+            ).all():
+                session.delete(mapping)
+            for list_item in session.exec(
+                select(ProductListItem).where(ProductListItem.product_id == pid)
+            ).all():
+                session.delete(list_item)
+            session.delete(legacy)
+            product_by_code.pop(short_code, None)
+            result.products_legacy_removed += 1
+        if result.products_legacy_removed:
+            result.warnings.append(
+                f"Odstránených {result.products_legacy_removed} starých produktov s krátkym "
+                f"katalógovým kódom (Money Katalóg), ktoré mali rovnaký riadok ako číslo Smart."
+            )
+        session.flush()
 
     # 2) Dodávatelia: preload + create chýbajúcich (meno bez rozlišovania veľkosti písmen)
     suppliers_rows = session.exec(select(Supplier)).all()
