@@ -215,14 +215,43 @@ class ArgipHttpClient:
     async def customer_cart_id(self) -> str:
         if self._cart_id:
             return self._cart_id
-        q = "query{customerCart{id}}"
-        data = await self._gql(q, {}, auth_required=True)
-        cart = data.get("customerCart")
-        cid = str((cart or {}).get("id") if isinstance(cart, dict) else "").strip()
+        cart = await self.fetch_customer_cart()
+        cid = str(cart.get("id") or "").strip()
         if not cid:
             raise RuntimeError("Argip: customerCart id sa nepodarilo načítať.")
         self._cart_id = cid
         return cid
+
+    async def fetch_customer_cart(self) -> dict[str, Any]:
+        """Načíta aktívny košík prihláseného zákazníka (Magento GraphQL)."""
+        queries = (
+            (
+                "query{customerCart{id total_quantity items{quantity product{sku name} "
+                "prices{price{value currency} row_total{value currency}} "
+                "... on ConfigurableCartItem{configured_variant{sku name}}} "
+                "prices{subtotal_excluding_tax{value currency} grand_total{value currency}}}}"
+            ),
+            (
+                "query{customerCart{id items{quantity product{sku name} "
+                "prices{price{value} row_total{value}} prices{grand_total{value}}}}"
+            ),
+            ("query{customerCart{id items{quantity product{sku name}}}}"),
+        )
+        last_err: Optional[Exception] = None
+        for q in queries:
+            try:
+                data = await self._gql(q, {}, auth_required=True)
+                cart = data.get("customerCart")
+                if isinstance(cart, dict):
+                    cid = str(cart.get("id") or "").strip()
+                    if cid:
+                        self._cart_id = cid
+                    return cart
+            except Exception as exc:
+                last_err = exc
+        if last_err:
+            raise last_err
+        raise RuntimeError("Argip: customerCart sa nepodarilo načítať.")
 
     async def add_to_cart(self, sku: str, quantity: int) -> None:
         cart_id = await self.customer_cart_id()
@@ -244,4 +273,90 @@ class ArgipHttpClient:
         if isinstance(user_errors, list) and user_errors:
             msg = str(user_errors[0].get("message") or "Argip cart chyba")
             raise RuntimeError(f"Argip: {msg}")
+
+
+def _argip_money_value(node: Any) -> Optional[float]:
+    if not isinstance(node, dict):
+        return None
+    raw = node.get("value")
+    if raw is None:
+        return None
+    try:
+        return round(float(raw), 4)
+    except (TypeError, ValueError):
+        return None
+
+
+def argip_parse_cart_json(cart: dict[str, Any]) -> dict[str, Any]:
+    """
+    Z GraphQL ``customerCart`` — riadky a súčet (EUR, prednostne bez DPH ak je v odpovedi).
+    """
+    lines: list[dict[str, Any]] = []
+    raw_items = cart.get("items")
+    if not isinstance(raw_items, list):
+        raw_items = []
+
+    for it in raw_items:
+        if not isinstance(it, dict):
+            continue
+        try:
+            qn = int(it.get("quantity") or 0)
+        except (TypeError, ValueError):
+            qn = 0
+        if qn <= 0:
+            continue
+        product = it.get("product") if isinstance(it.get("product"), dict) else {}
+        variant = (
+            it.get("configured_variant")
+            if isinstance(it.get("configured_variant"), dict)
+            else {}
+        )
+        sku = str(variant.get("sku") or product.get("sku") or "").strip()
+        label = str(variant.get("name") or product.get("name") or sku or "—").strip()
+        prices = it.get("prices") if isinstance(it.get("prices"), dict) else {}
+        unit_eur = _argip_money_value(
+            prices.get("price") if isinstance(prices.get("price"), dict) else None
+        )
+        line_total = _argip_money_value(
+            prices.get("row_total") if isinstance(prices.get("row_total"), dict) else None
+        )
+        if unit_eur is None and line_total is not None and qn > 0:
+            unit_eur = round(line_total / qn, 4)
+        if line_total is None and unit_eur is not None:
+            line_total = round(unit_eur * qn, 4)
+        lines.append(
+            {
+                "label": label,
+                "quantity": qn,
+                "unit_price_eur": unit_eur,
+                "line_total_eur": line_total,
+                "variant_code": sku or None,
+            }
+        )
+
+    cart_prices = cart.get("prices") if isinstance(cart.get("prices"), dict) else {}
+    total_eur: Optional[float] = None
+    for key in (
+        "subtotal_excluding_tax",
+        "subtotal_with_discount_excluding_tax",
+        "grand_total",
+    ):
+        node = cart_prices.get(key)
+        if isinstance(node, dict):
+            total_eur = _argip_money_value(node)
+            if total_eur is not None:
+                break
+    if total_eur is None:
+        total_eur = round(
+            sum((ln.get("line_total_eur") or 0.0) for ln in lines),
+            4,
+        )
+        if not lines:
+            total_eur = None
+
+    return {
+        "lines": lines,
+        "total_eur": total_eur,
+        "line_count": len(lines),
+    }
 

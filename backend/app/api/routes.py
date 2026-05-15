@@ -934,7 +934,7 @@ async def cart_remote_overview(
     session: Session = Depends(get_session),
     user: AuthUserContext = Depends(get_current_user),
 ):
-    """Súhrn košíkov u dodávateľov (HTTP: Haspl, Mekrs)."""
+    """Súhrn košíkov u dodávateľov (HTTP: Haspl, Mekrs, Argip)."""
     suppliers = session.exec(
         select(Supplier).order_by(Supplier.sort_order, Supplier.id)
     ).all()
