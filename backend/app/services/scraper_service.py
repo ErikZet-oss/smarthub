@@ -24,7 +24,9 @@ from app.services.hopefix_http_client import (
     HopefixHttpClient,
     build_hopefix_catalog_url,
     find_hopefix_row,
+    hopefix_cart_url,
     hopefix_norm_code,
+    hopefix_parse_cart_html,
     hopefix_raw_suggests_oos,
     hopefix_row_is_oos,
     parse_hopefix_rows,
@@ -117,6 +119,7 @@ _remote_schachermayer_cart_snapshot: RemoteCartCacheStore = {}
 _remote_valenta_cart_snapshot: RemoteCartCacheStore = {}
 _remote_halfmann_cart_snapshot: RemoteCartCacheStore = {}
 _remote_fabory_cart_snapshot: RemoteCartCacheStore = {}
+_remote_hopefix_cart_snapshot: RemoteCartCacheStore = {}
 
 
 class ScraperProductNotFoundError(ValueError):
@@ -184,6 +187,7 @@ def _invalidate_remote_cart_cache(
         _remote_valenta_cart_snapshot.pop(key, None)
         _remote_halfmann_cart_snapshot.pop(key, None)
         _remote_fabory_cart_snapshot.pop(key, None)
+        _remote_hopefix_cart_snapshot.pop(key, None)
         return
     suffix = f":{sid}"
     for store in (
@@ -196,6 +200,7 @@ def _invalidate_remote_cart_cache(
         _remote_valenta_cart_snapshot,
         _remote_halfmann_cart_snapshot,
         _remote_fabory_cart_snapshot,
+        _remote_hopefix_cart_snapshot,
     ):
         for k in list(store.keys()):
             if k.endswith(suffix):
@@ -213,6 +218,7 @@ def _clear_all_remote_cart_caches() -> None:
     _remote_valenta_cart_snapshot.clear()
     _remote_halfmann_cart_snapshot.clear()
     _remote_fabory_cart_snapshot.clear()
+    _remote_hopefix_cart_snapshot.clear()
 
 
 def _session_reuse_enabled() -> bool:
@@ -274,7 +280,9 @@ def _supplier_is_mekrs(supplier: Supplier) -> bool:
 def _supplier_is_hopefix(supplier: Supplier) -> bool:
     # „HOPE fix“, „Hope  Fix“ → po zrušení medzier musí sedieť s hopefix.cz
     compact = re.sub(r"\s+", "", (supplier.name or "").lower())
-    return "hopefix" in compact
+    if "hopefix" in compact:
+        return True
+    return "hopefix.cz" in (supplier.shop_url or "").lower()
 
 
 def _supplier_has_remote_cart_credentials(supplier: Supplier) -> bool:
@@ -381,6 +389,7 @@ def supplier_allows_empty_cart_config(supplier: Supplier) -> bool:
         or _supplier_is_schachermayer(supplier)
         or _supplier_is_valenta(supplier)
         or _supplier_is_fabory(supplier)
+        or _supplier_is_hopefix(supplier)
     ):
         return True
     u = (supplier.shop_url or "").lower()
@@ -400,6 +409,8 @@ def supplier_allows_empty_cart_config(supplier: Supplier) -> bool:
     if "valentazt.cz" in u:
         return True
     if "fabory.com" in u:
+        return True
+    if "hopefix.cz" in u:
         return True
     return False
 
@@ -7059,6 +7070,7 @@ class ScraperService:
                 or _supplier_is_valenta(supplier)
                 or _supplier_is_halfmann(supplier)
                 or _supplier_is_fabory(supplier)
+                or _supplier_is_hopefix(supplier)
             )
         ):
             hit = _remote_cart_cache_get(_remote_cart_overview_cache, uid, sid)
@@ -7316,13 +7328,16 @@ class ScraperService:
                         snap.get("simulation_html") or "",
                         cart_html=snap.get("cart_html") or "",
                     )
+                fabory_msg = None
+                if parsed.get("empty_cart"):
+                    fabory_msg = "Košík je prázdny."
                 result = {
                     **base,
                     "remote_supported": True,
                     "logged_in": True,
                     "total_eur": parsed["total_eur"],
                     "line_count": parsed["line_count"],
-                    "message": None,
+                    "message": fabory_msg,
                     "web_cart_url": fabory_cart_url(supplier.shop_url or ""),
                 }
                 if sid is not None:
@@ -7350,6 +7365,49 @@ class ScraperService:
                         },
                     )
                 return result
+            if _supplier_is_hopefix(supplier):
+                hf_base = (supplier.shop_url or "").strip() or "https://www.hopefix.cz"
+                async with HopefixHttpClient(hf_base) as client:
+                    await client.ensure_login(supplier.username, supplier.password)
+                    snap = await client.fetch_cart_snapshot()
+                    parsed = hopefix_parse_cart_html(snap.get("kosik_html") or "")
+                hopefix_msg = (
+                    "Košík je prázdny." if parsed.get("empty_cart") else None
+                )
+                result = {
+                    **base,
+                    "remote_supported": True,
+                    "logged_in": True,
+                    "total_eur": parsed["total_eur"],
+                    "line_count": parsed["line_count"],
+                    "message": hopefix_msg,
+                    "web_cart_url": hopefix_cart_url(hf_base),
+                }
+                if sid is not None:
+                    _remote_cart_cache_set(
+                        _remote_cart_overview_cache, uid, sid, result
+                    )
+                    _remote_cart_cache_set(
+                        _remote_hopefix_cart_snapshot, uid, sid, snap
+                    )
+                    _remote_cart_cache_set(
+                        _remote_cart_detail_cache,
+                        uid,
+                        sid,
+                        {
+                            "supplier_id": supplier.id,
+                            "name": supplier.name,
+                            "logo_url": supplier_logo_public_url(
+                                supplier.logo_path
+                            ),
+                            "remote_supported": True,
+                            "logged_in": True,
+                            "total_eur": parsed["total_eur"],
+                            "lines": parsed["lines"],
+                            "message": hopefix_msg,
+                        },
+                    )
+                return result
         except Exception as exc:
             return {
                 **base,
@@ -7358,7 +7416,8 @@ class ScraperService:
                 "message": str(exc),
             }
         base["message"] = (
-            "Košík cez API je zatiaľ pre Haspl, Mekrs, Argip, Schachermayer, Valenta, Halfmann a Fabory. "
+            "Košík cez API je zatiaľ pre Haspl, Mekrs, Argip, Schachermayer, Valenta, "
+            "Halfmann, Fabory a Hopefix. "
             "U ostatných sa položky pridávajú v prehliadači — obsah tu nevieme načítať."
         )
         return base
@@ -7609,16 +7668,55 @@ class ScraperService:
                         (snap or {}).get("simulation_html") or "",
                         cart_html=(snap or {}).get("cart_html") or "",
                     )
+                fabory_detail_msg = (
+                    "Košík je prázdny."
+                    if parsed.get("empty_cart")
+                    else None
+                )
                 result = {
                     **out,
                     "remote_supported": True,
                     "logged_in": True,
                     "total_eur": parsed["total_eur"],
                     "lines": parsed["lines"],
+                    "message": fabory_detail_msg,
                 }
                 if sid is not None and isinstance(snap, dict):
                     _remote_cart_cache_set(
                         _remote_fabory_cart_snapshot, uid, sid, snap
+                    )
+                    _remote_cart_cache_set(
+                        _remote_cart_detail_cache, uid, sid, result
+                    )
+                return result
+            if _supplier_is_hopefix(supplier):
+                snap = (
+                    _remote_cart_cache_get(_remote_hopefix_cart_snapshot, uid, sid)
+                    if sid is not None
+                    else None
+                )
+                hf_base = (supplier.shop_url or "").strip() or "https://www.hopefix.cz"
+                async with HopefixHttpClient(hf_base) as client:
+                    await client.ensure_login(supplier.username, supplier.password)
+                    if not isinstance(snap, dict):
+                        snap = await client.fetch_cart_snapshot()
+                    parsed = hopefix_parse_cart_html(
+                        (snap or {}).get("kosik_html") or ""
+                    )
+                hopefix_detail_msg = (
+                    "Košík je prázdny." if parsed.get("empty_cart") else None
+                )
+                result = {
+                    **out,
+                    "remote_supported": True,
+                    "logged_in": True,
+                    "total_eur": parsed["total_eur"],
+                    "lines": parsed["lines"],
+                    "message": hopefix_detail_msg,
+                }
+                if sid is not None and isinstance(snap, dict):
+                    _remote_cart_cache_set(
+                        _remote_hopefix_cart_snapshot, uid, sid, snap
                     )
                     _remote_cart_cache_set(
                         _remote_cart_detail_cache, uid, sid, result
@@ -7632,7 +7730,8 @@ class ScraperService:
                 "message": str(exc),
             }
         out["message"] = (
-            "Detail košíka cez API je zatiaľ len pre Haspl, Mekrs, Argip, Schachermayer, Valenta, Halfmann a Fabory."
+            "Detail košíka cez API je zatiaľ len pre Haspl, Mekrs, Argip, Schachermayer, Valenta, "
+            "Halfmann, Fabory a Hopefix."
         )
         return out
 

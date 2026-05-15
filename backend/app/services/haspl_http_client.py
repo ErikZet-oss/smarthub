@@ -68,6 +68,10 @@ def supplier_shop_cart_url(shop_url: str) -> str:
         from app.services.fabory_http_client import fabory_cart_url
 
         return fabory_cart_url(raw)
+    if "hopefix.cz" in raw.lower():
+        from app.services.hopefix_http_client import hopefix_cart_url
+
+        return hopefix_cart_url(raw)
     return f"{haspl_base_url(raw)}/kosik"
 
 

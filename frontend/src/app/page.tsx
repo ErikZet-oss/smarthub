@@ -5856,7 +5856,7 @@ export default function Home() {
                       Košík u dodávateľov
                     </div>
                     <p className="max-w-2xl text-xs text-slate-600">
-                      Zoznam dodávateľov sa zobrazí hneď; súhrn košíka (Haspl, Mekrs, Argip, Schachermayer, Valenta, Halfmann, Fabory) sa načíta
+                      Zoznam dodávateľov sa zobrazí hneď; súhrn košíka (Haspl, Mekrs, Argip, Schachermayer, Valenta, Halfmann, Fabory, Hopefix) sa načíta
                       postupne pre každého. U ostatných dodávateľov zatiaľ nie je čítanie košíka
                       napojené. Tlačidlo Obnoviť znovu stiahne košíky z e-shopov (preskočí cache).
                     </p>
@@ -5982,7 +5982,10 @@ export default function Home() {
                                       Načítavam košík…
                                     </span>
                                   ) : row.remote_supported && row.logged_in === true
-                                    ? row.message?.trim() || "Prihlásený"
+                                    ? row.message?.trim() ||
+                                      (row.line_count === 0
+                                        ? "Košík je prázdny"
+                                        : "Prihlásený")
                                     : row.remote_supported && row.logged_in === false
                                       ? row.message?.trim() || "Chyba prihlásenia / API"
                                       : row.message?.trim() ||
@@ -6059,8 +6062,22 @@ export default function Home() {
                                       </p>
                                     ) : detail?.message &&
                                       (!detail.lines || detail.lines.length === 0) ? (
-                                      <p className="text-xs text-rose-700">
+                                      <p
+                                        className={cn(
+                                          "text-xs",
+                                          detail.logged_in === true &&
+                                            /prázdny/i.test(detail.message)
+                                            ? "text-slate-600"
+                                            : "text-rose-700",
+                                        )}
+                                      >
                                         {detail.message}
+                                      </p>
+                                    ) : detail &&
+                                      detail.logged_in === true &&
+                                      (!detail.lines || detail.lines.length === 0) ? (
+                                      <p className="text-xs text-slate-600">
+                                        Košík je prázdny.
                                       </p>
                                     ) : detail && detail.lines.length > 0 ? (
                                       <div className="space-y-2">

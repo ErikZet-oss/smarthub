@@ -268,6 +268,10 @@ class HopefixHttpClient:
         r.raise_for_status()
         self._login_ok = True
 
+    async def fetch_cart_snapshot(self) -> dict[str, Any]:
+        html = await _hopefix_fetch_kosik_html(self._client)
+        return {"kosik_html": html}
+
     def _abs_url(self, url_or_path: str) -> str:
         u = (url_or_path or "").strip()
         if u.startswith("http://") or u.startswith("https://"):
@@ -321,3 +325,115 @@ class HopefixHttpClient:
             err = blob.get("error") or blob.get("err")
             if err and blob.get("ok") is False:
                 raise RuntimeError(f"Hopefix API: {err}")
+
+
+def hopefix_cart_url(base_url: str = DEFAULT_BASE) -> str:
+    return f"{(base_url or DEFAULT_BASE).rstrip('/')}/kosik"
+
+
+def _hopefix_cart_product_code_from_cell(text: str) -> str:
+    plain = _strip_tags(text)
+    if not plain:
+        return ""
+    first = plain.split()[0].strip()
+    return hopefix_norm_code(first)
+
+
+def hopefix_parse_cart_html(html: str) -> dict[str, Any]:
+    """
+    Z ``GET /kosik`` — riadky ``table.table_cart`` (variant[id][qty], ceny v EUR).
+    """
+    page = html or ""
+    if not page.strip():
+        return {"lines": [], "total_eur": None, "line_count": 0, "empty_cart": True}
+
+    lines: list[dict[str, Any]] = []
+    for m in re.finditer(
+        r"<tr[^>]*>([\s\S]*?name=[\"']variant\[(\d+)\]\[qty\][\"'][^>]*value=[\"'](\d+)[\"'][\s\S]*?)</tr>",
+        page,
+        re.I,
+    ):
+        inner = m.group(1)
+        if "td_price_total" in inner or "Celkem bez DPH" in inner:
+            continue
+        try:
+            qty = int(m.group(3))
+        except (TypeError, ValueError):
+            qty = 1
+        if qty < 1:
+            continue
+        tds = re.findall(r"<td[^>]*>([\s\S]*?)</td>", inner, re.I | re.DOTALL)
+        product_nr = ""
+        label = ""
+        product_idx: Optional[int] = None
+        for i, td in enumerate(tds):
+            code = _hopefix_cart_product_code_from_cell(td)
+            if code and len(code) >= 6:
+                product_nr = code
+                label = _strip_tags(td) or code
+                product_idx = i
+                break
+        if not product_nr:
+            continue
+        eur_vals: list[float] = []
+        for td in tds[(product_idx or 0) + 1 :]:
+            pe = _parse_eur_cell(_strip_tags(td))
+            if pe is not None:
+                eur_vals.append(pe)
+        unit_eur = eur_vals[0] if eur_vals else None
+        line_total = eur_vals[1] if len(eur_vals) > 1 else eur_vals[0] if eur_vals else None
+        if line_total is None and unit_eur is not None:
+            line_total = round(unit_eur * qty, 4)
+        lines.append(
+            {
+                "label": label,
+                "quantity": qty,
+                "unit_price_eur": unit_eur,
+                "line_total_eur": line_total,
+                "variant_code": product_nr,
+                "hopefix_variant_id": m.group(2),
+            }
+        )
+
+    total_eur: Optional[float] = None
+    tm = re.search(
+        r"Celkem bez DPH[\s\S]{0,120}?class=[\"']price_total[\"'][^>]*>([^<]+)",
+        page,
+        re.I,
+    )
+    if tm:
+        total_eur = _parse_eur_cell(tm.group(1))
+    if total_eur is None:
+        tm2 = re.search(r'class=["\']price_total["\'][^>]*>([^<]+)', page, re.I)
+        if tm2:
+            total_eur = _parse_eur_cell(tm2.group(1))
+    if total_eur is None and lines:
+        total_eur = round(
+            sum((ln.get("line_total_eur") or 0.0) for ln in lines),
+            4,
+        )
+
+    line_count = len(lines)
+    empty = line_count <= 0
+    if empty and total_eur is None:
+        total_eur = 0.0
+
+    return {
+        "lines": lines,
+        "total_eur": total_eur,
+        "line_count": line_count,
+        "empty_cart": empty,
+    }
+
+
+async def _hopefix_fetch_kosik_html(client: httpx.AsyncClient) -> str:
+    r = await client.get("/kosik")
+    r.raise_for_status()
+    body = r.text or ""
+    if "/prihlaseni" in str(r.url.path).lower() or 'name="cmd" value="log_me_in"' in body:
+        raise RuntimeError(
+            "Hopefix: košík vyžaduje prihlásenie (skontroluj email/heslo dodávateľa)."
+        )
+    return body
+
+
