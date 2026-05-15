@@ -36,7 +36,7 @@ from app.services.bmkco_http_client import (
     bmkco_base_url,
     bmkco_cart_url,
     bmkco_norm_code,
-    bmkco_parse_cart_datatable,
+    bmkco_parse_cart_html,
 )
 from app.services.halfmann_http_client import (
     HalfmannHttpClient,
@@ -7420,8 +7420,8 @@ class ScraperService:
                 async with BmkcoHttpClient(bm_base) as client:
                     await client.ensure_login(supplier.username, supplier.password)
                     snap = await client.fetch_cart_snapshot()
-                    parsed = bmkco_parse_cart_datatable(
-                        snap.get("datatable") or {},
+                    parsed = bmkco_parse_cart_html(
+                        snap.get("kosik_html") or "",
                         total_eur=snap.get("total_eur"),
                         line_count=snap.get("line_count"),
                     )
@@ -7787,8 +7787,8 @@ class ScraperService:
                     await client.ensure_login(supplier.username, supplier.password)
                     if not isinstance(snap, dict):
                         snap = await client.fetch_cart_snapshot()
-                    parsed = bmkco_parse_cart_datatable(
-                        (snap or {}).get("datatable") or {},
+                    parsed = bmkco_parse_cart_html(
+                        (snap or {}).get("kosik_html") or "",
                         total_eur=(snap or {}).get("total_eur"),
                         line_count=(snap or {}).get("line_count"),
                     )

@@ -9,7 +9,7 @@ HAR flow:
 - POST /cs/Data/DoKosiku (karta, mnozstvi)
 - POST /cs/Data/PocetPolozekKosiku — počet riadkov košíka
 - POST /cs/Data/CenaPolozekKosiku?zvolenaMena=EUR — súčet košíka
-- GET  /cs/Data/GetZbozi?typProduktu=kosik&searchPage=false — riadky košíka (DataTables)
+- POST /cs/Data/KosikPolozky (zvolenaMena, jazyk) — HTML riadkov košíka (stránka /cs/B2C/Kosik)
 """
 
 from __future__ import annotations
@@ -45,8 +45,7 @@ def bmkco_norm_code(text: str) -> str:
 
 
 def bmkco_cart_url(shop_url: str) -> str:
-    """Košík je panel na B2C úvodnej stránke (SPA)."""
-    return f"{bmkco_base_url(shop_url)}/cs/Home/IndexB2C"
+    return f"{bmkco_base_url(shop_url)}/cs/B2C/Kosik"
 
 
 def _strip_tags(html: str) -> str:
@@ -76,103 +75,104 @@ def _parse_eur_cell(text: str) -> Optional[float]:
         return None
 
 
-def _karta_from_datatable_cell(html: str) -> str:
-    plain = _strip_tags(html)
-    m = re.search(r"\b(\d{2,})\b", plain)
+def _hidden_input_value(html: str, element_id: str) -> Optional[str]:
+    m = re.search(
+        rf'id\s*=\s*["\']{re.escape(element_id)}["\'][^>]*value\s*=\s*["\']([^"\']*)["\']',
+        html or "",
+        re.I,
+    )
     if m:
-        return m.group(1)
-    return bmkco_norm_code(plain)
+        return (m.group(1) or "").strip()
+    m = re.search(
+        rf'value\s*=\s*["\']([^"\']*)["\'][^>]*id\s*=\s*["\']{re.escape(element_id)}["\']',
+        html or "",
+        re.I,
+    )
+    if m:
+        return (m.group(1) or "").strip()
+    return None
 
 
-def _qty_from_datatable_cell(html: str) -> int:
-    m = re.search(r'value\s*=\s*["\'](\d+)["\']', html or "", re.I)
-    if m:
-        try:
-            q = int(m.group(1))
-            return q if q > 0 else 1
-        except ValueError:
-            pass
+def _qty_from_cart_row(html: str) -> int:
+    for pat in (
+        r'name\s*=\s*["\']r\[\d+\]\[qty\]["\'][^>]*value\s*=\s*["\'](\d+)["\']',
+        r'value\s*=\s*["\'](\d+)["\'][^>]*name\s*=\s*["\']r\[\d+\]\[qty\]["\']',
+        r'name\s*=\s*["\']mnozstvi["\'][^>]*value\s*=\s*["\'](\d+)["\']',
+    ):
+        m = re.search(pat, html or "", re.I)
+        if m:
+            try:
+                q = int(m.group(1))
+                return q if q > 0 else 1
+            except ValueError:
+                pass
     q = _bmkco_parse_int(_strip_tags(html))
     return q if q and q > 0 else 1
 
 
-def _bmkco_datatable_query_params(*, s_echo: int = 1) -> dict[str, str]:
-    out: dict[str, str] = {
-        "sEcho": str(s_echo),
-        "iColumns": "12",
-        "sColumns": "," * 11,
-        "iDisplayStart": "0",
-        "iDisplayLength": "50",
-    }
-    for i in range(12):
-        out[f"mDataProp_{i}"] = str(i)
-        out[f"sSearch_{i}"] = ""
-        out[f"bRegex_{i}"] = "false"
-        out[f"bSearchable_{i}"] = "true"
-        out[f"bSortable_{i}"] = "false" if i == 1 else "true"
-    return out
-
-
-def _bmkco_cart_get_zbozi_params(*, currency: str = "EUR", s_echo: int = 1) -> dict[str, str]:
-    return {
-        "jazyk": "cs",
-        "fNormaTyp": "0",
-        "fCisloNormy": "",
-        "fMaterial": "",
-        "fUprava": "",
-        "fPrumer": "",
-        "fDelka": "",
-        "fCisloKarty": "",
-        "fKrizovyOdkaz": "",
-        "akce": "0",
-        "fNazev": "",
-        "oblibene": "0",
-        "typProduktu": "kosik",
-        "zvolenaMena": currency,
-        "novinky": "0",
-        "spojovaciMaterial": "null",
-        "b2x": "B2C",
-        "fInStock": "false",
-        "filter": "false",
-        "spMatFilter": "null",
-        "attributeCode1": "",
-        "attributeValue1": "null",
-        "attributeCode2": "",
-        "attributeValue2": "null",
-        "attributeCode3": "",
-        "attributeValue3": "null",
-        "attributeCode4": "",
-        "attributeValue4": "null",
-        "nesmCategoryLevel3": "",
-        "searchPage": "false",
-        **_bmkco_datatable_query_params(s_echo=s_echo),
-    }
-
-
-def bmkco_parse_cart_datatable(
-    blob: dict[str, Any],
+def bmkco_parse_cart_html(
+    html: str,
     *,
     total_eur: Optional[float] = None,
     line_count: Optional[int] = None,
 ) -> dict[str, Any]:
-    """Z ``GetZbozi?typProduktu=kosik`` (DataTables JSON) + voliteľný súčet z API."""
-    rows = blob.get("aaData") if isinstance(blob, dict) else None
-    if not isinstance(rows, list):
-        rows = []
+    """Z ``POST /cs/Data/KosikPolozky`` (HTML fragment) + voliteľný súčet z API."""
+    page = html or ""
+    line_totals_by_idx: dict[int, float] = {}
+    row_cnt_raw = _hidden_input_value(page, "cenaRadekPocet")
+    if row_cnt_raw:
+        try:
+            n_hidden = int(float(row_cnt_raw))
+            for i in range(1, n_hidden + 1):
+                raw = _hidden_input_value(page, f"cenaRadek{i}")
+                val = _bmkco_parse_decimal(raw or "")
+                if val is not None:
+                    line_totals_by_idx[i] = val
+        except ValueError:
+            pass
 
     lines: list[dict[str, Any]] = []
-    for row in rows:
-        if not isinstance(row, dict):
+    row_idx = 0
+    for m in re.finditer(r"<tr[^>]*>([\s\S]*?)</tr>", page, re.I):
+        inner = m.group(1)
+        km = re.search(r"DetailZbozi\((\d+)\)", inner)
+        if not km:
+            km = re.search(r"OdstranitPolozkuKosiku\((\d+)\)", inner)
+        if not km:
             continue
-        karta = _karta_from_datatable_cell(str(row.get("0", "")))
-        if not karta:
-            continue
-        label = _strip_tags(str(row.get("2", ""))) or karta
-        qty = _qty_from_datatable_cell(str(row.get("10", "")))
-        unit_eur = _parse_eur_cell(str(row.get("7", "")))
-        line_total = (
-            round(unit_eur * qty, 4) if unit_eur is not None and qty else unit_eur
+        karta = km.group(1)
+        row_idx += 1
+        label = ""
+        lm = re.search(
+            r"<h2[^>]*class=[\"']product-name[^\"']*[\"'][^>]*>([\s\S]*?)</h2>",
+            inner,
+            re.I,
         )
+        if lm:
+            label = _strip_tags(lm.group(1))
+        if not label:
+            tds = re.findall(r"<td[^>]*>([\s\S]*?)</td>", inner, re.I | re.DOTALL)
+            for td in tds[1:4]:
+                txt = _strip_tags(td)
+                if txt and len(txt) > 3 and not txt.isdigit():
+                    label = txt[:240]
+                    break
+        if not label:
+            label = karta
+
+        qty = _qty_from_cart_row(inner)
+        eur_vals: list[float] = []
+        for td in re.findall(r"<td[^>]*>([\s\S]*?)</td>", inner, re.I | re.DOTALL):
+            pe = _parse_eur_cell(_strip_tags(td))
+            if pe is not None:
+                eur_vals.append(pe)
+        unit_eur = eur_vals[0] if eur_vals else None
+        line_total = line_totals_by_idx.get(row_idx)
+        if line_total is None and len(eur_vals) > 1:
+            line_total = eur_vals[-1]
+        if line_total is None and unit_eur is not None:
+            line_total = round(unit_eur * qty, 4)
+
         lines.append(
             {
                 "label": label,
@@ -206,6 +206,26 @@ def bmkco_parse_cart_datatable(
         "line_count": line_count,
         "empty_cart": empty,
     }
+
+
+def bmkco_parse_cart_datatable(
+    blob: dict[str, Any],
+    *,
+    total_eur: Optional[float] = None,
+    line_count: Optional[int] = None,
+) -> dict[str, Any]:
+    """Spätná kompatibilita — očakáva ``{"kosik_html": "..."}`` v blob."""
+    if isinstance(blob, dict) and "kosik_html" in blob:
+        return bmkco_parse_cart_html(
+            str(blob.get("kosik_html") or ""),
+            total_eur=total_eur,
+            line_count=line_count,
+        )
+    return bmkco_parse_cart_html(
+        "",
+        total_eur=total_eur,
+        line_count=line_count if line_count is not None else 0,
+    )
 
 
 def _bmkco_parse_decimal(text: str) -> Optional[float]:
@@ -494,45 +514,33 @@ class BmkcoHttpClient:
         r.raise_for_status()
         return _bmkco_parse_decimal((r.text or "").strip())
 
-    async def fetch_cart_datatable(self, *, currency: str = "EUR") -> dict[str, Any]:
-        r = await self._client.get(
-            "/cs/Data/GetZbozi",
-            params=_bmkco_cart_get_zbozi_params(currency=currency),
+    async def fetch_kosik_polozky_html(
+        self,
+        *,
+        currency: str = "EUR",
+        language: str = "cs",
+    ) -> str:
+        cur = (currency or "EUR").strip() or "EUR"
+        lang = (language or "cs").strip() or "cs"
+        await self._client.get("/cs/B2C/Kosik")
+        r = await self._client.post(
+            "/cs/Data/KosikPolozky",
+            data={"zvolenaMena": cur, "jazyk": lang},
+            headers={"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"},
         )
         r.raise_for_status()
-        txt = (r.text or "").strip()
-        if not txt:
-            return {"aaData": [], "iTotalRecords": 0, "iTotalDisplayRecords": 0}
-        try:
-            blob = json.loads(txt)
-        except json.JSONDecodeError as exc:
-            raise RuntimeError("BMCo: GetZbozi (košík) nevrátil validný JSON.") from exc
-        if isinstance(blob, dict):
-            return blob
-        raise RuntimeError(f"BMCo: neočakávaná odpoveď GetZbozi: {type(blob).__name__}")
+        return r.text or ""
 
     async def fetch_cart_snapshot(self, *, currency: str = "EUR") -> dict[str, Any]:
         line_count = await self.fetch_cart_line_count()
         total_eur = await self.fetch_cart_total_eur(currency=currency)
-        datatable: dict[str, Any] = {
-            "aaData": [],
-            "iTotalRecords": 0,
-            "iTotalDisplayRecords": 0,
-        }
+        kosik_html = ""
         if line_count > 0:
-            datatable = await self.fetch_cart_datatable(currency=currency)
-            rec = _bmkco_parse_int(datatable.get("iTotalRecords")) or len(
-                datatable.get("aaData") or []
-            )
-            if rec is not None and rec > max(line_count * 3, 50):
-                raise RuntimeError(
-                    "BMCo: košík sa nepodarilo načítať "
-                    "(GetZbozi vrátil katalóg — skontroluj email/heslo)."
-                )
+            kosik_html = await self.fetch_kosik_polozky_html(currency=currency)
         return {
             "line_count": line_count,
             "total_eur": total_eur,
-            "datatable": datatable,
+            "kosik_html": kosik_html,
         }
 
     @staticmethod
