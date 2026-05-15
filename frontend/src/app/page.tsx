@@ -5856,7 +5856,7 @@ export default function Home() {
                       Košík u dodávateľov
                     </div>
                     <p className="max-w-2xl text-xs text-slate-600">
-                      Zoznam dodávateľov sa zobrazí hneď; súhrn košíka (Haspl, Mekrs, Argip, Schachermayer) sa načíta
+                      Zoznam dodávateľov sa zobrazí hneď; súhrn košíka (Haspl, Mekrs, Argip, Schachermayer, Valenta) sa načíta
                       postupne pre každého. U ostatných dodávateľov zatiaľ nie je čítanie košíka
                       napojené. Tlačidlo Obnoviť znovu stiahne košíky z e-shopov (preskočí cache).
                     </p>

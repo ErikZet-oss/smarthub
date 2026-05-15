@@ -61,7 +61,11 @@ from app.services.schachermayer_http_client import (
     schachermayer_parse_cart_json,
     schachermayer_web_cart_url,
 )
-from app.services.valenta_http_client import ValentaHttpClient, valenta_cart_url
+from app.services.valenta_http_client import (
+    ValentaHttpClient,
+    valenta_cart_url,
+    valenta_parse_cart_html,
+)
 from app.services.inoxmare_http_client import (
     InoxmareHttpClient,
     inoxmare_origin,
@@ -103,6 +107,7 @@ _remote_haspl_order_snapshot: RemoteCartCacheStore = {}
 _remote_mekrs_cart_snapshot: RemoteCartCacheStore = {}
 _remote_argip_cart_snapshot: RemoteCartCacheStore = {}
 _remote_schachermayer_cart_snapshot: RemoteCartCacheStore = {}
+_remote_valenta_cart_snapshot: RemoteCartCacheStore = {}
 
 
 class ScraperProductNotFoundError(ValueError):
@@ -167,6 +172,7 @@ def _invalidate_remote_cart_cache(
         _remote_mekrs_cart_snapshot.pop(key, None)
         _remote_argip_cart_snapshot.pop(key, None)
         _remote_schachermayer_cart_snapshot.pop(key, None)
+        _remote_valenta_cart_snapshot.pop(key, None)
         return
     suffix = f":{sid}"
     for store in (
@@ -176,6 +182,7 @@ def _invalidate_remote_cart_cache(
         _remote_mekrs_cart_snapshot,
         _remote_argip_cart_snapshot,
         _remote_schachermayer_cart_snapshot,
+        _remote_valenta_cart_snapshot,
     ):
         for k in list(store.keys()):
             if k.endswith(suffix):
@@ -190,6 +197,7 @@ def _clear_all_remote_cart_caches() -> None:
     _remote_mekrs_cart_snapshot.clear()
     _remote_argip_cart_snapshot.clear()
     _remote_schachermayer_cart_snapshot.clear()
+    _remote_valenta_cart_snapshot.clear()
 
 
 def _session_reuse_enabled() -> bool:
@@ -7028,6 +7036,7 @@ class ScraperService:
                 or _supplier_is_mekrs(supplier)
                 or _supplier_is_argip(supplier)
                 or _supplier_is_schachermayer(supplier)
+                or _supplier_is_valenta(supplier)
             )
         ):
             hit = _remote_cart_cache_get(_remote_cart_overview_cache, uid, sid)
@@ -7195,20 +7204,51 @@ class ScraperService:
                         },
                     )
                 return result
-            if _supplier_is_halfmann(supplier):
-                base_hf = halfmann_base_url(supplier.shop_url or "")
-                async with HalfmannHttpClient(base_hf) as client:
+            if _supplier_is_valenta(supplier):
+                async with ValentaHttpClient(supplier.shop_url or "") as client:
                     await client.ensure_login(supplier.username, supplier.password)
-                return {
+                    snap = await client.fetch_cart_snapshot()
+                    parsed = valenta_parse_cart_html(
+                        snap.get("order_edit_html") or "",
+                        orders_html=snap.get("orders_html") or "",
+                    )
+                result = {
                     **base,
                     "remote_supported": True,
                     "logged_in": True,
-                    "total_eur": None,
-                    "line_count": 0,
+                    "total_eur": parsed["total_eur"],
+                    "line_count": parsed["line_count"],
                     "message": None,
+                    "web_cart_url": valenta_cart_url(supplier.shop_url or ""),
                 }
-            if _supplier_is_valenta(supplier):
-                async with ValentaHttpClient(supplier.shop_url or "") as client:
+                if sid is not None:
+                    _remote_cart_cache_set(
+                        _remote_cart_overview_cache, uid, sid, result
+                    )
+                    _remote_cart_cache_set(
+                        _remote_valenta_cart_snapshot, uid, sid, snap
+                    )
+                    _remote_cart_cache_set(
+                        _remote_cart_detail_cache,
+                        uid,
+                        sid,
+                        {
+                            "supplier_id": supplier.id,
+                            "name": supplier.name,
+                            "logo_url": supplier_logo_public_url(
+                                supplier.logo_path
+                            ),
+                            "remote_supported": True,
+                            "logged_in": True,
+                            "total_eur": parsed["total_eur"],
+                            "lines": parsed["lines"],
+                            "message": None,
+                        },
+                    )
+                return result
+            if _supplier_is_halfmann(supplier):
+                base_hf = halfmann_base_url(supplier.shop_url or "")
+                async with HalfmannHttpClient(base_hf) as client:
                     await client.ensure_login(supplier.username, supplier.password)
                 return {
                     **base,
@@ -7226,7 +7266,7 @@ class ScraperService:
                 "message": str(exc),
             }
         base["message"] = (
-            "Košík cez API je zatiaľ pre Haspl, Mekrs, Argip a Schachermayer. "
+            "Košík cez API je zatiaľ pre Haspl, Mekrs, Argip, Schachermayer a Valenta. "
             "U ostatných sa položky pridávajú v prehliadači — obsah tu nevieme načítať."
         )
         return base
@@ -7402,22 +7442,43 @@ class ScraperService:
                         _remote_cart_detail_cache, uid, sid, result
                     )
                 return result
-            if _supplier_is_halfmann(supplier):
-                base_hf = halfmann_base_url(supplier.shop_url or "")
-                async with HalfmannHttpClient(base_hf) as client:
+            if _supplier_is_valenta(supplier):
+                snap = (
+                    _remote_cart_cache_get(_remote_valenta_cart_snapshot, uid, sid)
+                    if sid is not None
+                    else None
+                )
+                async with ValentaHttpClient(supplier.shop_url or "") as client:
                     await client.ensure_login(supplier.username, supplier.password)
-                return {
+                    if isinstance(snap, dict):
+                        order_html = str(snap.get("order_edit_html") or "")
+                        orders_html = str(snap.get("orders_html") or "")
+                    else:
+                        fresh = await client.fetch_cart_snapshot()
+                        order_html = fresh.get("order_edit_html") or ""
+                        orders_html = fresh.get("orders_html") or ""
+                        snap = fresh
+                    parsed = valenta_parse_cart_html(
+                        order_html, orders_html=orders_html
+                    )
+                result = {
                     **out,
                     "remote_supported": True,
                     "logged_in": True,
-                    "total_eur": None,
-                    "lines": [],
-                    "message": (
-                        "Prihlásenie funguje; zoznam položiek košíka cez API zatiaľ nečítame."
-                    ),
+                    "total_eur": parsed["total_eur"],
+                    "lines": parsed["lines"],
                 }
-            if _supplier_is_valenta(supplier):
-                async with ValentaHttpClient(supplier.shop_url or "") as client:
+                if sid is not None and isinstance(snap, dict):
+                    _remote_cart_cache_set(
+                        _remote_valenta_cart_snapshot, uid, sid, snap
+                    )
+                    _remote_cart_cache_set(
+                        _remote_cart_detail_cache, uid, sid, result
+                    )
+                return result
+            if _supplier_is_halfmann(supplier):
+                base_hf = halfmann_base_url(supplier.shop_url or "")
+                async with HalfmannHttpClient(base_hf) as client:
                     await client.ensure_login(supplier.username, supplier.password)
                 return {
                     **out,
@@ -7437,7 +7498,7 @@ class ScraperService:
                 "message": str(exc),
             }
         out["message"] = (
-            "Detail košíka cez API je zatiaľ len pre Haspl, Mekrs, Argip a Schachermayer."
+            "Detail košíka cez API je zatiaľ len pre Haspl, Mekrs, Argip, Schachermayer a Valenta."
         )
         return out
 

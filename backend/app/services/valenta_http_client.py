@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import re
 import time
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import parse_qs, urljoin, urlparse
 
 import httpx
@@ -40,6 +40,27 @@ _PRICE_RE = re.compile(r"(\d+(?:[.,]\d{2,4})?)\s*(?:€|EUR)\b", re.I)
 # Valenta často len Kč — raw_price stačí na „živú“ cenu v UI (bez EUR prepočtu).
 _PRICE_CZK_RE = re.compile(
     r"(\d+(?:[\s\u00a0\u202f]\d{3})*(?:[.,]\d{2})?)\s*(?:Kč|CZK)\b",
+    re.I,
+)
+_HEADER_PRICE_JS_RE = re.compile(
+    r'var\s+areboHeaderShopOrderPrice\s*=\s*"([^"]*)"',
+    re.I,
+)
+_ITEMS_COUNT_JS_RE = re.compile(
+    r"var\s+JS_ActiveShopOrderItemsCount\s*=\s*(\d+)",
+    re.I,
+)
+_ACTIVE_ORDER_JS_RE = re.compile(
+    r"var\s+areboActiveShopOrderId\s*=\s*(\d+)",
+    re.I,
+)
+_CHANGE_QTY_RE = re.compile(
+    r'id="arebocsoiddeidpdci(\d+)"[^>]*value="(\d+)"[^>]*'
+    r'class="[^"]*ASClsInputCountChangeShopOrderItemDetails',
+    re.I,
+)
+_CHANGE_QTY_ROW_RE = re.compile(
+    r"<tr[^>]*>[\s\S]*?ASClsInputCountChangeShopOrderItemDetails[\s\S]*?</tr>",
     re.I,
 )
 
@@ -242,6 +263,230 @@ def parse_valenta_product_page(html: str, *, article_code: str = "") -> dict[str
     }
 
 
+def _valenta_product_block(html: str, shop_product_id: str) -> str:
+    pid = (shop_product_id or "").strip()
+    if not pid:
+        return ""
+    for anchor in (f"arebooedeidpatof{pid}", f"arebomainproductimg{pid}"):
+        m = re.search(rf"{re.escape(anchor)}[\s\S]{{0,14000}}", html, re.I)
+        if m:
+            return m.group(0)
+    pos = html.find(f"arebocsoiddeidpdci{pid}")
+    if pos < 0:
+        pos = html.find(f"ChangeNumber{pid}")
+    if pos >= 0:
+        before = html[max(0, pos - 16000) : pos]
+        tables = list(
+            re.finditer(r"<table[^>]*class=\"[^\"]*ASClsTblShopProductDetails", before, re.I)
+        )
+        if tables:
+            start = tables[-1].start()
+            return before[start:] + html[pos : pos + 400]
+    return ""
+
+
+def _valenta_info_value(block: str, label: str) -> str:
+    if not block:
+        return ""
+    lab = re.escape(label)
+    m = re.search(
+        rf'class="CWClsTDInfoLabel"[^>]*>\s*{lab}\s*:?\s*</td>\s*'
+        rf'<td[^>]*class="CWClsTDInfoValue"[^>]*>([\s\S]*?)</td>',
+        block,
+        re.I,
+    )
+    if not m:
+        return ""
+    return _strip_tags(m.group(1))
+
+
+def _valenta_line_from_block(
+    block: str,
+    *,
+    shop_product_id: str,
+    quantity: int,
+) -> dict[str, Any]:
+    code = _valenta_info_value(block, "Kód položky") or _valenta_info_value(
+        block, "Kod polozky"
+    )
+    label = (
+        _valenta_info_value(block, "Jméno produktu")
+        or _valenta_info_value(block, "Jmeno produktu")
+    )
+    if not label:
+        m = re.search(r'<th[^>]*colspan="2"[^>]*>([^<]+)</th>', block, re.I)
+        if m:
+            label = _strip_tags(m.group(1))
+    price_raw = _valenta_info_value(block, "Cena bez DPH")
+    unit_eur = None
+    line_total = None
+    if price_raw:
+        pm = _PRICE_RE.search(price_raw)
+        if pm:
+            unit_eur = _parse_float_local(pm.group(1))
+        if unit_eur is None:
+            pm2 = _PRICE_CZK_RE.search(price_raw)
+            if pm2:
+                unit_eur = _parse_float_local(pm2.group(1))
+    qn = max(1, int(quantity))
+    if unit_eur is not None:
+        line_total = round(unit_eur * qn, 4)
+    if not code:
+        code = shop_product_id
+    return {
+        "label": label or code or f"Valenta #{shop_product_id}",
+        "quantity": qn,
+        "unit_price_eur": unit_eur,
+        "line_total_eur": line_total,
+        "variant_code": code or None,
+    }
+
+
+def _valenta_parse_line_from_row(row_html: str) -> dict[str, Any] | None:
+    m = re.search(
+        r'class="[^"]*ASClsInputCountChangeShopOrderItemDetails[^"]*ChangeNumber(\d+)"',
+        row_html,
+        re.I,
+    )
+    if not m:
+        m = re.search(
+            r'id="arebocsoiddeidpdci(\d+)"[^>]*value="(\d+)"',
+            row_html,
+            re.I,
+        )
+        if not m:
+            return None
+        pid, qty_s = m.group(1), m.group(2)
+    else:
+        pid = m.group(1)
+        qm = re.search(r'value="(\d+)"', row_html)
+        qty_s = qm.group(1) if qm else "1"
+    try:
+        qn = int(qty_s)
+    except (TypeError, ValueError):
+        qn = 1
+    if qn < 1:
+        return None
+    tds = [_strip_tags(x) for x in re.findall(r"<td[^>]*>([\s\S]*?)</td>", row_html, re.I)]
+    code = ""
+    label = ""
+    price_raw = ""
+    for td in tds:
+        if not td or td in ("ks", "Změnit počet", "Změnit pocet"):
+            continue
+        if re.fullmatch(r"\d+(?:[.,]\d+)?", td.replace(" ", "")):
+            continue
+        if not code and re.fullmatch(r"[0-9A-Z][0-9A-Z\-\./]{2,30}", td, re.I):
+            code = td
+            continue
+        if not label and len(td) > 8 and not re.search(r"^\d+[.,]\d", td):
+            label = td
+            continue
+        if not price_raw and (_PRICE_RE.search(td) or _PRICE_CZK_RE.search(td)):
+            price_raw = td
+    unit_eur = None
+    if price_raw:
+        pm = _PRICE_RE.search(price_raw)
+        if pm:
+            unit_eur = _parse_float_local(pm.group(1))
+    line_total = round(unit_eur * qn, 4) if unit_eur is not None else None
+    return {
+        "label": label or code or f"Valenta #{pid}",
+        "quantity": qn,
+        "unit_price_eur": unit_eur,
+        "line_total_eur": line_total,
+        "variant_code": code or None,
+    }
+
+
+def valenta_parse_cart_html(
+    order_edit_html: str,
+    *,
+    orders_html: str = "",
+) -> dict[str, Any]:
+    """Z HTML order_edit / orders (Arebo) — súčet, počet a riadky aktívnej objednávky."""
+    html_parts = [(order_edit_html or ""), (orders_html or "")]
+    merged = "\n".join(html_parts)
+
+    total_eur: Optional[float] = None
+    for part in html_parts:
+        m = _HEADER_PRICE_JS_RE.search(part)
+        if m:
+            total_eur = _parse_float_local(m.group(1))
+            if total_eur is not None:
+                break
+    if total_eur is None:
+        m = re.search(
+            r'id="arebophasopwvid"[^>]*>([^<]*)<',
+            merged,
+            re.I,
+        )
+        if m:
+            total_eur = _parse_float_local(m.group(1))
+
+    line_count = 0
+    for part in html_parts:
+        m = _ITEMS_COUNT_JS_RE.search(part)
+        if m:
+            line_count = int(m.group(1))
+            break
+
+    lines: list[dict[str, Any]] = []
+    seen_pids: set[str] = set()
+    for part in html_parts:
+        for pid, qty_s in _CHANGE_QTY_RE.findall(part):
+            if pid in seen_pids:
+                continue
+            seen_pids.add(pid)
+            try:
+                qn = int(qty_s)
+            except (TypeError, ValueError):
+                qn = 1
+            if qn < 1:
+                continue
+            block = _valenta_product_block(part, pid)
+            if block:
+                lines.append(
+                    _valenta_line_from_block(
+                        block, shop_product_id=pid, quantity=qn
+                    )
+                )
+            else:
+                row_m = re.search(
+                    rf'<tr[^>]*>[\s\S]*?arebocsoiddeidpdci{re.escape(pid)}[\s\S]*?</tr>',
+                    part,
+                    re.I,
+                )
+                if row_m:
+                    ln = _valenta_parse_line_from_row(row_m.group(0))
+                    if ln:
+                        lines.append(ln)
+
+    if not lines and orders_html:
+        for row in _CHANGE_QTY_ROW_RE.findall(orders_html):
+            ln = _valenta_parse_line_from_row(row)
+            if ln:
+                key = f"{ln.get('variant_code')}|{ln.get('label')}"
+                if key not in {f"{x.get('variant_code')}|{x.get('label')}" for x in lines}:
+                    lines.append(ln)
+
+    if line_count <= 0:
+        line_count = len(lines)
+    if total_eur is None and lines:
+        total_eur = round(
+            sum((ln.get("line_total_eur") or 0.0) for ln in lines),
+            4,
+        )
+        if not lines:
+            total_eur = None
+
+    return {
+        "lines": lines,
+        "total_eur": total_eur,
+        "line_count": line_count,
+    }
+
+
 class ValentaHttpClient:
     def __init__(self, shop_url: str) -> None:
         self._base = valenta_base_url(shop_url)
@@ -297,6 +542,62 @@ class ValentaHttpClient:
             raise RuntimeError("Valenta: po prihlásení sa nenašlo arebosnid (session).")
         self._session_id = sid
         self._logged_in = True
+
+    def _base_params(self) -> dict[str, str]:
+        if not self._session_id:
+            raise RuntimeError("Valenta: chýba session id (arebosnid).")
+        return {
+            "arebosnid": self._session_id,
+            "cwcdt": str(int(time.time() * 1000)),
+            "arebowsf": "1",
+        }
+
+    async def fetch_order_edit_page(self) -> str:
+        """Úvodná stránka veľkoobchodnej objednávky (bez vyhľadávania produktu)."""
+        if not self._logged_in or not self._session_id:
+            raise RuntimeError("Valenta: najprv volaj ensure_login().")
+        params = {**self._base_params(), "arebooedt": "11"}
+        r = await self._client.get(
+            f"{self._base}/order_edit.php",
+            params=params,
+            headers={"Referer": f"{self._base}/order_edit.php"},
+        )
+        r.raise_for_status()
+        return r.text or ""
+
+    async def fetch_orders_page(self) -> str:
+        """Stránka Košík / zoznam položiek objednávky."""
+        if not self._logged_in or not self._session_id:
+            raise RuntimeError("Valenta: najprv volaj ensure_login().")
+        order_html = await self.fetch_order_edit_page()
+        active_oid = ""
+        m = _ACTIVE_ORDER_JS_RE.search(order_html)
+        if m:
+            active_oid = m.group(1)
+        params = {
+            **self._base_params(),
+            "arebosdoousoid": "1",
+            "areboasmii": "23",
+            "arebosocid": "14",
+        }
+        if active_oid:
+            params["arebosocv"] = active_oid
+        r = await self._client.get(
+            f"{self._base}/orders.php",
+            params=params,
+            headers={"Referer": f"{self._base}/order_edit.php"},
+        )
+        r.raise_for_status()
+        return r.text or ""
+
+    async def fetch_cart_snapshot(self) -> dict[str, str]:
+        order_html = await self.fetch_order_edit_page()
+        orders_html = ""
+        try:
+            orders_html = await self.fetch_orders_page()
+        except Exception:
+            orders_html = ""
+        return {"order_edit_html": order_html, "orders_html": orders_html}
 
     async def fetch_product_data(self, product_code: str) -> dict[str, object]:
         code = (product_code or "").strip()
