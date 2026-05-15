@@ -223,23 +223,30 @@ class SchachermayerHttpClient:
         """Načíta JSON košíka (štandardný košík webshopu)."""
         if not self._login_ok:
             raise RuntimeError("Schachermayer: nie ste prihlásení.")
-        paths = (
+        # basket-items vracia 404 — používame len basket (+ voliteľný webshop API).
+        candidates = (
             f"{self._shop}/cat/api/private/extranet/webshopCore/basket",
-            f"{self._shop}/cat/api/private/extranet/webshopCore/basket-items",
+            f"{self._shop}/webshop/api/basket",
         )
         last_err: Optional[Exception] = None
-        for url in paths:
+        for url in candidates:
             try:
                 r = await self._client.get(url, headers=self._api_headers())
+                if r.status_code == 404:
+                    continue
                 r.raise_for_status()
                 data = r.json()
                 if isinstance(data, dict):
                     return data
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 404:
+                    continue
+                last_err = exc
             except Exception as exc:
                 last_err = exc
         if last_err:
             raise last_err
-        raise RuntimeError("Schachermayer: košík sa nepodarilo načítať.")
+        return {}
 
     async def fetch_basket_summary_html(self) -> str:
         """HTML súhrn z app-bar (fallback ak JSON neobsahuje riadky)."""
