@@ -4983,7 +4983,7 @@ export default function Home() {
 
           {!navCollapsed ? (
             <div className="mb-2 hidden items-center gap-2 md:mb-8 md:flex">
-              <HubMark size={22} className="shrink-0" title="Smarthub" />
+              <HubMark size={26} className="shrink-0" title="Smarthub" />
               <div className="min-w-0">
                 <p className="text-sm font-semibold">Smarthub</p>
                 <p className="text-xs text-slate-400">Interny porovnavac cien</p>
