@@ -3861,30 +3861,31 @@ export default function Home() {
     }
   };
 
-  useEffect(() => {
-    const loadFieldMapping = async () => {
-      try {
-        const response = await apiFetch(`${API_BASE}/api/mapping/fields`);
-        if (!response.ok) {
-          return;
-        }
-        const data = (await response.json()) as Record<string, string | null>;
-        setFieldToColumn({
-          code: data.code ?? "",
-          norma: data.norma ?? "",
-          surface: data.surface ?? "",
-          diameter: data.diameter ?? "",
-          length: data.length ?? "",
-          v_class: data.v_class ?? "",
-          y_money_name: data.y_money_name ?? "",
-          image_filename: data.image_filename ?? "",
-        });
-      } catch {
-        // ignore
+  const loadFieldMapping = useCallback(async () => {
+    try {
+      const response = await apiFetch(`${API_BASE}/api/mapping/fields`);
+      if (!response.ok) {
+        return;
       }
-    };
-    void loadFieldMapping();
+      const data = (await response.json()) as Record<string, string | null>;
+      setFieldToColumn({
+        code: data.code ?? "",
+        norma: data.norma ?? "",
+        surface: data.surface ?? "",
+        diameter: data.diameter ?? "",
+        length: data.length ?? "",
+        v_class: data.v_class ?? "",
+        y_money_name: data.y_money_name ?? "",
+        image_filename: data.image_filename ?? "",
+      });
+    } catch {
+      // ignore
+    }
   }, [apiFetch]);
+
+  useEffect(() => {
+    void loadFieldMapping();
+  }, [loadFieldMapping]);
 
   /** Profil stĺpcov z Excelu (unique_values) — inak sú filtre prázdne pri prázdnej DB alebo bez kliku „Načítať stĺpce“. */
   useEffect(() => {
@@ -4827,6 +4828,7 @@ export default function Home() {
       );
       setSearchTick((t) => t + 1);
       void refetchSuppliersList();
+      void loadFieldMapping();
       void loadMappingProfile();
     } catch (error) {
       const raw = error instanceof Error ? error.message : "";
