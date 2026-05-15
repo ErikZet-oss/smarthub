@@ -470,7 +470,7 @@ type SelectFilterKey =
 
 /** Zhoda s backend `FIELD_DEFAULTS` — ak z `/mapping/fields` prídu prázdne reťazce. */
 const FILTER_COLUMN_DEFAULTS: Record<SelectFilterKey, string> = {
-  norma: "STN",
+  norma: "Leading standard",
   surface: "Surface treatments (long)",
   diameter: "Diameter [M/Tr]",
   length: "Length [mm]",

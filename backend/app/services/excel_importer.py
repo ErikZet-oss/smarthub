@@ -12,7 +12,7 @@ from app.models.entities import FieldMapping, Product, ProductMapping, Supplier
 
 FIELD_DEFAULTS: dict[str, str] = {
     "code": "číslo Smart",
-    "norma": "STN",
+    "norma": "Leading standard",
     "surface": "Surface treatments (long)",
     "diameter": "Diameter [M/Tr]",
     "length": "Length [mm]",
@@ -21,6 +21,28 @@ FIELD_DEFAULTS: dict[str, str] = {
     "y_money_name": "Money názov",
     # Používateľ môže mapovať aj priamo písmenom stĺpca (W).
     "image_filename": "W",
+}
+
+# Ak sa v Exceli premenuje hlavička, import skúsi ešte tieto názvy (case-insensitive).
+FIELD_HEADER_ALIASES: dict[str, list[str]] = {
+    "norma": ["Leading standard", "Leading Standard", "STN"],
+    "surface": ["Surface treatments (long)", "Surface treatment (long)"],
+    "diameter": ["Diameter [M/Tr]", "Diameter"],
+    "length": ["Length [mm]", "Length"],
+    "v_class": ["Class"],
+    "y_money_name": ["Money názov", "Money nazov"],
+    "code": ["číslo Smart", "cislo Smart"],
+}
+
+_FIELD_ATTR_MAP: dict[str, str] = {
+    "code": "code_column",
+    "norma": "norma_column",
+    "surface": "surface_column",
+    "diameter": "diameter_column",
+    "length": "length_column",
+    "v_class": "v_class_column",
+    "y_money_name": "y_money_name_column",
+    "image_filename": "image_filename_column",
 }
 
 _BACKEND_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -58,18 +80,9 @@ def resolve_gamechanger_xlsx_path(file_path: str) -> Path:
 
 
 def _field_column_name(field_key: str, fm: FieldMapping | None) -> str | None:
-    attr_map = {
-        "code": "code_column",
-        "norma": "norma_column",
-        "surface": "surface_column",
-        "diameter": "diameter_column",
-        "length": "length_column",
-        "v_class": "v_class_column",
-        "y_money_name": "y_money_name_column",
-        "image_filename": "image_filename_column",
-    }
-    if fm:
-        raw = getattr(fm, attr_map[field_key], None)
+    attr = _FIELD_ATTR_MAP.get(field_key)
+    if fm and attr:
+        raw = getattr(fm, attr, None)
         if raw is not None and str(raw).strip():
             return str(raw).strip()
     return FIELD_DEFAULTS.get(field_key)
@@ -166,6 +179,38 @@ def _resolve_header_col_index(headers: list[str], mapped_name: str | None) -> in
     return None
 
 
+def _resolve_field_col_index(
+    headers: list[str],
+    field_key: str,
+    fm: FieldMapping | None,
+) -> tuple[int | None, str | None, bool]:
+    """
+    Nájde stĺpec pre mapované pole. Vráti (index, skutočná hlavička, či sa použil alias).
+    """
+    mapped = _field_column_name(field_key, fm)
+    if mapped:
+        idx = _resolve_header_col_index(headers, mapped)
+        if idx is not None:
+            return idx, headers[idx], False
+    for alt in FIELD_HEADER_ALIASES.get(field_key, []):
+        idx = _resolve_header_col_index(headers, alt)
+        if idx is not None:
+            return idx, headers[idx], True
+    return None, mapped, False
+
+
+def _sync_field_mapping_columns(
+    fm: FieldMapping | None,
+    resolved_headers: dict[str, str],
+) -> None:
+    if not fm:
+        return
+    for field_key, hdr in resolved_headers.items():
+        attr = _FIELD_ATTR_MAP.get(field_key)
+        if attr and hdr:
+            setattr(fm, attr, hdr)
+
+
 def _to_supplier_name(header: str) -> str:
     # "Fabory kód" / "Schachermayer nový kód" -> text pred posledným „ kód“
     h = (header or "").strip()
@@ -251,18 +296,40 @@ def import_gamechanger_excel(
 
     fm = session.get(FieldMapping, 1)
 
-    def col_idx(field_key: str) -> int | None:
-        col_name = _field_column_name(field_key, fm)
-        return _resolve_header_col_index(headers, col_name)
+    field_keys = (
+        "code",
+        "norma",
+        "diameter",
+        "length",
+        "surface",
+        "v_class",
+        "y_money_name",
+        "image_filename",
+    )
+    col_by_field: dict[str, int | None] = {}
+    resolved_hdr_by_field: dict[str, str] = {}
+    mapping_warnings: list[str] = []
+    for fk in field_keys:
+        idx, hdr, used_alias = _resolve_field_col_index(headers, fk, fm)
+        col_by_field[fk] = idx
+        if idx is not None and hdr:
+            resolved_hdr_by_field[fk] = hdr
+            if used_alias and fm:
+                old = _field_column_name(fk, fm)
+                if old and old != hdr:
+                    mapping_warnings.append(
+                        f"Mapovanie „{fk}“: v databáze je stĺpec „{old}“, v Exceli sa použije „{hdr}“ "
+                        f"(hlavička bola premenovaná). Po importe je mapovanie aktualizované."
+                    )
 
-    internal_code_idx = col_idx("code")
-    norma_idx = col_idx("norma")
-    diameter_idx = col_idx("diameter")
-    length_idx = col_idx("length")
-    surface_idx = col_idx("surface")
-    v_class_idx = col_idx("v_class")
-    y_money_name_idx = col_idx("y_money_name")
-    image_filename_idx = col_idx("image_filename")
+    internal_code_idx = col_by_field["code"]
+    norma_idx = col_by_field["norma"]
+    diameter_idx = col_by_field["diameter"]
+    length_idx = col_by_field["length"]
+    surface_idx = col_by_field["surface"]
+    v_class_idx = col_by_field["v_class"]
+    y_money_name_idx = col_by_field["y_money_name"]
+    image_filename_idx = col_by_field["image_filename"]
 
     if internal_code_idx is None:
         expected = _field_column_name("code", fm)
@@ -270,9 +337,41 @@ def import_gamechanger_excel(
             f"Stĺpec pre interný kód sa nenašiel (očakávaná hlavička: {expected!r})."
         )
 
+    leading_idx = _resolve_header_col_index(headers, "Leading standard")
+    stn_idx = _resolve_header_col_index(headers, "STN")
+    if leading_idx is not None and stn_idx is not None and norma_idx == stn_idx:
+        norma_idx = leading_idx
+        col_by_field["norma"] = leading_idx
+        resolved_hdr_by_field["norma"] = headers[leading_idx]
+        mapping_warnings.append(
+            "Mapovanie Norma: v databáze bol stĺpec „STN“, import použije „Leading standard“ "
+            "(v Exceli sú dva rôzne stĺpce — do aplikácie sa načítajú hodnoty z „Leading standard“)."
+        )
+
+    _sync_field_mapping_columns(fm, resolved_hdr_by_field)
+
+    _FIELD_LABELS: dict[str, str] = {
+        "norma": "Norma",
+        "surface": "Povrch",
+        "diameter": "Priemer",
+        "length": "Dĺžka",
+        "v_class": "Class",
+        "y_money_name": "Money názov",
+        "image_filename": "Obrázok (W)",
+    }
+    for fk, label in _FIELD_LABELS.items():
+        if col_by_field.get(fk) is None:
+            expected = _field_column_name(fk, fm)
+            mapping_warnings.append(
+                f"Stĺpec „{label}“ sa v Exceli nenašiel "
+                f"(mapovanie: {expected!r}). Hodnoty sa pri importe neaktualizujú."
+            )
+
     result = ImportResult()
+    result.warnings.extend(mapping_warnings)
     result.file_resolved = file_path
     result.total_rows = total_rows
+
     code_hdr = headers[internal_code_idx]
     ch_low = code_hdr.casefold()
     if "katalóg" in ch_low or "katalog" in ch_low:
