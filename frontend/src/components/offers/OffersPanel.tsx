@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
-import type { OfferDetail, OfferListItem } from "@/components/offers/types";
+import type { OfferDetail, OfferLine, OfferListItem } from "@/components/offers/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -443,12 +443,12 @@ function OffersPanelHeaderInner({
   companyConfigured: boolean | null;
 }) {
   return (
-    <div className="border-b border-sky-200/60 bg-gradient-to-r from-sky-50 via-white to-indigo-50/40 px-5 py-4">
-      <h2 className="flex items-center gap-2 text-base font-semibold text-slate-900">
-        <FileText className="h-5 w-5 text-sky-600" aria-hidden />
+    <div className="border-b border-sky-200/60 bg-gradient-to-r from-sky-50 via-white to-indigo-50/40 px-3 py-3 sm:px-5 sm:py-4">
+      <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900 sm:text-base">
+        <FileText className="h-5 w-5 shrink-0 text-sky-600" aria-hidden />
         Ponuky
       </h2>
-      <p className="mt-1 text-sm text-slate-600">
+      <p className="mt-1 text-xs text-slate-600 sm:text-sm">
         Vytvárajte cenové ponuky pre firmy a exportujte ich do PDF alebo CSV.
       </p>
       {companyConfigured === false ? (
@@ -524,12 +524,17 @@ function OffersLayout(props: {
 
   return (
     <div className="grid gap-0 lg:grid-cols-[minmax(240px,280px)_1fr]">
-      <aside className="border-b border-slate-200/80 bg-slate-50/50 p-4 lg:border-b-0 lg:border-r">
+      <aside
+        className={cn(
+          "border-b border-slate-200/80 bg-slate-50/50 p-3 sm:p-4 lg:border-b-0 lg:border-r",
+          showEditor && "hidden lg:block",
+        )}
+      >
         <div className="mb-3 flex items-center justify-between gap-2">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
             Zoznam ponúk
           </p>
-          <Button type="button" size="sm" onClick={onNew}>
+          <Button type="button" size="sm" className="shrink-0" onClick={onNew}>
             <Plus className="mr-1 h-3.5 w-3.5" />
             Nová
           </Button>
@@ -541,7 +546,7 @@ function OffersLayout(props: {
         ) : offers.length === 0 ? (
           <p className="text-sm text-slate-600">Zatiaľ žiadne ponuky.</p>
         ) : (
-          <ul className="max-h-[min(60vh,520px)] space-y-1 overflow-y-auto pr-1">
+          <ul className="max-h-[min(55vh,480px)] space-y-1 overflow-y-auto pr-0.5 lg:max-h-[min(60vh,520px)]">
             {offers.map((o) => (
               <li key={o.id}>
                 <button
@@ -568,10 +573,10 @@ function OffersLayout(props: {
         )}
       </aside>
 
-      <div className="p-4 sm:p-5">
+      <div className="min-w-0 p-3 sm:p-5">
         {error ? (
           <p
-            className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900"
+            className="mb-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900 sm:mb-4"
             role="alert"
           >
             {error}
@@ -579,7 +584,7 @@ function OffersLayout(props: {
         ) : null}
 
         {!showEditor ? (
-          <p className="py-12 text-center text-sm text-slate-500">
+          <p className="hidden py-12 text-center text-sm text-slate-500 lg:block">
             Vyberte ponuku zo zoznamu alebo vytvorte novú.
           </p>
         ) : loadingDetail && !isNew ? (
@@ -658,19 +663,20 @@ function OfferEditor(props: {
   } = props;
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="space-y-4 sm:space-y-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
         <EditorHeader
           isNew={isNew}
           detail={detail}
           onBack={onBack}
         />
         {!isNew ? (
-          <div className="flex flex-wrap gap-2">
+          <div className="grid w-full grid-cols-3 gap-2 sm:flex sm:w-auto sm:flex-wrap">
             <Button
               type="button"
               variant="outline"
               size="sm"
+              className="min-w-0 px-2 sm:px-3"
               disabled={!!exporting}
               onClick={onExportPdf}
             >
@@ -685,6 +691,7 @@ function OfferEditor(props: {
               type="button"
               variant="outline"
               size="sm"
+              className="min-w-0 px-2 sm:px-3"
               disabled={!!exporting}
               onClick={onExportCsv}
             >
@@ -699,11 +706,13 @@ function OfferEditor(props: {
               type="button"
               variant="outline"
               size="sm"
-              className="text-rose-700 hover:bg-rose-50"
+              className="min-w-0 text-rose-700 hover:bg-rose-50 sm:px-3"
               disabled={saving}
               onClick={onDelete}
+              aria-label="Zmazať ponuku"
             >
-              <Trash2 className="h-3.5 w-3.5" />
+              <Trash2 className="h-3.5 w-3.5 sm:mr-1" />
+              <span className="sr-only sm:not-sr-only sm:inline">Zmazať</span>
             </Button>
           </div>
         ) : null}
@@ -747,7 +756,7 @@ function OfferEditor(props: {
         </Field>
       </div>
 
-      <div className="rounded-xl border border-slate-200/90 bg-slate-50/40 p-4">
+      <div className="rounded-xl border border-slate-200/90 bg-slate-50/40 p-3 sm:p-4">
         <p className="mb-3 text-sm font-semibold text-slate-900">Odberateľ (klient)</p>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Názov firmy *" className="sm:col-span-2">
@@ -821,18 +830,18 @@ function OfferEditor(props: {
 
       {!isNew ? (
         <>
-          <div className="rounded-xl border border-sky-200/80 bg-sky-50/40 p-4">
+          <div className="rounded-xl border border-sky-200/80 bg-sky-50/40 p-3 sm:p-4">
             <p className="text-sm font-semibold text-slate-900">Marža ponuky</p>
             <p className="mt-1 text-xs text-slate-600">
               Nastavte predvolenú maržu a aplikujte ju na všetky položky s nákupnou cenou.
             </p>
-            <div className="mt-3 flex flex-wrap items-end gap-3">
-              <Field label="Hromadná marža (%)">
+            <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+              <Field label="Hromadná marža (%)" className="w-full sm:w-auto">
                 <Input
                   type="number"
                   step="0.1"
                   min={0}
-                  className="w-28"
+                  className="w-full sm:w-28"
                   value={detail.default_margin_percent}
                   onChange={(e) =>
                     onPatch({
@@ -845,6 +854,7 @@ function OfferEditor(props: {
                 type="button"
                 variant="outline"
                 size="sm"
+                className="w-full shrink-0 sm:w-auto"
                 disabled={saving}
                 onClick={onApplyBulkMargin}
               >
@@ -853,13 +863,25 @@ function OfferEditor(props: {
             </div>
           </div>
 
-          <div className="rounded-xl border border-slate-200/90 p-4">
+          <div className="rounded-xl border border-slate-200/90 p-3 sm:p-4">
             <p className="mb-3 text-sm font-semibold text-slate-900">Položky ponuky</p>
             <p className="mb-3 text-xs text-slate-500">
               Pridajte položky z vyhľadávania (ikona + pri dodávateľovi) alebo manuálne nižšie.
             </p>
             {detail.lines.length > 0 ? (
-              <div className="overflow-x-auto">
+              <>
+                <ul className="space-y-2 md:hidden">
+                  {detail.lines.map((ln) => (
+                    <OfferLineCard
+                      key={ln.id}
+                      line={ln}
+                      saving={saving}
+                      onDeleteLine={onDeleteLine}
+                      onUpdateLineMargin={onUpdateLineMargin}
+                    />
+                  ))}
+                </ul>
+                <div className="hidden overflow-x-auto md:block">
                 <table className="w-full min-w-[720px] text-left text-sm">
                   <thead>
                     <tr className="border-b border-slate-200 text-xs text-slate-500">
@@ -930,12 +952,13 @@ function OfferEditor(props: {
                     ))}
                   </tbody>
                 </table>
-              </div>
+                </div>
+              </>
             ) : (
               <p className="text-sm text-slate-500">Žiadne položky.</p>
             )}
 
-            <div className="mt-4 grid gap-2 rounded-lg border border-dashed border-sky-200 bg-sky-50/30 p-3 sm:grid-cols-12">
+            <div className="mt-4 grid grid-cols-1 gap-2 rounded-lg border border-dashed border-sky-200 bg-sky-50/30 p-3 sm:grid-cols-12">
               <AddLineFields
                 newLine={newLine}
                 saving={saving}
@@ -944,16 +967,19 @@ function OfferEditor(props: {
               />
             </div>
 
-            <div className="mt-4 flex flex-wrap justify-end gap-4 border-t border-slate-200 pt-4 text-sm">
-              <span className="text-slate-600">
-                Bez DPH: <strong>{fmtEur(detail.subtotal_eur)}</strong>
-              </span>
-              <span className="text-slate-600">
-                DPH 21 %: <strong>{fmtEur(detail.vat_eur)}</strong>
-              </span>
-              <span className="text-slate-900">
-                Celkom: <strong className="text-sky-700">{fmtEur(detail.total_eur)}</strong>
-              </span>
+            <div className="mt-4 space-y-2 border-t border-slate-200 pt-4 text-sm sm:flex sm:flex-wrap sm:justify-end sm:gap-4 sm:space-y-0">
+              <div className="flex items-center justify-between gap-2 sm:block">
+                <span className="text-slate-500">Bez DPH</span>
+                <strong className="text-slate-800">{fmtEur(detail.subtotal_eur)}</strong>
+              </div>
+              <div className="flex items-center justify-between gap-2 sm:block">
+                <span className="text-slate-500">DPH 21 %</span>
+                <strong className="text-slate-800">{fmtEur(detail.vat_eur)}</strong>
+              </div>
+              <div className="flex items-center justify-between gap-2 rounded-lg bg-sky-50/80 px-3 py-2 sm:block sm:rounded-none sm:bg-transparent sm:px-0 sm:py-0">
+                <span className="font-medium text-slate-700">Celkom</span>
+                <strong className="text-base text-sky-700">{fmtEur(detail.total_eur)}</strong>
+              </div>
             </div>
           </div>
 
@@ -974,13 +1000,13 @@ function OfferEditor(props: {
         </>
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-3 border-t border-slate-200 pt-4">
+      <div className="flex flex-col gap-2 border-t border-slate-200 pt-4 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
         {isNew ? (
-          <Button type="button" disabled={saving} onClick={onCreate}>
+          <Button type="button" className="w-full sm:w-auto" disabled={saving} onClick={onCreate}>
             {saving ? "Vytváram…" : "Vytvoriť ponuku"}
           </Button>
         ) : (
-          <Button type="button" disabled={saving} onClick={onSave}>
+          <Button type="button" className="w-full sm:w-auto" disabled={saving} onClick={onSave}>
             {saving ? "Ukladám…" : "Uložiť zmeny"}
           </Button>
         )}
@@ -994,6 +1020,87 @@ function OfferEditor(props: {
   );
 }
 
+function OfferLineCard({
+  line: ln,
+  saving,
+  onDeleteLine,
+  onUpdateLineMargin,
+}: {
+  line: OfferLine;
+  saving: boolean;
+  onDeleteLine: (id: number) => void;
+  onUpdateLineMargin: (lineId: number, marginPercent: number) => void;
+}) {
+  return (
+    <li className="rounded-lg border border-slate-200/90 bg-white p-3 shadow-sm">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+            #{ln.position}
+            {ln.supplier_name ? ` · ${ln.supplier_name}` : ""}
+          </p>
+          <p className="mt-1 text-sm font-medium leading-snug text-slate-900">{ln.description}</p>
+          <p className="mt-1 text-xs text-slate-500">
+            {ln.quantity} {ln.unit}
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-8 w-8 shrink-0 p-0 text-rose-600"
+          disabled={saving}
+          onClick={() => onDeleteLine(ln.id)}
+          aria-label="Odstrániť položku"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+      <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+        <div>
+          <dt className="text-slate-500">Nákup</dt>
+          <dd className="mt-0.5 font-medium tabular-nums text-slate-800">
+            {ln.purchase_unit_price_eur != null ? fmtEur(ln.purchase_unit_price_eur) : "—"}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-slate-500">Marža %</dt>
+          <dd className="mt-0.5">
+            {ln.purchase_unit_price_eur != null ? (
+              <Input
+                key={`m-${ln.id}-${ln.margin_percent}`}
+                type="number"
+                step="0.1"
+                min={0}
+                className="h-8 w-full text-right text-xs"
+                defaultValue={ln.margin_percent}
+                onBlur={(e) => {
+                  const v = parseFloat(e.target.value);
+                  if (Number.isFinite(v)) onUpdateLineMargin(ln.id, v);
+                }}
+              />
+            ) : (
+              <span className="text-slate-400">—</span>
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-slate-500">Predaj / ks</dt>
+          <dd className="mt-0.5 font-medium tabular-nums text-sky-800">
+            {fmtEur(ln.unit_price_eur)}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-slate-500">Spolu</dt>
+          <dd className="mt-0.5 font-semibold tabular-nums text-slate-900">
+            {fmtEur(ln.line_total_eur)}
+          </dd>
+        </div>
+      </dl>
+    </li>
+  );
+}
+
 function EditorHeader(props: {
   isNew: boolean;
   detail: OfferDetail;
@@ -1001,8 +1108,15 @@ function EditorHeader(props: {
 }) {
   const { isNew, detail, onBack } = props;
   return (
-    <div className="flex items-center gap-2">
-      <Button type="button" variant="outline" size="sm" onClick={onBack}>
+    <div className="flex min-w-0 items-center gap-2">
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="shrink-0"
+        onClick={onBack}
+        aria-label="Späť na zoznam"
+      >
         <ChevronLeft className="h-4 w-4" />
       </Button>
       <EditorHeaderInner isNew={isNew} detail={detail} />
@@ -1013,12 +1127,12 @@ function EditorHeader(props: {
 function EditorHeaderInner(props: { isNew: boolean; detail: OfferDetail }) {
   const { isNew, detail } = props;
   return (
-    <div>
-      <h3 className="text-lg font-semibold text-slate-900">
+    <div className="min-w-0">
+      <h3 className="truncate text-base font-semibold text-slate-900 sm:text-lg">
         {isNew ? "Nová ponuka" : detail.offer_number}
       </h3>
       {!isNew && detail.title ? (
-        <p className="text-sm text-slate-600">{detail.title}</p>
+        <p className="truncate text-xs text-slate-600 sm:text-sm">{detail.title}</p>
       ) : null}
     </div>
   );
@@ -1046,19 +1160,21 @@ function AddLineFields(props: {
           onChange={(e) => onNewLineChange({ ...newLine, description: e.target.value })}
         />
       </div>
-      <div className="sm:col-span-2">
-        <Input
-          placeholder="Množ."
-          value={newLine.quantity}
-          onChange={(e) => onNewLineChange({ ...newLine, quantity: e.target.value })}
-        />
-      </div>
-      <div className="sm:col-span-1">
-        <Input
-          placeholder="MJ"
-          value={newLine.unit}
-          onChange={(e) => onNewLineChange({ ...newLine, unit: e.target.value })}
-        />
+      <div className="grid grid-cols-2 gap-2 sm:contents">
+        <div className="sm:col-span-2">
+          <Input
+            placeholder="Množ."
+            value={newLine.quantity}
+            onChange={(e) => onNewLineChange({ ...newLine, quantity: e.target.value })}
+          />
+        </div>
+        <div className="sm:col-span-1">
+          <Input
+            placeholder="MJ"
+            value={newLine.unit}
+            onChange={(e) => onNewLineChange({ ...newLine, unit: e.target.value })}
+          />
+        </div>
       </div>
       <div className="sm:col-span-2">
         <Input
@@ -1071,7 +1187,7 @@ function AddLineFields(props: {
       </div>
       <div className="sm:col-span-2">
         <Button type="button" size="sm" className="w-full" disabled={saving} onClick={onAddLine}>
-          Pridať
+          Pridať položku
         </Button>
       </div>
     </>
