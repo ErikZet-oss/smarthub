@@ -75,6 +75,56 @@ automation = AutomationEngine()
 _IMPORT_TASKS: dict[str, dict[str, object]] = {}
 _IMPORT_TASKS_LOCK = threading.Lock()
 
+# Krátka TTL cache na conditional filter-options. Bez aktívnych filtrov (typický prvý
+# request po otvorení sekcie Vyhľadávanie) ide o najpomalší endpoint — 6× SELECT DISTINCT.
+# 60 s je dosť nato, aby sa pri otvorení/zatvorení stránky znova nepočítalo, a zároveň
+# málo, aby import Excelu rýchlo pretiekol do UI.
+_FILTER_OPTS_CACHE: dict[str, tuple[float, dict[str, list[str]]]] = {}
+_FILTER_OPTS_CACHE_TTL_SEC = 60.0
+_FILTER_OPTS_CACHE_LOCK = threading.Lock()
+
+
+def _filter_opts_cache_key(filters: "ProductSearchFilters") -> str:
+    return json.dumps(
+        {
+            "code": (filters.code or "").strip().lower(),
+            "norma": filters.norma or "",
+            "surface": filters.surface or "",
+            "diameter": filters.diameter or "",
+            "length": filters.length or "",
+            "v_class": filters.v_class or "",
+            "y_money_name": filters.y_money_name or "",
+        },
+        sort_keys=True,
+    )
+
+
+def _filter_opts_cache_get(key: str) -> dict[str, list[str]] | None:
+    with _FILTER_OPTS_CACHE_LOCK:
+        hit = _FILTER_OPTS_CACHE.get(key)
+        if hit is None:
+            return None
+        ts, value = hit
+        if (time.monotonic() - ts) > _FILTER_OPTS_CACHE_TTL_SEC:
+            _FILTER_OPTS_CACHE.pop(key, None)
+            return None
+        return value
+
+
+def _filter_opts_cache_set(key: str, value: dict[str, list[str]]) -> None:
+    with _FILTER_OPTS_CACHE_LOCK:
+        _FILTER_OPTS_CACHE[key] = (time.monotonic(), value)
+        # Odstráň najstaršie záznamy, aby cache nerástla bez kontroly.
+        if len(_FILTER_OPTS_CACHE) > 64:
+            oldest = sorted(_FILTER_OPTS_CACHE.items(), key=lambda kv: kv[1][0])
+            for k, _ in oldest[:32]:
+                _FILTER_OPTS_CACHE.pop(k, None)
+
+
+def _filter_opts_cache_invalidate() -> None:
+    with _FILTER_OPTS_CACHE_LOCK:
+        _FILTER_OPTS_CACHE.clear()
+
 
 def _supplier_product_url(supplier: Supplier, supplier_code: str | None) -> str | None:
     code = (supplier_code or "").strip()
@@ -513,20 +563,28 @@ async def search_products(
         .where(Supplier.is_connected == True)  # noqa: E712
         .order_by(Supplier.sort_order, Supplier.id)
     ).all()
+    supplier_by_id: dict[int, Supplier] = {s.id: s for s in suppliers if s.id is not None}
+
+    # N+1 fix: namiesto SELECT pre každý produkt načítaj všetky mappingy naraz.
+    product_ids = [p.id for p in products if p.id is not None]
+    mappings_by_product: dict[int, list[tuple[ProductMapping, Supplier]]] = {}
+    if product_ids:
+        mapping_rows_all = session.exec(
+            select(ProductMapping)
+            .where(ProductMapping.product_id.in_(product_ids))  # type: ignore[attr-defined]
+        ).all()
+        for mp in mapping_rows_all:
+            sup = supplier_by_id.get(mp.supplier_id)
+            if sup is None:
+                continue
+            mappings_by_product.setdefault(mp.product_id, []).append((mp, sup))
+        for k, lst in mappings_by_product.items():
+            lst.sort(key=lambda pair: ((pair[1].sort_order or 0), pair[1].id or 0))
 
     response: list[ProductComparison] = []
     for product in products:
         offers: list[SupplierOffer] = []
-        mapping_rows = session.exec(
-            select(ProductMapping, Supplier)
-            .join(Supplier, ProductMapping.supplier_id == Supplier.id)
-            .where(ProductMapping.product_id == product.id)
-            .where(Supplier.is_connected == True)  # noqa: E712
-        ).all()
-        mapping_rows = sorted(
-            mapping_rows,
-            key=lambda pair: ((pair[1].sort_order or 0), pair[1].id or 0),
-        )
+        mapping_rows = mappings_by_product.get(product.id, []) if product.id else []
 
         if mapping_rows:
             for mapping, supplier in mapping_rows:
@@ -678,13 +736,9 @@ def _distinct_conditional(
     return values[:max_values]
 
 
-@router.post("/products/filter-options/conditional")
-def product_filter_options_conditional(
-    filters: ProductSearchFilters,
-    session: Session = Depends(get_session),
-    _: AuthUserContext = Depends(get_current_user),
-):
-    """Možnosti pre každý filter podľa aktuálne zúženého súboru (kaskáda)."""
+def _build_conditional_filter_options(
+    session: Session, filters: ProductSearchFilters
+) -> dict[str, list[str]]:
     return {
         "norma": _distinct_conditional(
             session,
@@ -758,6 +812,69 @@ def product_filter_options_conditional(
             skip_y_money_name=True,
             column=Product.y_money_name,
         ),
+    }
+
+
+@router.post("/products/filter-options/conditional")
+def product_filter_options_conditional(
+    filters: ProductSearchFilters,
+    session: Session = Depends(get_session),
+    _: AuthUserContext = Depends(get_current_user),
+):
+    """Možnosti pre každý filter podľa aktuálne zúženého súboru (kaskáda)."""
+    cache_key = _filter_opts_cache_key(filters)
+    cached = _filter_opts_cache_get(cache_key)
+    if cached is not None:
+        return cached
+    result = _build_conditional_filter_options(session, filters)
+    _filter_opts_cache_set(cache_key, result)
+    return result
+
+
+@router.get("/health")
+def health_check() -> dict[str, str]:
+    """Bezauthový endpoint pre uptime monitor (UptimeRobot, BetterStack, GitHub Action).
+    Pravidelný ping (každé 4 min) drží Render dyno hore a odstráni 10–15 s cold start.
+    """
+    return {"status": "ok"}
+
+
+class BootstrapPayload(BaseModel):
+    code: str | None = None
+    limit: int = 25
+
+
+@router.post("/bootstrap/search")
+async def bootstrap_search(
+    payload: BootstrapPayload,
+    session: Session = Depends(get_session),
+    user: AuthUserContext = Depends(get_current_user),
+):
+    """
+    Spojí 3 prvotné requesty (filter-options + search + suppliers info) do jednej odpovede,
+    aby sa UI prvý render dotiahlo jedným round-tripom namiesto sekvenčných 2–3.
+    """
+    filters = ProductSearchFilters(code=(payload.code or "").strip() or None)
+    cache_key = _filter_opts_cache_key(filters)
+    cached_opts = _filter_opts_cache_get(cache_key)
+    if cached_opts is None:
+        cached_opts = _build_conditional_filter_options(session, filters)
+        _filter_opts_cache_set(cache_key, cached_opts)
+
+    limit = min(max(payload.limit or 25, 1), 100)
+    search_filters = ProductSearchFilters(
+        code=filters.code,
+        limit=limit,
+        prefetch_live_prices=False,
+    )
+    products = await search_products(  # type: ignore[func-returns-value]
+        search_filters, session=session, _=user
+    )
+    return {
+        "filter_options": cached_opts,
+        "products": products,
+        "limit": limit,
+        "is_admin": bool(user.is_admin),
     }
 
 
@@ -1398,6 +1515,8 @@ def _run_excel_import_task(task_id: str, file_path: str, sheet_name: str) -> Non
             for sup in session.exec(select(Supplier)).all():
                 ensure_credentials_for_supplier(session, int(sup.id))
             session.commit()
+        # filter-options cache musí vidieť nové normy/povrchy/priemery z importu.
+        _filter_opts_cache_invalidate()
         _import_task_update(
             task_id,
             state="done",
@@ -1497,6 +1616,7 @@ def import_excel(
         for sup in session.exec(select(Supplier)).all():
             ensure_credentials_for_supplier(session, int(sup.id))
         session.commit()
+        _filter_opts_cache_invalidate()
         return {
             "products_upserted": result.products_upserted,
             "products_legacy_removed": result.products_legacy_removed,

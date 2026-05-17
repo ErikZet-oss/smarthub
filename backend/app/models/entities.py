@@ -51,19 +51,23 @@ class UserSupplierCredential(SQLModel, table=True):
 class Product(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     internal_code: str = Field(index=True, unique=True)
-    norma: Optional[str] = None
-    diameter: Optional[str] = None
-    length: Optional[str] = None
-    surface: Optional[str] = None
-    v_class: Optional[str] = None
-    y_money_name: Optional[str] = None
+    # Indexy na filtre — bez nich SELECT DISTINCT + WHERE x = ? skenuje celú tabuľku
+    # (na ~30k produktoch v Postgrese to znamená 100–300 ms na každý filter).
+    norma: Optional[str] = Field(default=None, index=True)
+    diameter: Optional[str] = Field(default=None, index=True)
+    length: Optional[str] = Field(default=None, index=True)
+    surface: Optional[str] = Field(default=None, index=True)
+    v_class: Optional[str] = Field(default=None, index=True)
+    y_money_name: Optional[str] = Field(default=None, index=True)
     image_filename: Optional[str] = None
 
 
 class ProductMapping(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-    supplier_id: int = Field(foreign_key="supplier.id")
-    product_id: int = Field(foreign_key="product.id")
+    # Bez indexu na product_id musí každý dotaz cez join skenovať celú tabuľku
+    # mappingov — N+1 v /products/search je preto najmä waiting na IO.
+    supplier_id: int = Field(foreign_key="supplier.id", index=True)
+    product_id: int = Field(foreign_key="product.id", index=True)
     supplier_code: str = Field(index=True)
 
 

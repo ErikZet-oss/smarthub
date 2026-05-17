@@ -121,6 +121,44 @@ def migrate_schema() -> None:
     ):
         _add_column_if_missing("offerline", col, ddl)
 
+    _ensure_search_indexes()
+
+
+def _create_index_if_missing(
+    table: str, index_name: str, column: str
+) -> None:
+    """SQLite + Postgres: idempotentné CREATE INDEX IF NOT EXISTS."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(f'CREATE INDEX IF NOT EXISTS "{index_name}" ON "{table}" ("{column}")')
+            )
+    except Exception:
+        # Niektoré staršie engines (napr. SQLAlchemy bez schema podpory) — radšej ignoruj
+        # ako spadnúť pri štarte. Bez indexu beží všetko, len pomalšie.
+        pass
+
+
+def _ensure_search_indexes() -> None:
+    """Indexy pre filtre vo vyhľadávaní (SELECT DISTINCT + WHERE).
+
+    Bez indexov sa každý filter (norma, diameter, length, surface, v_class, y_money_name)
+    musí čítať celým seq scanom. Pri ~30k produktoch v Postgrese to znamená 100–300 ms
+    per query, čo sa pri 6 filtroch + jednom search-i pekne nasčítava.
+    """
+    for col in (
+        "norma",
+        "diameter",
+        "length",
+        "surface",
+        "v_class",
+        "y_money_name",
+    ):
+        _create_index_if_missing("product", f"ix_product_{col}", col)
+    # ProductMapping — kvôli rýchlemu načítaniu mappings pre product_id IN (...)
+    _create_index_if_missing("productmapping", "ix_productmapping_product_id", "product_id")
+    _create_index_if_missing("productmapping", "ix_productmapping_supplier_id", "supplier_id")
+
 
 def migrate_sqlite_schema() -> None:
     """Spätná kompatibilita — volá univerzálnu migráciu."""

@@ -3074,6 +3074,8 @@ export default function Home() {
   const [apiToken, setApiToken] = useState<string | null>(null);
   /** Po prvom dokončení GET /api/auth/session — aby sa vyhľadávanie nespúšťalo bez tokenu a neprepísalo výsledky 401. */
   const [authSessionReady, setAuthSessionReady] = useState(false);
+  /** Prvý kombinovaný `/api/bootstrap/search` volaj len raz — pri ďalších filtroch už klasický 2-step flow. */
+  const bootstrapDoneRef = useRef(false);
   /** Next vráti `error: config` keď chýba alebo je krátke SMARTHUB_AUTH_SECRET. */
   const [authConfigError, setAuthConfigError] = useState(false);
   const [isAppAdmin, setIsAppAdmin] = useState(false);
@@ -3104,6 +3106,9 @@ export default function Home() {
   );
 
   useEffect(() => {
+    // Auth session a backend health pingujeme paralelne. /api/health prebudí Render dyno,
+    // takže keď používateľ zafiltruje, backend už nie je studený.
+    void fetch(`${API_BASE}/api/health`, { cache: "no-store" }).catch(() => {});
     void fetch("/api/auth/session")
       .then((r) => r.json())
       .then(
@@ -4149,6 +4154,75 @@ export default function Home() {
         y_money_name: searchFilters.y_money_name || null,
         prefetch_live_prices: false,
       };
+      const noFiltersActive =
+        !apiBody.code &&
+        !apiBody.norma &&
+        !apiBody.surface &&
+        !apiBody.diameter &&
+        !apiBody.length &&
+        !apiBody.v_class &&
+        !apiBody.y_money_name;
+
+      // Cold-start optimalizácia: pri prvom otvorení Vyhľadávania bez aktívnych filtrov
+      // urobíme jediný request /api/bootstrap/search, ktorý vráti filter-options aj
+      // prvých 25 produktov. Ušetrí to 1 round-trip + 1 SELECT cez celú DB tabuľku.
+      if (!bootstrapDoneRef.current && noFiltersActive) {
+        try {
+          setSearchMessage("Pripájam sa k API…");
+          const bootRes = await apiFetch(`${API_BASE}/api/bootstrap/search`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ code: null, limit: 25 }),
+          });
+          if (cancelled) return;
+          if (bootRes.ok) {
+            const boot = (await bootRes.json()) as {
+              filter_options?: Partial<FilterOptions>;
+              products?: ProductSearchRow[];
+            };
+            if (cancelled) return;
+            const rawOpts = boot.filter_options ?? {};
+            const opts = mergeConditionalFilterOptionsWithExcel(
+              {
+                norma: rawOpts.norma ?? [],
+                surface: rawOpts.surface ?? [],
+                diameter: rawOpts.diameter ?? [],
+                length: rawOpts.length ?? [],
+                v_class: rawOpts.v_class ?? [],
+                y_money_name: rawOpts.y_money_name ?? [],
+              },
+              mappingProfile,
+              fieldToColumn,
+              false,
+            );
+            setFilterOptions((prev) =>
+              filterOptionsArraysEqual(prev, opts) ? prev : opts,
+            );
+            const rows = normalizeProductSearchRows(boot.products ?? []);
+            setSearchResults(rows);
+            setSearchMessage(
+              rows.length === 0
+                ? "Žiadne záznamy v databáze. Spusti import Excelu (Mapovanie)."
+                : `Nájdených záznamov: ${rows.length}.`,
+            );
+            setOpenProduct(null);
+            bootstrapDoneRef.current = true;
+            return;
+          }
+          // Fallback na klasický 2-step flow nižšie.
+        } catch (error) {
+          if (cancelled) return;
+          const raw = error instanceof Error ? error.message : "";
+          if (isBrowserFetchNetworkError(raw)) {
+            setSearchMessage(apiUnreachableUserMessage(API_BASE));
+            setSearchResults([]);
+            return;
+          }
+          // Inak skúsime klasický flow nižšie (bootstrap nemusí byť ešte deploynutý).
+        }
+      }
+
+      setSearchMessage(bootstrapDoneRef.current ? "Hľadám…" : "Pripájam sa k API…");
       try {
         const optRes = await apiFetch(
           `${API_BASE}/api/products/filter-options/conditional`,
@@ -4219,10 +4293,11 @@ export default function Home() {
         }
 
         setSearchMessage("Hľadám…");
+        const initialLimit = bootstrapDoneRef.current ? 50 : 25;
         const searchRes = await apiFetch(`${API_BASE}/api/products/search`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...apiBody, limit: 50 }),
+          body: JSON.stringify({ ...apiBody, limit: initialLimit }),
         });
         const payload = (await searchRes.json()) as
           | ProductSearchRow[]
@@ -4245,6 +4320,7 @@ export default function Home() {
             : `Nájdených záznamov: ${rows.length}.`,
         );
         setOpenProduct(null);
+        bootstrapDoneRef.current = true;
       } catch (error) {
         if (!cancelled) {
           const raw =
