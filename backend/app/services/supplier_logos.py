@@ -23,6 +23,9 @@ _REPO_LOGO_SEEDS: list[tuple[str, str]] = [
     ("mekrs", "Mekrs.png"),
     ("bmkco", "bmkco.png"),
     ("bmco", "bmkco.png"),
+    # Schäfer-Peters — meno môže prísť ako „Schaef", „Schäfer", „Schäfer-Peters".
+    # Hľadáme prefix bez diakritiky (logo seed sa robí proti casefold + bez medzier).
+    ("schaef", "Schaefer.png"),
 ]
 
 _CONTENT_TYPE_EXT = {
@@ -170,14 +173,7 @@ def seed_supplier_logos_from_repo(session) -> int:
             data,
             filename=os.path.basename(src),
         )
-        if (supplier.logo_path or "").strip() != basename:
-            supplier.logo_path = basename
-            session.add(supplier)
-            updated += 1
-        else:
-            # Súbor už sedí — prepíš na disku (aktualizácia loga v gite).
-            dest = os.path.join(supplier_logos_dir(), basename)
-            if not os.path.isfile(dest):
-                shutil.copy2(src, dest)
-                updated += 1
+        supplier.logo_path = basename
+        session.add(supplier)
+        updated += 1
     return updated

@@ -93,6 +93,11 @@ from app.services.mekrs_http_client import (
     _mekrs_sanitize_variant_label,
     mekrs_parse_cart_json,
 )
+from app.services.schaef_http_client import (
+    SchaefHttpClient,
+    schaef_base_url,
+    schaef_round_qty_to_step,
+)
 from app.services.supplier_logos import supplier_logo_public_url
 from app.services.dev_run_log import (
     dev_run_log,
@@ -638,6 +643,27 @@ def _supplier_is_fabory(supplier: Supplier) -> bool:
     return "fabory.com" in (supplier.shop_url or "").lower()
 
 
+def _supplier_is_schaef(supplier: Supplier) -> bool:
+    """Schäfer-Peters / shop.schaefer-peters.com — DCShop B2B portál.
+
+    Detekcia musí byť tolerantná: kým prejde používateľ z UI klávesnicou, mená sa
+    objavujú ako „Schaef", „Schäfer", „Schäfer-Peters", „Schaeffer" atď.
+    """
+    compact = re.sub(r"\s+", "", (supplier.name or "").lower())
+    compact_ascii = (
+        compact.replace("ä", "a").replace("ö", "o").replace("ü", "u").replace("ß", "ss")
+    )
+    if (
+        "schaef" in compact_ascii
+        or "schafer" in compact_ascii
+        or "schaeffer" in compact_ascii
+        or "schäf" in compact
+    ):
+        return True
+    u = (supplier.shop_url or "").lower()
+    return "schaefer-peters.com" in u or "schaeferpeters.com" in u
+
+
 def supplier_allows_empty_cart_config(supplier: Supplier) -> bool:
     """Dodávatelia s HTTP klientom — Playwright JSON nie je povinný."""
     if (
@@ -650,6 +676,7 @@ def supplier_allows_empty_cart_config(supplier: Supplier) -> bool:
         or _supplier_is_valenta(supplier)
         or _supplier_is_fabory(supplier)
         or _supplier_is_hopefix(supplier)
+        or _supplier_is_schaef(supplier)
     ):
         return True
     u = (supplier.shop_url or "").lower()
@@ -671,6 +698,8 @@ def supplier_allows_empty_cart_config(supplier: Supplier) -> bool:
     if "fabory.com" in u:
         return True
     if "hopefix.cz" in u:
+        return True
+    if "schaefer-peters.com" in u or "schaeferpeters.com" in u:
         return True
     return False
 
@@ -2209,6 +2238,82 @@ async def _fabory_get_supplier_data_via_http(
         supplier,
         run_id,
         f"get_supplier_data Fabory HTTP: code={code!r} price={data.get('price_eur')!r} stock={data.get('stock')!r} pack={data.get('pack_quantity')!r}",
+    )
+    return data
+
+
+async def _schaef_get_supplier_data_via_http(
+    supplier: Supplier,
+    product_code: str,
+    *,
+    run_label: str,
+    run_id: str,
+    automation_user_id: int = 0,
+) -> dict[str, Any]:
+    """Cena + sklad zo Schäfer-Peters cez prihlásený HTTP session + PDP HTML.
+
+    Session sa drží v procese cez ``_supplier_http_client_get_or_create`` — login
+    (~1.5 s) sa robí len pri prvom dotaze; ďalšie kódy v rámci 8 min idú priamo.
+    """
+    code = (product_code or "").strip()
+    if not code:
+        raise ValueError("Prázdny kód produktu.")
+    user = (supplier.username or "").strip()
+    pwd = (supplier.password or "").strip()
+    if not user or not pwd:
+        raise ValueError("Schäfer-Peters: chýba meno alebo heslo dodávateľa.")
+
+    base = schaef_base_url(supplier.shop_url or "")
+
+    def _factory() -> SchaefHttpClient:
+        return SchaefHttpClient(base_url=base)
+
+    async def _login(c: SchaefHttpClient) -> None:
+        await c.ensure_login(user, pwd)
+
+    client: SchaefHttpClient = await _supplier_http_client_get_or_create(
+        "schaef",
+        supplier,
+        automation_user_id,
+        _factory,
+        _login,
+    )
+
+    try:
+        data = await client.fetch_product_price_and_stock(code)
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code if exc.response is not None else None
+        if status in (401, 403, 302):
+            _log(
+                run_label,
+                supplier,
+                run_id,
+                f"Schäfer-Peters HTTP: status {status} → invalidujem session a relogujem",
+                "warn",
+            )
+            await _supplier_http_client_invalidate(
+                "schaef", supplier.id, automation_user_id
+            )
+            client = await _supplier_http_client_get_or_create(
+                "schaef", supplier, automation_user_id, _factory, _login
+            )
+            data = await client.fetch_product_price_and_stock(code)
+        else:
+            raise
+    except RuntimeError as exc:
+        msg = str(exc).lower()
+        if "prihlás" in msg or "login" in msg or "neprihl" in msg:
+            await _supplier_http_client_invalidate(
+                "schaef", supplier.id, automation_user_id
+            )
+        raise
+    _log(
+        run_label,
+        supplier,
+        run_id,
+        f"get_supplier_data Schäf HTTP: code={code!r} price={data.get('price_eur')!r} "
+        f"stock={data.get('stock')!r} pack={data.get('pack_quantity')!r} "
+        f"item_id={data.get('schaef_item_id')!r}",
     )
     return data
 
@@ -6436,6 +6541,24 @@ class ScraperService:
                     "warn",
                 )
 
+        if _supplier_is_schaef(supplier):
+            # Schäfer-Peters má len HTTP cestu (Playwright config v Smart-hube
+            # zámerne neudržiavame — eshop je čisto server-side rendered DCShop).
+            sf = await _schaef_get_supplier_data_via_http(
+                supplier,
+                product_code,
+                run_label=run_label,
+                run_id=run_id,
+                automation_user_id=automation_user_id,
+            )
+            _log(
+                run_label,
+                supplier,
+                run_id,
+                f"get_supplier_data done (Schäf HTTP): {sf}",
+            )
+            return await _maybe_cache(sf)
+
         if _supplier_is_haspl(supplier):
             try:
                 hp = await _haspl_get_supplier_data_via_http(
@@ -6903,6 +7026,8 @@ class ScraperService:
         haspl_variant_code: Optional[str] = None,
         inoxmare_product_id: Optional[str] = None,
         inoxmare_referer_path: Optional[str] = None,
+        schaef_item_id: Optional[str] = None,
+        schaef_referer_path: Optional[str] = None,
         *,
         automation_user_id: int = 0,
     ) -> None:
@@ -6921,6 +7046,7 @@ class ScraperService:
         is_valenta = _supplier_is_valenta(supplier)
         hopefix_http = _supplier_is_hopefix(supplier) and _hopefix_http_enabled(config)
         inoxmare_http = _supplier_is_inoxmare(supplier)
+        is_schaef = _supplier_is_schaef(supplier)
         if (
             not is_mekrs
             and not hopefix_http
@@ -6931,6 +7057,7 @@ class ScraperService:
             and not is_schachermayer
             and not is_valenta
             and not inoxmare_http
+            and not is_schaef
         ):
             if not search_sel and not search_url_tmpl:
                 raise ValueError(
@@ -7138,6 +7265,115 @@ class ScraperService:
 
             await _mekrs_http_cart()
             _log(run_label, supplier, run_id, "add_to_cart done (Mekrs HTTP)")
+            return
+
+        if is_schaef:
+            code_sf = (product_code or "").strip()
+            if not code_sf:
+                raise ValueError("Schäfer-Peters: prázdny kód produktu.")
+
+            base_sf = schaef_base_url(supplier.shop_url or "")
+            user_sf = (supplier.username or "").strip()
+            pwd_sf = (supplier.password or "").strip()
+            if not user_sf or not pwd_sf:
+                raise ValueError(
+                    "Schäfer-Peters: chýba meno alebo heslo dodávateľa."
+                )
+
+            iid = (schaef_item_id or "").strip()
+            ref_path = (schaef_referer_path or "").strip() or "/b2b/en/"
+            order_step = 1
+            order_min = 1
+
+            # Ak FE neposlal item_id, vyžiadame PDP najprv (cez search redirect)
+            # a vytiahneme si všetky potrebné údaje.
+            if not iid:
+                pdp_data = await _schaef_get_supplier_data_via_http(
+                    supplier,
+                    code_sf,
+                    run_label=run_label,
+                    run_id=run_id,
+                    automation_user_id=automation_user_id,
+                )
+                iid = str(pdp_data.get("schaef_item_id") or "").strip()
+                ref_path = (
+                    str(pdp_data.get("schaef_pdp_path") or "").strip() or ref_path
+                )
+                try:
+                    order_step = int(pdp_data.get("schaef_order_step") or 1)
+                except (TypeError, ValueError):
+                    order_step = 1
+                try:
+                    order_min = int(pdp_data.get("schaef_order_min") or order_step)
+                except (TypeError, ValueError):
+                    order_min = order_step
+                if not iid:
+                    raise RuntimeError(
+                        f"Schäfer-Peters: pre kód {code_sf!r} sa nepodarilo "
+                        "extrahovať item_id z PDP."
+                    )
+
+            # Zaokrúhli kusy na najbližší násobok krokov objednávky (typicky 50).
+            qty_pieces = schaef_round_qty_to_step(
+                int(quantity), order_step, order_min
+            )
+
+            def _factory() -> SchaefHttpClient:
+                return SchaefHttpClient(base_url=base_sf)
+
+            async def _login(c: SchaefHttpClient) -> None:
+                await c.ensure_login(user_sf, pwd_sf)
+
+            client_sf: SchaefHttpClient = await _supplier_http_client_get_or_create(
+                "schaef",
+                supplier,
+                automation_user_id,
+                _factory,
+                _login,
+            )
+
+            _log(
+                run_label,
+                supplier,
+                run_id,
+                f"add_to_cart Schäf HTTP item_id={iid!r} qty={qty_pieces} "
+                f"(step={order_step}, min={order_min}, requested={quantity}) "
+                f"referer={ref_path!r}",
+            )
+
+            try:
+                await client_sf.add_to_cart(
+                    item_id=iid,
+                    quantity_pieces=qty_pieces,
+                    referer_path=ref_path,
+                )
+            except httpx.HTTPStatusError as exc:
+                status = (
+                    exc.response.status_code if exc.response is not None else None
+                )
+                if status in (401, 403, 302):
+                    _log(
+                        run_label,
+                        supplier,
+                        run_id,
+                        f"Schäf HTTP cart: status {status} → invalidujem session a retry",
+                        "warn",
+                    )
+                    await _supplier_http_client_invalidate(
+                        "schaef", supplier.id, automation_user_id
+                    )
+                    client_sf = await _supplier_http_client_get_or_create(
+                        "schaef", supplier, automation_user_id, _factory, _login
+                    )
+                    await client_sf.add_to_cart(
+                        item_id=iid,
+                        quantity_pieces=qty_pieces,
+                        referer_path=ref_path,
+                    )
+                else:
+                    raise
+
+            _log(run_label, supplier, run_id, "add_to_cart done (Schäf HTTP)")
             return
 
         if is_haspl:

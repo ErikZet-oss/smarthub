@@ -224,6 +224,10 @@ class AddToCartPayload(BaseModel):
     # Inoxmare HTTP: Magento product ID a relatívna cesta PDP (z packaging_variants).
     inoxmare_product_id: str | None = None
     inoxmare_referer_path: str | None = None
+    # Schäfer-Peters HTTP: numerické item_id z PDP (hidden input). Bez neho
+    # backend musí najprv získať PDP cez search a item_id si vytiahnuť sám.
+    schaef_item_id: str | None = None
+    schaef_referer_path: str | None = None
 
 
 class StepScreenshotsPayload(BaseModel):
@@ -1166,6 +1170,8 @@ async def cart_add(
             haspl_variant_code=payload.haspl_variant_code,
             inoxmare_product_id=payload.inoxmare_product_id,
             inoxmare_referer_path=payload.inoxmare_referer_path,
+            schaef_item_id=payload.schaef_item_id,
+            schaef_referer_path=payload.schaef_referer_path,
             automation_user_id=user.id,
         )
         ScraperService.invalidate_remote_cart_cache(
