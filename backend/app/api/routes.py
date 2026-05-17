@@ -110,20 +110,31 @@ def _next_supplier_sort_order(session: Session) -> int:
     return max((s.sort_order or 0) for s in suppliers) + 10
 
 
+def _strip_json_trailing_commas(text: str) -> str:
+    """JSON5-friendly: ostrá `json` knižnica padá na „, }" / „, ]"."""
+    import re as _re
+
+    return _re.sub(r",(\s*[}\]])", r"\1", text)
+
+
 def _normalize_supplier_cart_config_json(name: str, raw_cfg: str | None) -> str | None:
     cfg_text = (raw_cfg or "").strip()
     if not cfg_text:
         return None
-    # Fabory na Render beží bez X servera; browser_channel=chrome spôsobí pád headed browsera.
-    # Ak sa hodnota niekde obnoví zo šablóny, pri uložení ju tu odstránime.
-    if "fabory" in (name or "").strip().lower():
+    parsed: dict | None = None
+    try:
+        parsed = json.loads(cfg_text)
+    except json.JSONDecodeError:
         try:
-            cfg = json.loads(cfg_text)
-            if isinstance(cfg, dict) and "browser_channel" in cfg:
-                cfg.pop("browser_channel", None)
-                return json.dumps(cfg, ensure_ascii=False, indent=2)
+            parsed = json.loads(_strip_json_trailing_commas(cfg_text))
         except Exception:
-            return cfg_text
+            parsed = None
+    if isinstance(parsed, dict):
+        # Fabory na Render beží bez X servera; browser_channel=chrome spôsobí pád headed browsera.
+        # Ak sa hodnota niekde obnoví zo šablóny, pri uložení ju tu odstránime.
+        if "fabory" in (name or "").strip().lower():
+            parsed.pop("browser_channel", None)
+        return json.dumps(parsed, ensure_ascii=False, indent=2)
     return cfg_text
 
 

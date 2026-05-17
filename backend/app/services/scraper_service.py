@@ -7973,10 +7973,29 @@ class ScraperService:
         return out
 
 
+def _strip_json_trailing_commas(text: str) -> str:
+    """JSON5-friendly: odstráni „, }" a „, ]" (čokoľvek medzi tým len whitespace).
+    Bežná chyba ručného editu; standardná json knižnica ich odmieta."""
+    return re.sub(r",(\s*[}\]])", r"\1", text)
+
+
+def _parse_cart_config_text(raw: str) -> ScraperConfig:
+    try:
+        return ScraperConfig.model_validate_json(raw)
+    except Exception as first_err:
+        cleaned = _strip_json_trailing_commas(raw)
+        if cleaned == raw:
+            raise
+        try:
+            return ScraperConfig.model_validate_json(cleaned)
+        except Exception:
+            raise first_err
+
+
 def load_scraper_config(supplier: Supplier) -> ScraperConfig:
     raw = (supplier.cart_config_json or "").strip()
     if raw:
-        return ScraperConfig.model_validate_json(supplier.cart_config_json)
+        return _parse_cart_config_text(raw)
     if supplier_allows_empty_cart_config(supplier):
         # Zástupca pre Pydantic — pri zlyhaní HTTP musí Playwright mať reálne selektory (nie „body“).
         if _supplier_is_inoxmare(supplier):
