@@ -2718,6 +2718,11 @@ class ScraperConfig(BaseModel):
     schachermayer_catalog_id: Optional[str] = None
     # Celá hlavička Cookie z prehliadača po ručnom prihlásení (DevTools → Sieť → Cookie). Obíde CAPTCHA.
     inoxmare_session_cookie_header: Optional[str] = None
+    # Inoxmare: pred goto na login otvor homepage, scrolluj a pohni myšou — Magento ReCaptcha
+    # / Cloudflare nás nezaznamenajú ako bota a CAPTCHA challenge sa nespustí.
+    inoxmare_browser_warmup: bool = True
+    inoxmare_warmup_min_sec: float = 1.6
+    inoxmare_warmup_max_sec: float = 3.4
     search_submit_selector: Optional[str] = None
     search_submit_key: Optional[str] = "Enter"
     post_search_wait_ms: int = 2500
@@ -2794,9 +2799,25 @@ def _chromium_launch_kwargs(
     config: ScraperConfig,
     supplier: Optional[Supplier] = None,
 ) -> dict[str, Any]:
+    # Argumenty znižujú „automation“ odtlačok prehliadača. Tieto sú overené proti
+    # Cloudflare bot fight / Magento ReCaptchaWebapiUi a nemenia rendering pre bežné B2B portály.
+    args = [
+        "--disable-blink-features=AutomationControlled",
+        "--disable-features=IsolateOrigins,site-per-process,Translate,UserAgentClientHintsGREASEUpdate",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-default-apps",
+        "--disable-popup-blocking",
+        "--password-store=basic",
+        "--use-mock-keychain",
+        "--enable-features=NetworkService,NetworkServiceInProcess",
+    ]
     kw: dict[str, Any] = {
         "headless": config.headless,
-        "args": ["--disable-blink-features=AutomationControlled"],
+        "args": args,
+        # Excluded switches — bez nich Chrome v devtools deklaruje --enable-automation
+        # ako infobar a window.navigator.webdriver = true.
+        "ignore_default_args": ["--enable-automation", "--enable-blink-features=IdleDetection"],
     }
     ch = (config.browser_channel or "").strip()
     if ch:
@@ -3963,15 +3984,36 @@ async def _new_browser_context(
     supplier: Optional[Supplier] = None,
     automation_user_id: int = 0,
 ) -> BrowserContext:
-    """Menej „headless“ odtlačok — niektoré B2B weby blokujú prázdny UA."""
+    """
+    Kontext sa správa ako bežný Chrome 147 na Windows: UA, Client Hints (sec-ch-ua*),
+    Accept-Language. Bez týchto hlavičiek Magento ReCaptcha / Cloudflare zistí, že je
+    to bot, a vyžiada CAPTCHA / 403.
+    """
+    chrome_major = "147"
+    sec_ch_ua = (
+        f'"Google Chrome";v="{chrome_major}", '
+        f'"Not.A/Brand";v="8", '
+        f'"Chromium";v="{chrome_major}"'
+    )
     kwargs: dict[str, Any] = {
         "user_agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+            f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            f"(KHTML, like Gecko) Chrome/{chrome_major}.0.0.0 Safari/537.36"
         ),
         "locale": "sk-SK",
         "timezone_id": "Europe/Bratislava",
         "viewport": {"width": 1400, "height": 900},
+        "device_scale_factor": 1.0,
+        "is_mobile": False,
+        "has_touch": False,
+        "color_scheme": "light",
+        "extra_http_headers": {
+            "Accept-Language": "sk,cs;q=0.9,en-US;q=0.8,en;q=0.7",
+            "sec-ch-ua": sec_ch_ua,
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": '"Windows"',
+            "Upgrade-Insecure-Requests": "1",
+        },
     }
     if (
         supplier is not None
@@ -4006,11 +4048,11 @@ async def _apply_playwright_stealth_if_enabled(
         )
         return
     stealth = Stealth(
-        navigator_languages_override=("sk-SK", "sk", "en-US", "en"),
+        navigator_languages_override=("sk-SK", "sk", "cs", "en-US", "en"),
         navigator_platform_override="Win32",
         navigator_user_agent_override=(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+            "(KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
         ),
     )
     try:
@@ -4235,6 +4277,85 @@ async def _inoxmare_seed_playwright_cookies(
     )
 
 
+async def _inoxmare_browser_warmup(
+    page: Page,
+    supplier: Supplier,
+    config: ScraperConfig,
+    *,
+    run_label: str,
+    run_id: str,
+) -> None:
+    """
+    „Reálny zákazník“ pred prihlásením otvorí domovskú stránku, niečo si nalistuje
+    a až potom klikne na Sign In. Bez tejto rozcvičky Magento ReCaptcha modul
+    vyhodnotí požiadavku ako bota a vypýta CAPTCHA. Domovská návšteva tiež nahodí
+    form_key, X-Magento-Vary a Cloudflare cookies (cf_clearance, frontend, …).
+    """
+    origin = inoxmare_origin(supplier.shop_url or "")
+    store = inoxmare_store_path(supplier.shop_url or "", config.inoxmare_store_path)
+    home_url = f"{origin}{store}/"
+    _log(
+        run_label,
+        supplier,
+        run_id,
+        f"Inoxmare warmup: goto homepage {home_url!r}",
+    )
+    try:
+        await page.goto(
+            home_url,
+            wait_until="domcontentloaded",
+            timeout=min(45_000, int(config.navigation_timeout_ms)),
+        )
+    except Exception as exc:
+        _log(
+            run_label,
+            supplier,
+            run_id,
+            f"Inoxmare warmup: homepage goto zlyhalo ({exc!s}) — pokračujem",
+            "warn",
+        )
+        return
+
+    # Akceptuj cookies (CookieScript / Magento default banner) — bez toho overlay zostane.
+    await _dismiss_cookies(page, config.optional_cookie_dismiss_selector)
+    await _dismiss_cookiescript_if_present(
+        page,
+        run_label=run_label,
+        supplier=supplier,
+        run_id=run_id,
+        config_selector=config.optional_cookie_dismiss_selector,
+    )
+
+    await asyncio.sleep(random.uniform(0.6, 1.2))
+
+    # Náhodné myšacie pohyby + scroll — simulujeme „pozeranie ponuky“.
+    try:
+        viewport = page.viewport_size or {"width": 1400, "height": 900}
+        for _ in range(random.randint(3, 5)):
+            x = random.randint(120, max(300, int(viewport["width"]) - 120))
+            y = random.randint(120, max(300, int(viewport["height"]) - 200))
+            await page.mouse.move(x, y, steps=random.randint(6, 14))
+            await asyncio.sleep(random.uniform(0.12, 0.32))
+    except Exception:
+        pass
+
+    try:
+        for delta in (180, 320, 240):
+            await page.mouse.wheel(0, delta)
+            await asyncio.sleep(random.uniform(0.18, 0.45))
+        await page.mouse.wheel(0, -240)
+    except Exception:
+        pass
+
+    try:
+        await page.wait_for_load_state("networkidle", timeout=5_000)
+    except Exception:
+        pass
+    await asyncio.sleep(random.uniform(0.4, 0.9))
+
+    _log(run_label, supplier, run_id, "Inoxmare warmup: domov OK")
+
+
 async def _inoxmare_raise_if_login_captcha_required(
     page: Page, config: ScraperConfig
 ) -> None:
@@ -4342,6 +4463,33 @@ async def _login_and_search(
             run_id,
             "Inoxmare: inoxmare_session_cookie_header — prvý goto je prihlásená zóna (bez login stránky)",
         )
+
+    # Warm-up: pred prvým „prihláseným“ requestom otvor homepage a urob ľudské pohyby.
+    # Bez tohto kroku Magento Captcha / Cloudflare bot-score okamžite vyhodnotí relácie z čistého
+    # kontextu Playwright ako bota a CAPTCHA challenge sa zapne.
+    if (
+        _supplier_is_inoxmare(supplier)
+        and not inox_cookie_hdr
+        and getattr(config, "inoxmare_browser_warmup", True)
+    ):
+        _has_inox_saved_session = (
+            _session_reuse_enabled()
+            and supplier.id is not None
+            and os.path.isfile(_storage_state_path(supplier.id, storage_user_id))
+        )
+        if not _has_inox_saved_session:
+            await _inoxmare_browser_warmup(
+                page,
+                supplier,
+                config,
+                run_label=run_label,
+                run_id=run_id,
+            )
+            wu_lo = float(getattr(config, "inoxmare_warmup_min_sec", 1.6))
+            wu_hi = float(getattr(config, "inoxmare_warmup_max_sec", 3.4))
+            if wu_hi < wu_lo:
+                wu_lo, wu_hi = wu_hi, wu_lo
+            await asyncio.sleep(random.uniform(wu_lo, max(wu_lo, wu_hi)))
 
     _log(
         run_label,

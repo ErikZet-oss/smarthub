@@ -14,10 +14,62 @@ from urllib.parse import quote, unquote, urlparse
 
 import httpx
 
+# Pravidelne aktualizujeme major verziu Chrome — staré UA (Chrome 120/131) Cloudflare aj
+# Magento Captcha modul vyhodnocujú ako podozrivý fingerprint a vyvolajú CAPTCHA challenge.
+CHROME_MAJOR = "147"
 DEFAULT_UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    f"(KHTML, like Gecko) Chrome/{CHROME_MAJOR}.0.0.0 Safari/537.36"
 )
+SEC_CH_UA = (
+    f'"Google Chrome";v="{CHROME_MAJOR}", '
+    f'"Not.A/Brand";v="8", '
+    f'"Chromium";v="{CHROME_MAJOR}"'
+)
+
+
+def _inoxmare_base_headers() -> dict[str, str]:
+    """Hlavičky 1:1 ako Chrome 147 v reálnom prehliadači — zhoduje sa s HAR z DevTools."""
+    return {
+        "User-Agent": DEFAULT_UA,
+        "Accept": (
+            "text/html,application/xhtml+xml,application/xml;q=0.9,"
+            "image/avif,image/webp,image/apng,*/*;q=0.8,"
+            "application/signed-exchange;v=b3;q=0.7"
+        ),
+        "Accept-Encoding": "gzip, deflate, br, zstd",
+        "Accept-Language": "sk,cs;q=0.9,en-US;q=0.8,en;q=0.7,bg;q=0.6,pl;q=0.5",
+        "Upgrade-Insecure-Requests": "1",
+        "sec-ch-ua": SEC_CH_UA,
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+        "DNT": "1",
+    }
+
+
+def _inoxmare_navigation_headers(referer: Optional[str] = None) -> dict[str, str]:
+    """Hlavná navigácia (PDP, login GET, homepage). Referer je voliteľný."""
+    h = {
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "same-origin" if referer else "none",
+        "Sec-Fetch-User": "?1",
+    }
+    if referer:
+        h["Referer"] = referer
+    return h
+
+
+def _inoxmare_xhr_headers(referer: str) -> dict[str, str]:
+    """Section load / page_cache render / cart add — XHR z prihlásenej zóny."""
+    return {
+        "Accept": "*/*",
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-origin",
+        "X-Requested-With": "XMLHttpRequest",
+        "Referer": referer,
+    }
 
 
 def inoxmare_norm_code(text: str) -> str:
@@ -477,18 +529,28 @@ class InoxmareHttpClient:
                     jar.set(name, value, domain=host, path="/")
                 except Exception:
                     jar.set(name, value, path="/")
-        self._client = httpx.AsyncClient(
-            base_url=self._origin,
-            headers={
-                "User-Agent": DEFAULT_UA,
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "en,it;q=0.9,sk;q=0.8",
-            },
-            cookies=jar,
-            follow_redirects=True,
-            timeout=httpx.Timeout(35.0, connect=8.0),
-        )
+        # http2=True priblíži flow Chromu (Cloudflare Bot Management si všíma protokol),
+        # ale vyžaduje balík `h2`. Bez neho httpx pri inicializácii hodí ImportError —
+        # urobíme tichý fallback na HTTP/1.1.
+        try:
+            self._client = httpx.AsyncClient(
+                base_url=self._origin,
+                headers=_inoxmare_base_headers(),
+                cookies=jar,
+                follow_redirects=True,
+                timeout=httpx.Timeout(35.0, connect=8.0),
+                http2=True,
+            )
+        except ImportError:
+            self._client = httpx.AsyncClient(
+                base_url=self._origin,
+                headers=_inoxmare_base_headers(),
+                cookies=jar,
+                follow_redirects=True,
+                timeout=httpx.Timeout(35.0, connect=8.0),
+            )
         self._login_ok = False
+        self._warmed_up = False
 
     async def __aenter__(self) -> InoxmareHttpClient:
         return self
@@ -500,8 +562,35 @@ class InoxmareHttpClient:
     def store_path(self) -> str:
         return self._store
 
+    async def warmup(self) -> None:
+        """
+        „Reálny prehliadač“ začína návštevou domovskej stránky — Magento Page Cache si
+        nastaví form_key / X-Magento-Vary aj pre anonymného návštevníka a Cloudflare
+        bot-score klesne. Bez tohto kroku ide hneď prvý request na /customer/account/
+        a CAPTCHA modul si nás okamžite označí.
+        """
+        if self._warmed_up:
+            return
+        try:
+            await self._client.get(
+                f"{self._store}/",
+                headers=_inoxmare_navigation_headers(),
+            )
+            await self._client.get(
+                f"{self._store}/customer/section/load/",
+                params={
+                    "sections": "cart,messages,directory-data",
+                    "force_new_section_timestamp": "true",
+                },
+                headers=_inoxmare_xhr_headers(referer=f"{self._origin}{self._store}/"),
+            )
+        except httpx.HTTPError:
+            pass
+        self._warmed_up = True
+
     async def _ensure_session_from_manual_cookies(self) -> None:
         """Relácia z prehliadača (cart_config inoxmare_session_cookie_header) — obíde CAPTCHA na loginPost."""
+        await self.warmup()
         try:
             await self._client.get(
                 f"{self._store}/customer/section/load/",
@@ -509,11 +598,14 @@ class InoxmareHttpClient:
                     "sections": "customer,cart",
                     "force_new_section_timestamp": "1",
                 },
-                headers={"X-Requested-With": "XMLHttpRequest"},
+                headers=_inoxmare_xhr_headers(referer=f"{self._origin}{self._store}/"),
             )
         except httpx.HTTPError:
             pass
-        r_chk = await self._client.get(f"{self._store}/customer/account/")
+        r_chk = await self._client.get(
+            f"{self._store}/customer/account/",
+            headers=_inoxmare_navigation_headers(referer=f"{self._origin}{self._store}/"),
+        )
         if "customer/account/login" in str(r_chk.url).lower():
             raise RuntimeError(
                 "Inoxmare: inoxmare_session_cookie_header je neplatná alebo vypršala. "
@@ -532,10 +624,25 @@ class InoxmareHttpClient:
         p = (password or "").strip()
         if not u or not p:
             raise ValueError("Inoxmare: chýba prihlasovacie meno alebo heslo.")
+        await self.warmup()
         login_path = f"{self._store}/customer/account/login/"
-        r = await self._client.get(login_path)
+        r = await self._client.get(
+            login_path,
+            headers=_inoxmare_navigation_headers(referer=f"{self._origin}{self._store}/"),
+        )
         r.raise_for_status()
         login_html = r.text or ""
+        if re.search(r'<input[^>]+name=["\']captcha', login_html, re.I) or re.search(
+            r"captcha\s*[\"']?\s*:\s*\{\s*\"required\"\s*:\s*true",
+            login_html,
+            re.I,
+        ):
+            raise RuntimeError(
+                "Inoxmare: prihlasovací formulár vyžaduje CAPTCHA (Magento). "
+                "HTTP login nevie obísť obrázkový kód. Použi cart_config_json "
+                "inoxmare_session_cookie_header (cookies z Chrome po ručnom prihlásení) "
+                "alebo prejdi cez Playwright (headless: false)."
+            )
         fk = parse_inoxmare_form_key(login_html)
         if not fk:
             raise RuntimeError("Inoxmare: na prihlasovacej stránke sa nenašiel form_key.")
@@ -549,9 +656,18 @@ class InoxmareHttpClient:
             post_path,
             data=data,
             headers={
+                "Accept": (
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                    "image/avif,image/webp,image/apng,*/*;q=0.8,"
+                    "application/signed-exchange;v=b3;q=0.7"
+                ),
                 "Content-Type": "application/x-www-form-urlencoded",
-                "Referer": f"{self._origin}{login_path}",
                 "Origin": self._origin,
+                "Referer": f"{self._origin}{login_path}",
+                "Sec-Fetch-Dest": "document",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Site": "same-origin",
+                "Sec-Fetch-User": "?1",
             },
         )
         r2.raise_for_status()
@@ -601,11 +717,14 @@ class InoxmareHttpClient:
                     "sections": "customer,cart",
                     "force_new_section_timestamp": "1",
                 },
-                headers={"X-Requested-With": "XMLHttpRequest"},
+                headers=_inoxmare_xhr_headers(referer=f"{self._origin}{login_path}"),
             )
         except httpx.HTTPError:
             pass
-        r_chk = await self._client.get(f"{self._store}/customer/account/")
+        r_chk = await self._client.get(
+            f"{self._store}/customer/account/",
+            headers=_inoxmare_navigation_headers(referer=f"{self._origin}{login_path}"),
+        )
         if "customer/account/login" in str(r_chk.url).lower():
             raise RuntimeError(
                 "Inoxmare: účet sa nepodarilo overiť — skontroluj prihlasovacie údaje alebo obchod (store path)."
@@ -616,9 +735,13 @@ class InoxmareHttpClient:
         code = inoxmare_norm_code(product_code)
         if not code:
             raise ValueError("Inoxmare: prázdny kód produktu.")
+        await self.warmup()
         q = quote(code, safe="")
         path_qs = f"{self._store}/quicksearch/index/resolve/?item={q}&din=&uni=&iso="
-        r = await self._client.get(path_qs)
+        r = await self._client.get(
+            path_qs,
+            headers=_inoxmare_navigation_headers(referer=f"{self._origin}{self._store}/"),
+        )
         r.raise_for_status()
         final = urlparse(str(r.url))
         path = final.path or ""
@@ -635,7 +758,11 @@ class InoxmareHttpClient:
 
     async def fetch_pdp_html(self, product_path: str) -> str:
         pp = product_path if product_path.startswith("/") else "/" + product_path
-        r = await self._client.get(pp)
+        await self.warmup()
+        r = await self._client.get(
+            pp,
+            headers=_inoxmare_navigation_headers(referer=f"{self._origin}{self._store}/"),
+        )
         r.raise_for_status()
         return r.text
 
@@ -649,11 +776,7 @@ class InoxmareHttpClient:
         try:
             r = await self._client.get(
                 rel,
-                headers={
-                    "Referer": f"{self._origin}{ref}",
-                    "X-Requested-With": "XMLHttpRequest",
-                    "Accept": "*/*",
-                },
+                headers=_inoxmare_xhr_headers(referer=f"{self._origin}{ref}"),
             )
         except httpx.HTTPError:
             return ""
@@ -682,6 +805,7 @@ class InoxmareHttpClient:
         """PDP + Magento page_cache render (ceny/sklad v tabuľke pre prihláseného)."""
         html = await self.fetch_pdp_html(product_path)
         if self._login_ok:
+            ref = product_path if product_path.startswith("/") else "/" + product_path
             try:
                 await self._client.get(
                     f"{self._store}/customer/section/load/",
@@ -689,7 +813,7 @@ class InoxmareHttpClient:
                         "sections": "customer,cart",
                         "force_new_section_timestamp": "1",
                     },
-                    headers={"X-Requested-With": "XMLHttpRequest"},
+                    headers=_inoxmare_xhr_headers(referer=f"{self._origin}{ref}"),
                 )
             except httpx.HTTPError:
                 pass
@@ -744,9 +868,8 @@ class InoxmareHttpClient:
             f"{self._store}/checkout/cart/add/",
             data=data,
             headers={
+                **_inoxmare_xhr_headers(referer=ref),
                 "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-                "Referer": ref,
-                "X-Requested-With": "XMLHttpRequest",
                 "Origin": self._origin,
             },
         )

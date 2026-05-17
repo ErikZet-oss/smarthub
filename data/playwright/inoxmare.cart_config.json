@@ -6,9 +6,12 @@
   "password_selector": "#login-form input[name=\"login[password]\"]",
   "login_button_selector": "#login-form button.action.login",
   "login_expect_spring_security_post": false,
-  "post_login_wait_ms": 1800,
+  "post_login_wait_ms": 2200,
   "inoxmare_session_cookie_header": "",
   "inoxmare_store_path": "/en",
+  "inoxmare_browser_warmup": true,
+  "inoxmare_warmup_min_sec": 1.8,
+  "inoxmare_warmup_max_sec": 3.6,
   "search_via_url_template": "https://www.inoxmare.com/en/quicksearch/index/resolve/?item={code}&din=&uni=&iso=",
   "post_search_wait_ms": 3500,
   "price_stock_timeout_ms": 20000,
@@ -18,9 +21,9 @@
   "browser_channel": "chrome",
   "playwright_stealth": true,
   "playwright_human_pause_between_actions": true,
-  "playwright_human_pause_min_sec": 1.0,
-  "playwright_human_pause_max_sec": 3.0,
+  "playwright_human_pause_min_sec": 0.9,
+  "playwright_human_pause_max_sec": 2.4,
   "playwright_human_type_login_fields": true,
-  "playwright_human_type_min_ms": 30.0,
-  "playwright_human_type_max_ms": 95.0
+  "playwright_human_type_min_ms": 55.0,
+  "playwright_human_type_max_ms": 165.0
 }
