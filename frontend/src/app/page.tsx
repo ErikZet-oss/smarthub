@@ -55,7 +55,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { normalizeApiOrigin } from "@/lib/api-origin";
+import { API_PROXY_PREFIX } from "@/lib/api-origin";
 import { cn } from "@/lib/utils";
 
 type View =
@@ -468,7 +468,8 @@ const EXCEL_COL_V = "V";
 const EXCEL_COL_W = "W";
 const EXCEL_COL_Y = "Y";
 
-const API_BASE = normalizeApiOrigin(process.env.NEXT_PUBLIC_API_BASE_URL);
+/** Same-origin proxy → FastAPI (next.config rewrites), bez CORS „Failed to fetch“. */
+const API_BASE = API_PROXY_PREFIX;
 
 /** Absolútna URL pre statické assety API (logo dodávateľa atď.). */
 /** Posledný segment cesty (názov súboru) — zobrazovanie v párovaní. */

@@ -1927,7 +1927,24 @@ def add_offer_line_from_catalog(
     session: Session = Depends(get_session),
     user: AuthUserContext = Depends(get_current_user),
 ):
-    offer = _get_user_offer_or_404(session, offer_id, user.id)
+    try:
+        return _add_offer_line_from_catalog_impl(session, offer_id, user.id, payload)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Pridanie do ponuky zlyhalo: {exc}",
+        ) from exc
+
+
+def _add_offer_line_from_catalog_impl(
+    session: Session,
+    offer_id: int,
+    user_id: int,
+    payload: OfferLineFromCatalogPayload,
+) -> dict:
+    offer = _get_user_offer_or_404(session, offer_id, user_id)
     purchase = float(payload.purchase_price_eur)
     if purchase < 0:
         raise HTTPException(status_code=400, detail="Neplatná nákupná cena.")

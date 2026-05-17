@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import type { OfferListItem } from "@/components/offers/types";
 import { Button } from "@/components/ui/button";
+import { formatApiFetchError } from "@/lib/api-errors";
 import { cn } from "@/lib/utils";
 
 export type AddToOfferPayload = {
@@ -58,7 +59,7 @@ export function AddToOfferDialog({
       const draft = rows.find((o) => o.status === "draft");
       setSelectedId(draft?.id ?? rows[0]?.id ?? null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Chyba.");
+      setError(formatApiFetchError(e, apiBase));
     } finally {
       setLoading(false);
     }
@@ -71,6 +72,11 @@ export function AddToOfferDialog({
 
   const submit = async () => {
     if (!payload || selectedId == null) return;
+    const purchase = Number(payload.purchase_price_eur);
+    if (!Number.isFinite(purchase) || purchase <= 0) {
+      setError("Chýba platná nákupná cena — počkaj na načítanie ceny od dodávateľa.");
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
@@ -85,21 +91,28 @@ export function AddToOfferDialog({
             supplier_id: payload.supplier_id,
             supplier_name: payload.supplier_name,
             supplier_code: payload.supplier_code,
-            purchase_price_eur: payload.purchase_price_eur,
+            purchase_price_eur: purchase,
             quantity: 1,
             description: payload.description,
           }),
         },
       );
       if (!res.ok) {
-        const d = (await res.json().catch(() => ({}))) as { detail?: string };
-        throw new Error(d.detail ?? "Pridanie do ponuky zlyhalo.");
+        const d = (await res.json().catch(() => ({}))) as { detail?: unknown };
+        const detail = d.detail;
+        throw new Error(
+          typeof detail === "string"
+            ? detail
+            : Array.isArray(detail)
+              ? detail.map((x) => String(x)).join(", ")
+              : "Pridanie do ponuky zlyhalo.",
+        );
       }
       const picked = offers.find((o) => o.id === selectedId);
       onAdded?.(selectedId, picked?.offer_number ?? "");
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Chyba.");
+      setError(formatApiFetchError(e, apiBase));
     } finally {
       setSubmitting(false);
     }

@@ -22,7 +22,7 @@ if sys.platform == "win32":
 
 from app.api.deps import AuthUserContext
 from app.api.routes import router
-from app.db import DATABASE_FILE, create_db_and_tables, engine, migrate_sqlite_schema
+from app.db import DATABASE_FILE, create_db_and_tables, engine, migrate_schema
 from app.services.dev_run_log import dev_run_log, dev_screens_dir
 from app.services.product_images import product_images_dir
 from app.services.smarthub_bootstrap import seed_initial_admin_if_empty
@@ -112,7 +112,7 @@ async def smarthub_bearer_auth(request: Request, call_next):
 @app.on_event("startup")
 def on_startup():
     create_db_and_tables()
-    migrate_sqlite_schema()
+    migrate_schema()
     with Session(engine) as session:
         seed_initial_admin_if_empty(session)
         seed_supplier_logos_from_repo(session)
