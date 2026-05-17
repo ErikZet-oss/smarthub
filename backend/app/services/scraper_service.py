@@ -7056,9 +7056,43 @@ class ScraperService:
                         "obnov ceny (scrape) alebo vyber iné balenie."
                     )
             else:
+                # Frontend poslal vid priamo bez `packaging_variant_index`.
+                # Načítaj varianty, aby sme zistili `pack_quantity` (ks/balenie) —
+                # bez neho by sme nevedeli previesť kusy z UI na počet balení pre API.
                 referer_path = "/produkty"
+                try:
+                    data_lookup = await _mekrs_get_supplier_data_via_http(
+                        supplier,
+                        product_code,
+                        run_label=run_label,
+                        run_id=run_id,
+                    )
+                    for pv in data_lookup.get("packaging_variants") or []:
+                        if str(pv.get("mekrs_variant_id") or "").strip() == vid:
+                            row = pv
+                            slug2 = str(pv.get("mekrs_product_slug") or "").strip()
+                            if slug2:
+                                referer_path = f"/produkty/{slug2}"
+                            break
+                except Exception as exc:
+                    _log(
+                        run_label,
+                        supplier,
+                        run_id,
+                        f"Mekrs: doplnenie pack_quantity pre vid={vid!r} zlyhalo: {exc}",
+                        "warn",
+                    )
 
             qty_requested = int(quantity)
+            pack_q = 1
+            if row is not None:
+                pq_raw = row.get("pack_quantity")
+                if isinstance(pq_raw, int) and pq_raw >= 1:
+                    pack_q = pq_raw
+            # ks → balení (zaokrúhli nahor: 60 ks pri balení 50 ks ⇒ 2 balenia = 100 ks).
+            # Bez tejto konverzie Mekrs API počíta `quantity` ako počet balení, takže pri
+            # výbere 50-ks balenia a zadaní „50" pridá 50 balení = 2500 ks (bug z UI).
+            import math as _math
 
             async def _mekrs_http_cart() -> None:
                 async with MekrsHttpClient() as client:
@@ -7073,27 +7107,34 @@ class ScraperService:
                             product_code=product_code.strip(),
                             variant_id=vid,
                         )
-                    q = qty_requested
-                    if isinstance(vs, int) and vs >= 1 and q > vs:
+                    pieces_eff = qty_requested
+                    if isinstance(vs, int) and vs >= 1 and pieces_eff > vs:
                         _log(
                             run_label,
                             supplier,
                             run_id,
-                            f"Mekrs: požadované množstvo {q} znížené na sklad variantu {vs} ks",
+                            f"Mekrs: požadované množstvo {pieces_eff} znížené na sklad variantu {vs} ks",
                             "warn",
                         )
-                        q = vs
-                    if isinstance(vs, int) and vs < 1 and q >= 1:
+                        pieces_eff = vs
+                    if isinstance(vs, int) and vs < 1 and pieces_eff >= 1:
                         raise RuntimeError(
                             "Mekrs: vybraný variant nemá sklad (0 ks) — nedá sa pridať do košíka."
                         )
+                    packs_eff = max(
+                        1, _math.ceil(pieces_eff / max(1, pack_q))
+                    )
                     _log(
                         run_label,
                         supplier,
                         run_id,
-                        f"add_to_cart Mekrs HTTP variant_id={vid!r} qty={q} referer={referer_path!r}",
+                        f"add_to_cart Mekrs HTTP variant_id={vid!r} "
+                        f"packs={packs_eff} (ks={pieces_eff}, ks/bal={pack_q}) "
+                        f"referer={referer_path!r}",
                     )
-                    await client.add_to_cart(vid, q, referer_path=referer_path)
+                    await client.add_to_cart(
+                        vid, packs_eff, referer_path=referer_path
+                    )
 
             await _mekrs_http_cart()
             _log(run_label, supplier, run_id, "add_to_cart done (Mekrs HTTP)")
