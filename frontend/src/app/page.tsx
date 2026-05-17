@@ -7747,11 +7747,12 @@ export default function Home() {
         </main>
       </div>
       <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200/90 bg-white/95 px-2 py-1.5 backdrop-blur md:hidden">
-        <div className="mx-auto grid max-w-3xl grid-cols-5 gap-1">
+        <div className="mx-auto grid max-w-3xl grid-cols-6 gap-0.5 sm:gap-1">
           {[
             { id: "vyhladavanie" as const, label: "Hľadať", icon: PackageSearch },
             { id: "zoznamy" as const, label: "Zoznamy", icon: List },
             { id: "kosik" as const, label: "Košík", icon: ShoppingCart },
+            { id: "ponuky" as const, label: "Ponuky", icon: FileText },
             { id: "historia" as const, label: "História", icon: History },
           ].map((item) => {
             const Icon = item.icon;
