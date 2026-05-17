@@ -499,6 +499,18 @@ def patch_my_supplier_credentials(
     ScraperService.invalidate_remote_cart_cache(
         int(payload.supplier_id), user_id=user.id
     )
+    # Cached HTTP klient pre tohto používateľa drží staré meno/heslo — zhodiť.
+    from app.services.scraper_service import (
+        invalidate_supplier_http_session_sync,
+        invalidate_supplier_price_cache_sync,
+    )
+
+    invalidate_supplier_http_session_sync(
+        int(payload.supplier_id), user_id=user.id
+    )
+    invalidate_supplier_price_cache_sync(
+        int(payload.supplier_id), user_id=user.id
+    )
     return {"ok": True}
 
 
@@ -1329,6 +1341,16 @@ def upsert_supplier(
         admin_cred.username = payload.username.strip()
         admin_cred.password = payload.password
     session.commit()
+
+    # Zmena šablóny/credentials → cachovaný HTTP klient drží starú reláciu.
+    # Zhodíme aj price+stock cache, aby UI hneď ukázalo aktuálne ceny.
+    from app.services.scraper_service import (
+        invalidate_supplier_http_session_sync,
+        invalidate_supplier_price_cache_sync,
+    )
+
+    invalidate_supplier_http_session_sync(int(supplier.id))
+    invalidate_supplier_price_cache_sync(int(supplier.id))
     return {
         "id": supplier.id,
         "name": supplier.name,

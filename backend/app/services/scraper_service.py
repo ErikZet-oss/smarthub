@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 from urllib.parse import parse_qsl, quote, urlencode, urljoin, urlparse, urlunparse
 
+import httpx
 from pydantic import BaseModel, Field
 from playwright.async_api import BrowserContext, Locator, Page, Route, async_playwright
 
@@ -231,6 +232,259 @@ def _session_reuse_enabled() -> bool:
     """Uložiť/načítať Playwright storage state — zapnúť explicitne: SCRAPER_REUSE_SESSION=1."""
     v = os.environ.get("SCRAPER_REUSE_SESSION", "").strip().lower()
     return v in ("1", "true", "yes", "on")
+
+
+# ------------------------------------------------------------------
+# Per-process HTTP supplier client pool
+# ------------------------------------------------------------------
+# Po prvom prihlásení (Hopefix/Fabory) si držíme `httpx.AsyncClient` v RAM.
+# Ďalšie volania toho istého `(supplier_id, user_id)` reuse-nú cookies a TCP
+# spojenie, takže odpadá ~500-1500 ms login round-trip pri každom dotaze
+# na cenu/sklad. Po 8 minútach nečinnosti klient sa zruší (server-side relácie
+# Fabory/Hopefix vydržia výrazne dlhšie, ale radšej konzervatívne).
+_HTTP_SUPPLIER_CLIENT_TTL_SEC = float(
+    os.environ.get("SUPPLIER_HTTP_CLIENT_TTL_SEC", "480").strip() or "480"
+)
+
+# {(provider, supplier_id, user_id): (expires_at_monotonic, client_obj)}
+_supplier_http_clients: dict[
+    tuple[str, int, int], tuple[float, Any]
+] = {}
+_supplier_http_clients_lock = asyncio.Lock()
+
+
+async def _supplier_http_client_get_or_create(
+    provider: str,
+    supplier: Supplier,
+    user_id: int,
+    factory,
+    login_coro,
+) -> Any:
+    """Vráti živú inštanciu klienta. `factory()` → nový klient, `login_coro(client)` → login."""
+    if supplier.id is None:
+        client = factory()
+        try:
+            await login_coro(client)
+        except Exception:
+            await _safe_close_supplier_client(client)
+            raise
+        return client
+
+    key = (provider, int(supplier.id), int(user_id))
+    async with _supplier_http_clients_lock:
+        item = _supplier_http_clients.get(key)
+        now = time.monotonic()
+        if item is not None:
+            exp, cached_client = item
+            if exp > now and getattr(cached_client, "login_ok", False):
+                _supplier_http_clients[key] = (
+                    now + _HTTP_SUPPLIER_CLIENT_TTL_SEC,
+                    cached_client,
+                )
+                return cached_client
+            _supplier_http_clients.pop(key, None)
+            await _safe_close_supplier_client(cached_client)
+
+        new_client = factory()
+        try:
+            await login_coro(new_client)
+        except Exception:
+            await _safe_close_supplier_client(new_client)
+            raise
+        _supplier_http_clients[key] = (
+            now + _HTTP_SUPPLIER_CLIENT_TTL_SEC,
+            new_client,
+        )
+        return new_client
+
+
+async def _supplier_http_client_invalidate(
+    provider: str, supplier_id: Optional[int], user_id: Optional[int] = None
+) -> None:
+    if supplier_id is None:
+        return
+    sid = int(supplier_id)
+    async with _supplier_http_clients_lock:
+        keys = [
+            k for k in _supplier_http_clients
+            if k[0] == provider
+            and k[1] == sid
+            and (user_id is None or k[2] == int(user_id))
+        ]
+        for k in keys:
+            _, c = _supplier_http_clients.pop(k)
+            await _safe_close_supplier_client(c)
+
+
+def invalidate_supplier_http_session_sync(
+    supplier_id: Optional[int],
+    user_id: Optional[int] = None,
+    provider: Optional[str] = None,
+) -> None:
+    """Drop bez await — z FastAPI sync endpointu (admin uloží credentials).
+
+    Nezatvára httpx klientov (aclose je async). TCP socket sa zruší GC-om alebo
+    keep-alive timeoutom. Pre účel invalidácie stačí, že ďalší dotaz vytvorí
+    nový klient + login.
+    """
+    if supplier_id is None:
+        return
+    sid = int(supplier_id)
+    for k in list(_supplier_http_clients.keys()):
+        prov, k_sid, k_uid = k
+        if k_sid != sid:
+            continue
+        if provider is not None and prov != provider:
+            continue
+        if user_id is not None and k_uid != int(user_id):
+            continue
+        _supplier_http_clients.pop(k, None)
+
+
+def invalidate_supplier_price_cache_sync(
+    supplier_id: Optional[int],
+    user_id: Optional[int] = None,
+    product_code: Optional[str] = None,
+) -> None:
+    """Drop bez await — z FastAPI sync endpointu."""
+    if not _price_stock_cache_enabled():
+        return
+    if supplier_id is None:
+        _price_stock_cache.clear()
+        return
+    sid = int(supplier_id)
+    code_norm = (product_code or "").strip().lower() or None
+    for k in list(_price_stock_cache.keys()):
+        ks_sid, ks_uid, ks_code = k
+        if ks_sid != sid:
+            continue
+        if user_id is not None and ks_uid != int(user_id):
+            continue
+        if code_norm is not None and ks_code.strip().lower() != code_norm:
+            continue
+        _price_stock_cache.pop(k, None)
+
+
+async def _safe_close_supplier_client(client: Any) -> None:
+    try:
+        close = getattr(client, "aclose", None) or getattr(client, "close", None)
+        if close is None:
+            return
+        res = close()
+        if asyncio.iscoroutine(res):
+            await res
+    except Exception:
+        pass
+
+
+# ------------------------------------------------------------------
+# TTL cache pre supplier price + stock (per produkt, per používateľ)
+# ------------------------------------------------------------------
+# Keď si používateľ otvorí porovnanie cien, klikne na obnoviť, alebo otvorí
+# rovnaký produkt o pár sekúnd → odpovieme z RAM. 90 s je krátko nato, aby
+# nezostarela cena pri zmene v B2B portáli, a dosť dlho, aby ušetrila desiatky
+# requestov pri normálnom prezeraní porovnaní.
+_PRICE_STOCK_CACHE_TTL_SEC = float(
+    os.environ.get("PRICE_STOCK_CACHE_TTL_SEC", "90").strip() or "90"
+)
+_price_stock_cache: dict[tuple[int, int, str], tuple[float, dict[str, Any]]] = {}
+_price_stock_cache_lock = asyncio.Lock()
+
+
+def _price_stock_cache_enabled() -> bool:
+    return _PRICE_STOCK_CACHE_TTL_SEC > 0
+
+
+def _price_stock_cache_key(
+    supplier_id: Optional[int], user_id: int, product_code: str
+) -> Optional[tuple[int, int, str]]:
+    if supplier_id is None:
+        return None
+    code = (product_code or "").strip()
+    if not code:
+        return None
+    return (int(supplier_id), int(user_id), code)
+
+
+async def _price_stock_cache_get(
+    supplier_id: Optional[int], user_id: int, product_code: str
+) -> Optional[dict[str, Any]]:
+    if not _price_stock_cache_enabled():
+        return None
+    key = _price_stock_cache_key(supplier_id, user_id, product_code)
+    if key is None:
+        return None
+    async with _price_stock_cache_lock:
+        item = _price_stock_cache.get(key)
+        if not item:
+            return None
+        exp, payload = item
+        if time.monotonic() > exp:
+            _price_stock_cache.pop(key, None)
+            return None
+        return copy.deepcopy(payload)
+
+
+async def _price_stock_cache_set(
+    supplier_id: Optional[int],
+    user_id: int,
+    product_code: str,
+    payload: dict[str, Any],
+) -> None:
+    if not _price_stock_cache_enabled():
+        return
+    if not isinstance(payload, dict):
+        return
+    if payload.get("price_eur") is None and payload.get("stock") is None:
+        # Cachovať „dáta som nedostal" by len skryl problém.
+        return
+    key = _price_stock_cache_key(supplier_id, user_id, product_code)
+    if key is None:
+        return
+    async with _price_stock_cache_lock:
+        _price_stock_cache[key] = (
+            time.monotonic() + _PRICE_STOCK_CACHE_TTL_SEC,
+            copy.deepcopy(payload),
+        )
+        # Mäkký horný limit, aby cache nerástla bez kontroly (typicky < 200 záznamov).
+        if len(_price_stock_cache) > 1024:
+            oldest = sorted(
+                _price_stock_cache.items(), key=lambda kv: kv[1][0]
+            )[:512]
+            for k, _ in oldest:
+                _price_stock_cache.pop(k, None)
+
+
+async def _price_stock_cache_invalidate(
+    supplier_id: Optional[int],
+    user_id: Optional[int] = None,
+    product_code: Optional[str] = None,
+) -> None:
+    if not _price_stock_cache_enabled():
+        return
+    async with _price_stock_cache_lock:
+        if supplier_id is None:
+            _price_stock_cache.clear()
+            return
+        sid = int(supplier_id)
+        code_norm = (product_code or "").strip().lower() or None
+        keys = []
+        for k in _price_stock_cache:
+            if k[0] != sid:
+                continue
+            if user_id is not None and k[2] != int(user_id):
+                # third element is code, not user_id — pozor
+                pass
+        # Jednoduchšie: iteruj cez kľúče tuplov a porovnaj komponenty.
+        for k in list(_price_stock_cache.keys()):
+            ks_sid, ks_uid, ks_code = k
+            if ks_sid != sid:
+                continue
+            if user_id is not None and ks_uid != int(user_id):
+                continue
+            if code_norm is not None and ks_code.strip().lower() != code_norm:
+                continue
+            _price_stock_cache.pop(k, None)
 
 
 def _storage_state_path(supplier_id: int, automation_user_id: int = 0) -> str:
@@ -1700,6 +1954,7 @@ async def _hopefix_get_supplier_data_via_http(
     *,
     run_label: str,
     run_id: str,
+    automation_user_id: int = 0,
 ) -> dict[str, Any]:
     """Katalógová stránka + parsovanie riadku line-<kód> po prihlásení (httpx)."""
     code = (product_code or "").strip()
@@ -1728,8 +1983,26 @@ async def _hopefix_get_supplier_data_via_http(
 
     row: Optional[dict[str, Any]] = None
     last_html_len = 0
-    async with HopefixHttpClient() as client:
-        await client.ensure_login(supplier.username, supplier.password)
+
+    def _hopefix_factory() -> HopefixHttpClient:
+        return HopefixHttpClient()
+
+    async def _hopefix_login(c: HopefixHttpClient) -> None:
+        await c.ensure_login(supplier.username, supplier.password)
+
+    # Reuse cookies + TCP cez per-process pool. `nullcontext` ponecháva pôvodný
+    # `async with`-blok bez zmeny indentácie — klient sa NEZATVÁRA po skončení,
+    # iba ho po 8 min TTL zmaže `_supplier_http_client_get_or_create`.
+    import contextlib as _contextlib
+
+    pooled_client: HopefixHttpClient = await _supplier_http_client_get_or_create(
+        "hopefix",
+        supplier,
+        automation_user_id,
+        _hopefix_factory,
+        _hopefix_login,
+    )
+    async with _contextlib.nullcontext(pooled_client) as client:
 
         async def _fetch_row(u: str) -> tuple[str, int, Optional[dict[str, Any]]]:
             html = await client.get_text(u)
@@ -1777,55 +2050,48 @@ async def _hopefix_get_supplier_data_via_http(
         if not row:
             # Úzka podkategória v šablóne často obsahuje len časť riadkov; veľká /sortiment/<seg>
             # (rovnaký fallback ako Playwright) má kompletnú tabuľku. Fragment #kód sa na server neposiela.
-            for seg in _hopefix_fallback_category_segments(code):
-                rel_ref = f"/sortiment/{seg}?_ref={enc}"
-                if rel_ref not in seen_u:
-                    seen_u.add(rel_ref)
+            # Skúsime všetky podstránky paralelne — server zvládne 5-10 paralelných GET-ov bez problémov
+            # a šetríme tým 2-5 s pri ne-trefe v hlavnej URL.
+            segs = _hopefix_fallback_category_segments(code)
+            fallback_urls: list[str] = []
+            for seg in segs:
+                for rel in (f"/sortiment/{seg}?_ref={enc}", f"/sortiment/{seg}"):
+                    if rel not in seen_u:
+                        seen_u.add(rel)
+                        fallback_urls.append(rel)
+            if fallback_urls:
+                _log(
+                    run_label,
+                    supplier,
+                    run_id,
+                    f"Hopefix HTTP: paralelný fallback {len(fallback_urls)} podstránok",
+                )
+
+                async def _fetch_fallback(rel: str) -> tuple[str, Optional[dict[str, Any]], int, Optional[str]]:
                     try:
-                        _log(
-                            run_label,
-                            supplier,
-                            run_id,
-                            f"Hopefix HTTP: GET fallback kategória {rel_ref!r}",
-                        )
-                        html_fb = await client.get_text(rel_ref)
-                        last_html_len = max(last_html_len, len(html_fb or ""))
-                        row = find_hopefix_row(parse_hopefix_rows(html_fb), code)
-                        if row:
-                            break
+                        html_fb = await client.get_text(rel)
+                        return rel, find_hopefix_row(parse_hopefix_rows(html_fb), code), len(html_fb or ""), None
                     except Exception as exc:
+                        return rel, None, 0, str(exc)
+
+                fb_results = await asyncio.gather(
+                    *[_fetch_fallback(u) for u in fallback_urls],
+                    return_exceptions=False,
+                )
+                for rel, r, ln, err in fb_results:
+                    if ln:
+                        last_html_len = max(last_html_len, ln)
+                    if err:
                         _log(
                             run_label,
                             supplier,
                             run_id,
-                            f"Hopefix HTTP: fallback {rel_ref!r}: {exc!s}",
+                            f"Hopefix HTTP: fallback {rel!r}: {err}",
                             "warn",
                         )
-                rel_plain = f"/sortiment/{seg}"
-                if not row and rel_plain not in seen_u:
-                    seen_u.add(rel_plain)
-                    try:
-                        _log(
-                            run_label,
-                            supplier,
-                            run_id,
-                            f"Hopefix HTTP: GET fallback kategória {rel_plain!r}",
-                        )
-                        html_fb = await client.get_text(rel_plain)
-                        last_html_len = max(last_html_len, len(html_fb or ""))
-                        row = find_hopefix_row(parse_hopefix_rows(html_fb), code)
-                        if row:
-                            break
-                    except Exception as exc:
-                        _log(
-                            run_label,
-                            supplier,
-                            run_id,
-                            f"Hopefix HTTP: fallback {rel_plain!r}: {exc!s}",
-                            "warn",
-                        )
-                if row:
-                    break
+                        continue
+                    if r and not row:
+                        row = r
     if not row:
         raise RuntimeError(
             f"Hopefix: v tabuľke sa nenašiel riadok pre kód {code!r} (skúšané {len(try_urls)} URL, "
@@ -1870,6 +2136,79 @@ async def _hopefix_get_supplier_data_via_http(
         supplier,
         run_id,
         f"get_supplier_data Hopefix HTTP: row={code!r} product_id={hopefix_id!r}",
+    )
+    return data
+
+
+async def _fabory_get_supplier_data_via_http(
+    supplier: Supplier,
+    product_code: str,
+    *,
+    run_label: str,
+    run_id: str,
+    automation_user_id: int = 0,
+) -> dict[str, Any]:
+    """Cena + sklad z Fabory cez JSON API ``/sk/product/price`` a ``/sk/product/stock``.
+
+    Tieto endpointy bežne volá Fabory front-end z PDP. Vrátia presne tú istú cenu,
+    ktorú by zákazník videl na produktovej stránke — bez nutnosti otvárať Chromium.
+    Login session sa drží v procese cez ``_supplier_http_client_get_or_create``,
+    takže ďalšie volania v rámci 8 min preskočia login (>1 s ušetrený).
+    """
+    code = (product_code or "").strip()
+    if not code:
+        raise ValueError("Prázdny kód produktu.")
+    user = (supplier.username or "").strip()
+    pwd = (supplier.password or "").strip()
+    if not user or not pwd:
+        raise ValueError("Fabory: chýba meno alebo heslo dodávateľa.")
+
+    shop_url = (supplier.shop_url or "").strip()
+
+    def _factory() -> FaboryHttpClient:
+        return FaboryHttpClient(shop_url)
+
+    async def _login(c: FaboryHttpClient) -> None:
+        await c.ensure_login(user, pwd)
+
+    client: FaboryHttpClient = await _supplier_http_client_get_or_create(
+        "fabory",
+        supplier,
+        automation_user_id,
+        _factory,
+        _login,
+    )
+
+    try:
+        data = await client.fetch_product_price_and_stock(code)
+    except httpx.HTTPStatusError as exc:
+        # 401/403/302 → session expirovala (cookie po B2B logoute). Zhoď cache a skús raz znova.
+        status = exc.response.status_code if exc.response is not None else None
+        if status in (401, 403, 302):
+            _log(
+                run_label,
+                supplier,
+                run_id,
+                f"Fabory HTTP: status {status} → invalidujem session a relogujem",
+                "warn",
+            )
+            await _supplier_http_client_invalidate("fabory", supplier.id, automation_user_id)
+            client = await _supplier_http_client_get_or_create(
+                "fabory", supplier, automation_user_id, _factory, _login
+            )
+            data = await client.fetch_product_price_and_stock(code)
+        else:
+            raise
+    except RuntimeError as exc:
+        msg = str(exc).lower()
+        if "prihlás" in msg or "login" in msg or "302" in msg:
+            await _supplier_http_client_invalidate("fabory", supplier.id, automation_user_id)
+        raise
+    _log(
+        run_label,
+        supplier,
+        run_id,
+        f"get_supplier_data Fabory HTTP: code={code!r} price={data.get('price_eur')!r} stock={data.get('stock')!r} pack={data.get('pack_quantity')!r}",
     )
     return data
 
@@ -6022,6 +6361,28 @@ class ScraperService:
             f"get_supplier_data start supplier={supplier.name!r} id={supplier.id} code={product_code!r}",
         )
 
+        # Krátka TTL cache (~90 s) — pri opätovnom otvorení toho istého produktu
+        # alebo „rýchlom" prepínaní porovnaní šetrí celý round-trip k e-shopu.
+        cached = await _price_stock_cache_get(
+            supplier.id, automation_user_id, product_code
+        )
+        if cached is not None:
+            cached_copy = copy.deepcopy(cached)
+            cached_copy["from_cache"] = True
+            _log(
+                run_label,
+                supplier,
+                run_id,
+                f"get_supplier_data CACHE HIT supplier_id={supplier.id} code={product_code!r}",
+            )
+            return cached_copy
+
+        async def _maybe_cache(payload: dict[str, Any]) -> dict[str, Any]:
+            await _price_stock_cache_set(
+                supplier.id, automation_user_id, product_code, payload
+            )
+            return payload
+
         if _supplier_is_hopefix(supplier) and _hopefix_http_enabled(config):
             try:
                 hf = await _hopefix_get_supplier_data_via_http(
@@ -6030,6 +6391,7 @@ class ScraperService:
                     config,
                     run_label=run_label,
                     run_id=run_id,
+                    automation_user_id=automation_user_id,
                 )
                 _log(
                     run_label,
@@ -6037,7 +6399,7 @@ class ScraperService:
                     run_id,
                     f"get_supplier_data done (Hopefix HTTP): {hf}",
                 )
-                return hf
+                return await _maybe_cache(hf)
             except Exception as exc:
                 dev_run_log_exception(run_label, exc)
                 _log(
@@ -6045,6 +6407,32 @@ class ScraperService:
                     supplier,
                     run_id,
                     f"Hopefix HTTP zlyhalo, pokračujem Playwright: {exc}",
+                    "warn",
+                )
+
+        if _supplier_is_fabory(supplier):
+            try:
+                fb = await _fabory_get_supplier_data_via_http(
+                    supplier,
+                    product_code,
+                    run_label=run_label,
+                    run_id=run_id,
+                    automation_user_id=automation_user_id,
+                )
+                _log(
+                    run_label,
+                    supplier,
+                    run_id,
+                    f"get_supplier_data done (Fabory HTTP): {fb}",
+                )
+                return await _maybe_cache(fb)
+            except Exception as exc:
+                dev_run_log_exception(run_label, exc)
+                _log(
+                    run_label,
+                    supplier,
+                    run_id,
+                    f"Fabory HTTP zlyhalo, pokračujem Playwright: {exc}",
                     "warn",
                 )
 
@@ -6087,7 +6475,7 @@ class ScraperService:
                     run_id,
                     f"get_supplier_data done (BMCo HTTP): {bm}",
                 )
-                return bm
+                return await _maybe_cache(bm)
             except Exception as exc:
                 dev_run_log_exception(run_label, exc)
                 _log(
@@ -6112,7 +6500,7 @@ class ScraperService:
                     run_id,
                     f"get_supplier_data done (Halfmann HTTP): {hfm}",
                 )
-                return hfm
+                return await _maybe_cache(hfm)
             except Exception as exc:
                 dev_run_log_exception(run_label, exc)
                 _log(
@@ -6138,7 +6526,7 @@ class ScraperService:
                     run_id,
                     f"get_supplier_data done (Inoxmare HTTP): {ix}",
                 )
-                return ix
+                return await _maybe_cache(ix)
             except Exception as exc:
                 dev_run_log_exception(run_label, exc)
                 _log(
@@ -6163,7 +6551,7 @@ class ScraperService:
                     run_id,
                     f"get_supplier_data done (Argip HTTP): {ag}",
                 )
-                return ag
+                return await _maybe_cache(ag)
             except Exception as exc:
                 dev_run_log_exception(run_label, exc)
                 _log(
@@ -6190,7 +6578,7 @@ class ScraperService:
                     run_id,
                     f"get_supplier_data done (Schachermayer HTTP): {sch}",
                 )
-                return sch
+                return await _maybe_cache(sch)
             except ScraperProductNotFoundError:
                 raise
             except Exception as exc:
@@ -6218,7 +6606,7 @@ class ScraperService:
                     run_id,
                     f"get_supplier_data done (Valenta HTTP): {val}",
                 )
-                return val
+                return await _maybe_cache(val)
             except ScraperProductNotFoundError:
                 raise
             except Exception as exc:
@@ -6246,7 +6634,7 @@ class ScraperService:
                     run_id,
                     f"get_supplier_data done (HTTP): {data_http}",
                 )
-                return data_http
+                return await _maybe_cache(data_http)
             except Exception as exc:
                 dev_run_log_exception(run_label, exc)
                 _log(
@@ -6497,8 +6885,10 @@ class ScraperService:
             def _thread_entry() -> dict[str, Any]:
                 return _run_async_on_windows_proactor(_playwright_flow())
 
-            return await asyncio.to_thread(_thread_entry)
-        return await _playwright_flow()
+            pw_data = await asyncio.to_thread(_thread_entry)
+            return await _maybe_cache(pw_data) if isinstance(pw_data, dict) else pw_data
+        pw_data = await _playwright_flow()
+        return await _maybe_cache(pw_data) if isinstance(pw_data, dict) else pw_data
 
     @staticmethod
     async def add_to_cart(

@@ -232,23 +232,47 @@ class HopefixHttpClient:
         origin = f"{parsed.scheme}://{parsed.netloc}" if parsed.netloc else self._base
         self._origin = origin
         # Kratšie read ako 60 s — katalóg má byť do pár s; skorší fail pri výpadku.
-        self._client = httpx.AsyncClient(
-            base_url=self._origin,
-            headers={
-                "User-Agent": DEFAULT_UA,
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "cs,sk;q=0.9,en;q=0.8",
-            },
-            follow_redirects=True,
-            timeout=httpx.Timeout(28.0, connect=5.0),
-        )
+        # HTTP/2 šetrí ~50-150 ms pri viacerých paralelných GET-och z toho istého hosta.
+        try:
+            self._client = httpx.AsyncClient(
+                base_url=self._origin,
+                headers={
+                    "User-Agent": DEFAULT_UA,
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Accept-Language": "cs,sk;q=0.9,en;q=0.8",
+                },
+                follow_redirects=True,
+                timeout=httpx.Timeout(28.0, connect=5.0),
+                http2=True,
+            )
+        except (ImportError, RuntimeError):
+            self._client = httpx.AsyncClient(
+                base_url=self._origin,
+                headers={
+                    "User-Agent": DEFAULT_UA,
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Accept-Language": "cs,sk;q=0.9,en;q=0.8",
+                },
+                follow_redirects=True,
+                timeout=httpx.Timeout(28.0, connect=5.0),
+            )
         self._login_ok = False
+
+    @property
+    def login_ok(self) -> bool:
+        return self._login_ok
 
     async def __aenter__(self) -> HopefixHttpClient:
         return self
 
     async def __aexit__(self, *args: object) -> None:
-        await self._client.aclose()
+        await self.aclose()
+
+    async def aclose(self) -> None:
+        try:
+            await self._client.aclose()
+        except Exception:
+            pass
 
     async def ensure_login(self, email: str, password: str) -> None:
         if self._login_ok:

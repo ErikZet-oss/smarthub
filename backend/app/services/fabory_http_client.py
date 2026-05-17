@@ -5,14 +5,19 @@ HAR / skúsenosť:
   - POST {locale}/j_spring_security_check (j_username, j_password, _csrf)
   - GET {locale}/cart — riadky (formuláre updateCartFormN)
   - GET {locale}/cart/simulation — ceny (item-price / item__total bez DPH)
+  - POST {locale}/product/price — JSON ["<code>", ...] → ceny per zákazník
+  - POST {locale}/product/stock — JSON {"pageType":"ADPG","materialCodes":[...]}
+    Tieto dva endpointy fronend volá z PDP cez XMLHttpRequest. Vrátia presne to,
+    čo užívateľ vidí na produktovej stránke — bez nutnosti otvárať Chromium.
 """
 
 from __future__ import annotations
 
 import html as html_module
+import json
 import re
-from typing import Any, Optional
-from urllib.parse import urlparse
+from typing import Any, Iterable, Optional
+from urllib.parse import quote, urlparse
 
 import httpx
 
@@ -76,6 +81,12 @@ def fabory_shop_prefix(shop_url: str) -> str:
 
 def fabory_cart_url(shop_url: str) -> str:
     return f"{fabory_shop_prefix(shop_url)}/cart/simulation"
+
+
+def fabory_pdp_search_url(shop_url: str, code: str) -> str:
+    """Search URL, ktorá 301-uje na PDP. Slúži pre kanonickú PDP-URL (Referer header)."""
+    enc = quote((code or "").strip(), safe=".-_~")
+    return f"{fabory_shop_prefix(shop_url)}/search/?text={enc}"
 
 
 def _parse_eur_amount(text: Any) -> Optional[float]:
@@ -207,34 +218,69 @@ def fabory_parse_cart_html(
             sum((ln.get("line_total_eur") or 0.0) for ln in lines),
             4,
         )
+    if not lines and line_count <= 0:
+        line_count = 0
+        if total_eur is None:
+            total_eur = 0.0
 
     return {
         "lines": lines,
         "total_eur": total_eur,
         "line_count": line_count,
+        "empty_cart": line_count <= 0 and not lines,
     }
 
 
 class FaboryHttpClient:
     def __init__(self, shop_url: str) -> None:
         self._prefix = fabory_shop_prefix(shop_url)
-        self._client = httpx.AsyncClient(
-            base_url=self._prefix,
-            headers={
-                "User-Agent": DEFAULT_UA,
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "sk,sk-SK;q=0.9,cs;q=0.8,en;q=0.7",
-            },
-            follow_redirects=True,
-            timeout=httpx.Timeout(45.0),
-        )
+        self._shop_url = (shop_url or "").strip()
+        try:
+            # HTTP/2 šetrí pár 100 ms pri viacerých XHR-och z jedného hosta.
+            self._client = httpx.AsyncClient(
+                base_url=self._prefix,
+                headers={
+                    "User-Agent": DEFAULT_UA,
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Accept-Language": "sk,sk-SK;q=0.9,cs;q=0.8,en;q=0.7",
+                },
+                follow_redirects=True,
+                timeout=httpx.Timeout(45.0),
+                http2=True,
+            )
+        except (ImportError, RuntimeError):
+            self._client = httpx.AsyncClient(
+                base_url=self._prefix,
+                headers={
+                    "User-Agent": DEFAULT_UA,
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Accept-Language": "sk,sk-SK;q=0.9,cs;q=0.8,en;q=0.7",
+                },
+                follow_redirects=True,
+                timeout=httpx.Timeout(45.0),
+            )
         self._login_ok = False
+        self._last_pdp_url: Optional[str] = None
+
+    @property
+    def login_ok(self) -> bool:
+        return self._login_ok
+
+    @property
+    def prefix(self) -> str:
+        return self._prefix
 
     async def __aenter__(self) -> FaboryHttpClient:
         return self
 
     async def __aexit__(self, *args: Any) -> None:
-        await self._client.aclose()
+        await self.aclose()
+
+    async def aclose(self) -> None:
+        try:
+            await self._client.aclose()
+        except Exception:
+            pass
 
     async def ensure_login(self, username: str, password: str) -> None:
         if self._login_ok:
@@ -279,4 +325,172 @@ class FaboryHttpClient:
         return {
             "cart_html": cart_html,
             "simulation_html": sim_html,
+        }
+
+    async def _resolve_pdp_url(self, code: str) -> Optional[str]:
+        """`/search/?text=<code>` 301-uje na PDP. Stačí spraviť HEAD a vrátiť finálnu URL.
+        Používa sa len ako Referer pre POST /product/price (server tým validuje kontext)."""
+        c = (code or "").strip()
+        if not c:
+            return None
+        try:
+            r = await self._client.get(
+                f"/search/?text={quote(c, safe='.-_~')}",
+                follow_redirects=True,
+            )
+            final = str(r.url)
+            if "/p/" in final:
+                self._last_pdp_url = final
+                return final
+        except Exception:
+            return None
+        return None
+
+    async def _post_json(
+        self,
+        path: str,
+        payload: Any,
+        *,
+        referer: Optional[str] = None,
+    ) -> Any:
+        """POST cez XHR — Fabory front-end nepoužíva CSRF na tieto endpointy (HAR ukazuje
+        prázdny `x-csrf-token`), ale `x-requested-with` a `accept` musia byť JSON-friendly."""
+        body = json.dumps(payload, ensure_ascii=False)
+        ref = referer or self._last_pdp_url or self._prefix
+        r = await self._client.post(
+            path,
+            content=body,
+            headers={
+                "Accept": "application/json, text/javascript, */*; q=0.01",
+                "Content-Type": "application/json",
+                "Origin": f"https://{urlparse(self._prefix).netloc}",
+                "Referer": ref,
+                "X-Requested-With": "XMLHttpRequest",
+            },
+        )
+        r.raise_for_status()
+        txt = (r.text or "").strip()
+        if not txt:
+            return {}
+        try:
+            return r.json()
+        except (json.JSONDecodeError, ValueError) as exc:
+            raise RuntimeError(f"Fabory {path}: neočakávaná odpoveď ({len(txt)} B).") from exc
+
+    async def fetch_prices(
+        self,
+        codes: Iterable[str],
+        *,
+        referer: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Batch: `POST /product/price` s poľom kódov. Vráti `{code: {...}}`."""
+        items = [c.strip() for c in codes if c and c.strip()]
+        if not items:
+            return {}
+        data = await self._post_json("/product/price", items, referer=referer)
+        return data if isinstance(data, dict) else {}
+
+    async def fetch_stock(
+        self,
+        codes: Iterable[str],
+        *,
+        page_type: str = "ADPG",
+        referer: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Batch: `POST /product/stock` s {materialCodes:[...]}. Vráti `{code: {...}}`."""
+        items = [c.strip() for c in codes if c and c.strip()]
+        if not items:
+            return {}
+        data = await self._post_json(
+            "/product/stock",
+            {"pageType": page_type, "materialCodes": items},
+            referer=referer,
+        )
+        return data if isinstance(data, dict) else {}
+
+    async def fetch_product_price_and_stock(self, code: str) -> dict[str, Any]:
+        """Pre jeden kód získa cenu aj sklad v ~2 paralelných XHR-och.
+
+        Návratový formát zodpovedá ostatným supplier HTTP cestám (Hopefix, Halfmann):
+        ``price_eur``, ``stock``, ``pack_quantity`` + ``raw_*`` + ``packaging_variants``.
+        Cena je tu „za balík ``unitQuantity`` kusov" (rovnako ako Fabory zobrazuje na PDP).
+        """
+        c = (code or "").strip()
+        if not c:
+            raise ValueError("Fabory price/stock: prázdny kód.")
+
+        try:
+            await self._resolve_pdp_url(c)
+        except Exception:
+            self._last_pdp_url = None
+        ref = self._last_pdp_url
+
+        # Paralelný POST — Fabory front-end ich tiež strieľa naraz.
+        import asyncio as _asyncio
+
+        price_task = self.fetch_prices([c], referer=ref)
+        stock_task = self.fetch_stock([c], referer=ref)
+        price_map, stock_map = await _asyncio.gather(price_task, stock_task)
+
+        if c not in price_map:
+            raise RuntimeError(
+                f"Fabory: cena pre kód {c!r} nedostupná (B2B účet nemusí mať tento materiál). "
+                f"PDP={self._last_pdp_url or 'neznáme'}"
+            )
+        p = price_map.get(c) or {}
+        s = stock_map.get(c) or {}
+
+        unit_quantity = int(p.get("unitQuantity") or 1)
+        if unit_quantity < 1:
+            unit_quantity = 1
+        unit_net = p.get("unitNetPrice")
+        try:
+            price_eur = float(unit_net) if unit_net is not None else None
+        except (TypeError, ValueError):
+            price_eur = None
+        raw_price = p.get("formattedUnitNetPrice") or None
+
+        stock_status = (s.get("stockLevelStatus") or "").upper()
+        stock_qty_raw = s.get("stockQuantity")
+        try:
+            stock_qty = int(stock_qty_raw) if stock_qty_raw is not None else 0
+        except (TypeError, ValueError):
+            stock_qty = 0
+        # Fabory pre B2B niekedy vracia stockQuantity=0 aj keď je INSTOCK (vyrába sa na zákazku).
+        # Zachováme "1" ako "dostupný", "0" len ak je explicitne OUTOFSTOCK alebo NOT_AVAILABLE.
+        if stock_status in ("OUTOFSTOCK", "NOT_AVAILABLE", "OUT_OF_STOCK"):
+            stock_final: Optional[int] = 0
+        elif stock_qty > 0:
+            stock_final = stock_qty
+        elif stock_status == "INSTOCK":
+            stock_final = 1
+        else:
+            stock_final = None
+        raw_stock = (s.get("stockLevelMessage") or "").strip() or None
+
+        label = (p.get("productName") or "").strip() or None
+
+        packaging_variants = [
+            {
+                "label": label or c,
+                "pack_quantity": unit_quantity,
+                "price_eur": price_eur,
+                "raw_price": raw_price,
+                "stock": stock_final,
+                "raw_stock": raw_stock,
+            }
+        ]
+        return {
+            "price_eur": price_eur,
+            "stock": stock_final,
+            "pack_quantity": unit_quantity,
+            "raw_price": raw_price,
+            "raw_stock": raw_stock,
+            "raw_pack_quantity": str(unit_quantity),
+            "packaging_variants": packaging_variants,
+            "logged_in": True,
+            "fabory_via_http": True,
+            "pdp_url": self._last_pdp_url,
+            "label": label,
+            "currency": (p.get("currencyIso") or "EUR"),
         }
