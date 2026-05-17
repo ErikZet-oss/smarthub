@@ -196,6 +196,115 @@ def _build_mock_client_for_pdp(pdp_html: str) -> SchaefHttpClient:
     return client
 
 
+def test_normalize_supplier_code_handles_nbsp_and_tabs() -> None:
+    """Excel kódy obsahujú často \\xa0 (NBSP) medzi cifrou a sufixom.
+
+    Server Schäf-a search-i akceptuje normálnu medzeru (HAR: ``%20``),
+    nie NBSP (``%C2%A0``) — bez normalizácie nám vrátil 200 OK s prázdnym
+    listom miesto 302 na PDP. Test zachycuje regresiu nahláseného bug-u
+    s kódom ``"0933212\\xa016"``.
+    """
+    norm = SchaefHttpClient._normalize_supplier_code
+    assert norm("0933212\xa016") == "0933212 16"
+    assert norm("0933212 \t  40") == "0933212 40"
+    assert norm("  0933212\u202f40  ") == "0933212 40"
+    assert norm("") == ""
+
+
+@pytest.mark.asyncio
+async def test_search_to_pdp_uses_normalized_code_for_nbsp() -> None:
+    """Excel-ový kód s NBSP nezhodí search-er — ide cez %20 priamo na PDP.
+
+    Regresia z prevádzky: kód ``"0933212\\xa016"`` v Exceli prešiel ako
+    ``%C2%A0`` v query a Schäf-server vrátil 200 s prázdnym výsledkom
+    (na PDP nepresmeroval). Klient teraz najprv normalizuje whitespace
+    a posiela query s bežnou medzerou (``%20``).
+    """
+    attempts: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        query = (
+            request.url.query.decode()
+            if isinstance(request.url.query, bytes)
+            else str(request.url.query)
+        )
+        if path.startswith("/b2b/en/search/"):
+            attempts.append(query)
+            if "%C2%A0" in query:
+                # NBSP varianta → server nezhoduje, vráti prázdny zoznam.
+                return httpx.Response(
+                    200, text="<html><body>No results</body></html>"
+                )
+            return httpx.Response(
+                302,
+                headers={"Location": "/b2b/en/din-933-a2-70-m-12x16-p133790/"},
+            )
+        if "/b2b/en/" in path and "-p" in path:
+            return httpx.Response(
+                200,
+                text='<html><body><input name="item_id" value="133790"></body></html>',
+            )
+        return httpx.Response(404)
+
+    client = SchaefHttpClient(base_url="https://shop.schaefer-peters.com")
+    client._client = httpx.AsyncClient(
+        base_url=client._base,
+        transport=httpx.MockTransport(handler),
+        follow_redirects=True,
+    )
+    client._login_ok = True
+    try:
+        pdp_path, body = await client._search_to_pdp("0933212\xa016")
+    finally:
+        await client.aclose()
+    assert pdp_path == "/b2b/en/din-933-a2-70-m-12x16-p133790/"
+    assert 'value="133790"' in body
+    # Najprv MUSÍ skúsiť normalizovaný kód (%20), nie surový NBSP.
+    assert attempts, "search sa nezavolal vôbec"
+    assert "%C2%A0" not in attempts[0], (
+        f"Prvý pokus mal byť %20, dostali sme: {attempts[0]!r}"
+    )
+    assert "0933212%2016" in attempts[0]
+
+
+@pytest.mark.asyncio
+async def test_search_to_pdp_falls_back_to_first_link_from_results() -> None:
+    """Žiadny redirect nepríde, ale v HTML zozname je prvý PDP hit — má ho použiť."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.startswith("/b2b/en/search/"):
+            return httpx.Response(
+                200,
+                text=(
+                    '<html><body><ul><li>'
+                    '<a href="/b2b/en/iso-7380-a2-m6x12-p99999/">First hit</a>'
+                    "</li></ul></body></html>"
+                ),
+            )
+        if path == "/b2b/en/iso-7380-a2-m6x12-p99999/":
+            return httpx.Response(
+                200,
+                text='<input name="item_id" value="99999">',
+            )
+        return httpx.Response(404)
+
+    client = SchaefHttpClient(base_url="https://shop.schaefer-peters.com")
+    client._client = httpx.AsyncClient(
+        base_url=client._base,
+        transport=httpx.MockTransport(handler),
+        follow_redirects=True,
+    )
+    client._login_ok = True
+    try:
+        pdp_path, body = await client._search_to_pdp("UNKNOWN-CODE")
+    finally:
+        await client.aclose()
+    assert pdp_path == "/b2b/en/iso-7380-a2-m6x12-p99999/"
+    assert 'value="99999"' in body
+
+
 @pytest.mark.asyncio
 async def test_fetch_product_price_and_stock_via_mock_transport() -> None:
     client = _build_mock_client_for_pdp(PDP_SNIPPET)

@@ -472,46 +472,91 @@ class SchaefHttpClient:
             )
         self._login_ok = True
 
-    async def _search_to_pdp(self, supplier_code: str) -> Tuple[str, str]:
-        """GET search → 302 na PDP. Vracia ``(pdp_path, html)``.
-
-        Search server-side vie aj fuzzy/Algolia hľadanie — keď ale podám presný
-        článkový kód („0933212 40"), spravidla okamžite presmeruje na PDP.
+    @staticmethod
+    def _normalize_supplier_code(code: str) -> str:
+        """Odstráni nbsp / tab / multi-space — Excel kódy obsahujú často ``\\xa0``
+        (non-breaking space), ktorý Schäfer-server na search-i nezhoduje s
+        bežnou medzerou v internej databáze (HAR ukazuje ``%20``).
         """
-        code = (supplier_code or "").strip()
         if not code:
-            raise ValueError("Schäfer-Peters: prázdny kód produktu.")
-        # Kódy v Exceli môžu mať medzeru („0933212 40") — kódujeme ako %20.
-        enc = quote(code, safe="")
-        path = f"/b2b/en/search/?SP_B2B_LIVE_ENU%5Bquery%5D={enc}&searchAlgolia={enc}"
+            return ""
+        # Všetky unicode whitespacy (\xa0, \u2007, \u202f, tab, …) zjednotíme na " ".
+        s = re.sub(r"\s+", " ", code, flags=re.UNICODE).strip()
+        return s
+
+    async def _try_search(self, query: str) -> Tuple[Optional[str], str]:
+        """Jeden search pokus. Vráti ``(pdp_path | None, body)``.
+
+        Ak server presmeroval na PDP, vráti aj cestu. Inak vráti len HTML
+        výsledkov, aby caller mohol skúsiť ďalší variant alebo extrahovať
+        prvý PDP link zo zoznamu.
+        """
+        # Kódujeme s ``%20`` — Schäf-search prijíma rovnako ako bežný používateľ.
+        enc = quote(query, safe="")
+        path = (
+            f"/b2b/en/search/?SP_B2B_LIVE_ENU%5Bquery%5D={enc}&searchAlgolia={enc}"
+        )
         r = await self._client.get(path)
         if r.status_code >= 400:
             raise RuntimeError(
-                f"Schäfer-Peters: search status {r.status_code} pre kód {code!r}"
+                f"Schäfer-Peters: search status {r.status_code} pre kód {query!r}"
             )
         final_path = urlparse(str(r.url)).path or path
         body = r.text or ""
-        # PDP slug v Schäf-e končí na ``-pNNNNN/`` (numerické product id). Search,
-        # ktorý nepresmeroval, ostáva na ``/b2b/en/search/`` alebo má len výsledky.
         is_pdp = bool(re.search(r"-p\d+/?$", final_path))
-        if not is_pdp or 'name="item_id"' not in body:
+        if is_pdp and 'name="item_id"' in body:
+            return final_path, body
+        return None, body
+
+    async def _search_to_pdp(self, supplier_code: str) -> Tuple[str, str]:
+        """GET search → 302 na PDP. Vracia ``(pdp_path, html)``.
+
+        Schäf-server vie fuzzy aj Algolia hľadanie — pri presnom čísle článku
+        („0933212 40") spravidla okamžite presmeruje na PDP. Ak prvý variant
+        nezasiahne (napr. iný oddeľovač medzery), skúsi sa kód bez medzier
+        a potom ako fallback prvý PDP link z výsledkov.
+        """
+        raw_code = (supplier_code or "").strip()
+        if not raw_code:
+            raise ValueError("Schäfer-Peters: prázdny kód produktu.")
+
+        normalized = self._normalize_supplier_code(raw_code)
+        candidates: list[str] = []
+        for c in (normalized, normalized.replace(" ", ""), raw_code):
+            if c and c not in candidates:
+                candidates.append(c)
+
+        last_body = ""
+        for candidate in candidates:
+            pdp_path, body = await self._try_search(candidate)
+            if pdp_path:
+                return pdp_path, body
+            last_body = body
+            # Skús extrahovať prvý PDP link zo zoznamu výsledkov — pri viacerých
+            # zhodách na variant kódu (napr. „0933212 16" vs „0933212-16") server
+            # zobrazí list a my otvoríme prvý hit.
             m = re.search(
                 r'href=["\'](\/b2b\/en\/[^"\']+-p\d+\/)["\']',
                 body,
             )
-            if not m:
-                raise RuntimeError(
-                    f"Schäfer-Peters: pre kód {code!r} sa nenašiel produkt "
-                    "(search nepresmeroval na PDP)."
-                )
-            pdp_path = m.group(1)
-            r2 = await self._client.get(pdp_path)
-            if r2.status_code >= 400:
-                raise RuntimeError(
-                    f"Schäfer-Peters: PDP {pdp_path!r} status {r2.status_code}"
-                )
-            return pdp_path, r2.text or ""
-        return final_path, body
+            if m:
+                pdp_path = m.group(1)
+                r2 = await self._client.get(pdp_path)
+                if r2.status_code >= 400:
+                    raise RuntimeError(
+                        f"Schäfer-Peters: PDP {pdp_path!r} status {r2.status_code}"
+                    )
+                return pdp_path, r2.text or ""
+
+        # Posledný pokus zlyhal — pridáme indíciu (počet znakov tela), nech sa
+        # dá v logu rýchlo overiť, či sme dostali prázdnu / login stránku.
+        tried = ", ".join(repr(c) for c in candidates)
+        body_len = len(last_body)
+        raise RuntimeError(
+            f"Schäfer-Peters: pre kód {raw_code!r} sa nenašiel produkt "
+            f"(search nepresmeroval na PDP; skúšané varianty: {tried}; "
+            f"posledný response body {body_len} znakov)."
+        )
 
     async def fetch_product_price_and_stock(
         self, supplier_code: str
