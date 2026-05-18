@@ -111,11 +111,49 @@ def _mekrs_code_key(text: str) -> str:
     """
     Kľúč pre porovnanie dodávateľského čísla (Mekrs sku2) s kódom z DB.
     Odstráni medzery a interpunkciu — „00200.14.00.030.016“ a variácie sa zrovnajú.
-    Žiadne čiastočné zhody (tie vracali M20 namiesto M3).
     """
     t = (text or "").strip().lower().replace("\xa0", "")
     t = re.sub(r"\s+", "", t)
-    return re.sub(r"[.\-_/]+", "", t)
+    return re.sub(r"[.\-_/,\s]+", "", t)
+
+
+def _mekrs_code_keys_compatible(query_key: str, sku_key: str) -> bool:
+    """
+    Presná zhoda alebo bezpečný prefix (DB „…200“ vs Mekrs „…200.000“).
+    Krátke prefixy neakceptujeme — aby „10000“ netrafilo celú radu.
+    """
+    q = (query_key or "").strip()
+    s = (sku_key or "").strip()
+    if not q or not s:
+        return False
+    if q == s:
+        return True
+    short, long = (q, s) if len(q) <= len(s) else (s, q)
+    if len(short) < 10:
+        return False
+    if not long.startswith(short):
+        return False
+    suffix = long[len(short) :]
+    if not suffix:
+        return True
+    return suffix.isdigit() and set(suffix) <= {"0"}
+
+
+def _fulltext_items_dedupe_by_slug(
+    items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for it in items:
+        slug = it.get("slug")
+        if not slug or not isinstance(slug, str):
+            continue
+        s = slug.strip()
+        if not s or s in seen:
+            continue
+        seen.add(s)
+        out.append(it)
+    return out
 
 
 def _fulltext_items_exact_for_code(
@@ -137,6 +175,43 @@ def _fulltext_items_exact_for_code(
         seen.add(slug)
         out.append(it)
     return out
+
+
+def _fulltext_items_relaxed_for_code(
+    items: list[dict[str, Any]], code_key: str
+) -> list[dict[str, Any]]:
+    if not code_key:
+        return []
+    matched: list[dict[str, Any]] = []
+    for it in items:
+        sku2 = str(it.get("sku2") or "")
+        if not _mekrs_code_keys_compatible(code_key, _mekrs_code_key(sku2)):
+            continue
+        slug = it.get("slug")
+        if not slug or not isinstance(slug, str):
+            continue
+        matched.append(it)
+    return _fulltext_items_dedupe_by_slug(matched)
+
+
+def _fulltext_items_for_code(
+    items: list[dict[str, Any]],
+    code_key: str,
+    *,
+    fulltext_count: Optional[int] = None,
+) -> list[dict[str, Any]]:
+    """Exact sku2 → uvoľnený prefix → jediný fulltext hit (count=1)."""
+    hit = _fulltext_items_exact_for_code(items, code_key)
+    if hit:
+        return hit
+    hit = _fulltext_items_relaxed_for_code(items, code_key)
+    if hit:
+        return hit
+    if fulltext_count == 1 and len(items) == 1:
+        it = items[0]
+        if isinstance(it, dict) and it.get("slug") and it.get("sku2"):
+            return _fulltext_items_dedupe_by_slug([it])
+    return []
 
 
 def _mekrs_nominal_to_per_100ks_display(
@@ -379,15 +454,23 @@ class MekrsHttpClient:
 
         blob = await _fetch_fulltext(code)
         items: list[dict[str, Any]] = list(blob.get("items") or [])
-        exact_rows = _fulltext_items_exact_for_code(items, code_key)
-        if not exact_rows and code_key and code_key != code:
-            blob = await _fetch_fulltext(code_key)
-            items = list(blob.get("items") or [])
-            exact_rows = _fulltext_items_exact_for_code(items, code_key)
+        ft_count = blob.get("count")
+        matched_rows = _fulltext_items_for_code(
+            items, code_key, fulltext_count=ft_count
+        )
+        if not matched_rows:
+            alt_q = code.replace(",", ".")
+            if alt_q != code:
+                blob = await _fetch_fulltext(alt_q)
+                items = list(blob.get("items") or [])
+                ft_count = blob.get("count")
+                matched_rows = _fulltext_items_for_code(
+                    items, code_key, fulltext_count=ft_count
+                )
 
         slug_batch: list[str] = []
         slug_to_fulltext_item: dict[str, dict[str, Any]] = {}
-        for it in exact_rows:
+        for it in matched_rows:
             slug = it.get("slug")
             if slug and isinstance(slug, str) and slug.strip():
                 s = slug.strip()
@@ -398,7 +481,7 @@ class MekrsHttpClient:
                 break
 
         product_stock_level: Optional[int] = None
-        for it in exact_rows:
+        for it in matched_rows:
             sl = it.get("stockLevel")
             if sl is None:
                 continue
@@ -423,7 +506,9 @@ class MekrsHttpClient:
                 if not pid:
                     return
                 sku2_p = str(pj.get("sku2") or "").strip()
-                if code_key and _mekrs_code_key(sku2_p) != code_key:
+                if code_key and not _mekrs_code_keys_compatible(
+                    code_key, _mekrs_code_key(sku2_p)
+                ):
                     return
                 vr = await self._client.get(
                     f"/api/product/{pid}/variants",

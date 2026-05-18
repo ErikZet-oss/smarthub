@@ -94,6 +94,7 @@ from app.services.inoxmare_http_client import (
 from app.services.mekrs_http_client import (
     MekrsHttpClient,
     _mekrs_code_key,
+    _mekrs_code_keys_compatible,
     _mekrs_nominal_to_per_100ks_display,
     _mekrs_sanitize_variant_label,
     mekrs_parse_cart_json,
@@ -1987,7 +1988,9 @@ async def _mekrs_get_supplier_data_via_http(
     if code_key and raw_vars:
 
         def _sku_matches(v: dict[str, Any]) -> bool:
-            return _mekrs_code_key(str(v.get("sku2") or "")) == code_key
+            return _mekrs_code_keys_compatible(
+                code_key, _mekrs_code_key(str(v.get("sku2") or ""))
+            )
 
         narrowed = [v for v in raw_vars if _sku_matches(v)]
         if narrowed:
