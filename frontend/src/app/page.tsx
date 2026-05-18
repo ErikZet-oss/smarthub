@@ -1709,6 +1709,27 @@ function ProductSupplierExpandedTableRow({
                                       const offerStockUiBlocked =
                                         offerLiveOutOfStock ||
                                         liveScrapeMissingOffer;
+                                      /** Hopefix HTTP: bez product_id API košík nepridá; sklad/cena môžu byť z katalógu bez košíka v HTML. */
+                                      const hopefixActiveMissingProductId =
+                                        supplierNameIsHopefix(offer.supplier) &&
+                                        scraperApplicable &&
+                                        Boolean(
+                                          scrape &&
+                                            !scrape.loading &&
+                                            !scrape.error,
+                                        ) &&
+                                        Boolean(activePv) &&
+                                        !(
+                                          String(
+                                            activePv.hopefix_product_id ?? "",
+                                          ).trim()
+                                        );
+                                      const offerCartUiBlocked =
+                                        offerStockUiBlocked ||
+                                        hopefixActiveMissingProductId;
+                                      const hopefixPriceStockIncomplete =
+                                        hopefixActiveMissingProductId &&
+                                        !offerLiveOutOfStock;
                                       const faboryStockCls =
                                         supplierNameIsFabory(offer.supplier)
                                           ? faboryStockDisplayClass(
@@ -1726,6 +1747,8 @@ function ProductSupplierExpandedTableRow({
                                           "font-semibold text-red-600",
                                         liveScrapeMissingOffer &&
                                           !offerLiveOutOfStock &&
+                                          "font-medium text-amber-800",
+                                        hopefixPriceStockIncomplete &&
                                           "font-medium text-amber-800",
                                       );
                                       const rowPack =
@@ -2375,7 +2398,9 @@ function ProductSupplierExpandedTableRow({
                                                   "rounded-md border bg-white/95 p-1 shadow-sm ring-1 sm:p-2",
                                                   offerLiveOutOfStock
                                                     ? "border-red-200/90 bg-red-50/45 ring-red-100/70"
-                                                    : "border-slate-200/80 ring-slate-100/60",
+                                                    : hopefixPriceStockIncomplete
+                                                      ? "border-amber-200/90 bg-amber-50/40 ring-amber-100/70"
+                                                      : "border-slate-200/80 ring-slate-100/60",
                                                 )}
                                               >
                                               <div className="grid grid-cols-1 gap-1 text-[10px] sm:flex sm:flex-nowrap sm:items-center sm:justify-between sm:gap-x-2 sm:gap-y-0 sm:text-[13px]">
@@ -2384,7 +2409,9 @@ function ProductSupplierExpandedTableRow({
                                                     "flex min-w-0 items-center justify-between gap-x-2 rounded-md border px-1.5 py-1 text-left sm:flex-1 sm:flex-wrap sm:justify-start sm:gap-x-1 sm:rounded-none sm:border-0 sm:px-0 sm:py-0",
                                                     offerLiveOutOfStock
                                                       ? "border-red-100/90 bg-red-50/60 sm:border-0 sm:bg-transparent"
-                                                      : "border-slate-100 bg-slate-50/70 sm:border-0 sm:bg-transparent",
+                                                      : hopefixPriceStockIncomplete
+                                                        ? "border-amber-100/90 bg-amber-50/50 sm:border-0 sm:bg-transparent"
+                                                        : "border-slate-100 bg-slate-50/70 sm:border-0 sm:bg-transparent",
                                                   )}
                                                 >
                                                   <span
@@ -2392,7 +2419,9 @@ function ProductSupplierExpandedTableRow({
                                                       "mr-0.5 text-[8px] font-semibold uppercase tracking-wider sm:mr-1 sm:text-[10px]",
                                                       offerLiveOutOfStock
                                                         ? "text-red-600"
-                                                        : "text-slate-500",
+                                                        : hopefixPriceStockIncomplete
+                                                          ? "text-amber-700"
+                                                          : "text-slate-500",
                                                     )}
                                                   >
                                                     Cena
@@ -2402,7 +2431,9 @@ function ProductSupplierExpandedTableRow({
                                                       "tabular-nums",
                                                       offerLiveOutOfStock
                                                         ? "font-medium text-red-600"
-                                                        : "text-slate-900",
+                                                        : hopefixPriceStockIncomplete
+                                                          ? "font-medium text-amber-800"
+                                                          : "text-slate-900",
                                                     )}
                                                   >
                                                     {!scraperApplicable ? (
@@ -2419,7 +2450,9 @@ function ProductSupplierExpandedTableRow({
                                                                 "text-[9px] font-normal sm:text-[11px]",
                                                                 offerLiveOutOfStock
                                                                   ? "text-red-500"
-                                                                  : "text-slate-500",
+                                                                  : hopefixPriceStockIncomplete
+                                                                    ? "text-amber-600"
+                                                                    : "text-slate-500",
                                                               )}
                                                             >
                                                               {rowPriceSuffix}
@@ -2445,7 +2478,9 @@ function ProductSupplierExpandedTableRow({
                                                             "text-[9px] font-normal sm:text-[11px]",
                                                             offerLiveOutOfStock
                                                               ? "text-red-500"
-                                                              : "text-slate-500",
+                                                              : hopefixPriceStockIncomplete
+                                                                ? "text-amber-600"
+                                                                : "text-slate-500",
                                                           )}
                                                         >
                                                           {rowPriceSuffix}
@@ -2460,7 +2495,8 @@ function ProductSupplierExpandedTableRow({
                                                       načítavam…
                                                     </span>
                                                   ) : rowPriceLive &&
-                                                    !offerLiveOutOfStock ? (
+                                                    !offerLiveOutOfStock &&
+                                                    !hopefixActiveMissingProductId ? (
                                                     <span
                                                       className="ml-0.5 inline-flex shrink-0 items-center align-middle"
                                                       title="Živá cena z e-shopu"
@@ -2483,7 +2519,9 @@ function ProductSupplierExpandedTableRow({
                                                     "flex min-w-0 items-center justify-between gap-x-2 rounded-md border px-1.5 py-1 text-right sm:flex-1 sm:flex-wrap sm:justify-end sm:gap-x-1 sm:rounded-none sm:border-0 sm:px-0 sm:py-0",
                                                     offerLiveOutOfStock
                                                       ? "border-red-100/90 bg-red-50/60 sm:border-0 sm:bg-transparent"
-                                                      : "border-slate-100 bg-slate-50/70 sm:border-0 sm:bg-transparent",
+                                                      : hopefixPriceStockIncomplete
+                                                        ? "border-amber-100/90 bg-amber-50/50 sm:border-0 sm:bg-transparent"
+                                                        : "border-slate-100 bg-slate-50/70 sm:border-0 sm:bg-transparent",
                                                   )}
                                                 >
                                                     <span
@@ -2491,7 +2529,9 @@ function ProductSupplierExpandedTableRow({
                                                         "mr-0.5 text-[8px] font-semibold uppercase tracking-wider sm:mr-1 sm:text-[10px]",
                                                         offerLiveOutOfStock
                                                           ? "text-red-600"
-                                                          : "text-slate-500",
+                                                          : hopefixPriceStockIncomplete
+                                                            ? "text-amber-700"
+                                                            : "text-slate-500",
                                                       )}
                                                     >
                                                     Sklad
@@ -2500,7 +2540,9 @@ function ProductSupplierExpandedTableRow({
                                                     className={cn(
                                                       offerLiveOutOfStock
                                                         ? "font-medium text-red-600"
-                                                        : "text-slate-900",
+                                                        : hopefixPriceStockIncomplete
+                                                          ? "font-medium text-amber-800"
+                                                          : "text-slate-900",
                                                     )}
                                                   >
                                                     {!scraperApplicable ? (
@@ -2539,7 +2581,7 @@ function ProductSupplierExpandedTableRow({
                                                       načítavam…
                                                     </span>
                                                   ) : rowStockLive &&
-                                                    !offerStockUiBlocked ? (
+                                                    !offerCartUiBlocked ? (
                                                     <span
                                                       className="ml-0.5 inline-flex shrink-0 items-center align-middle"
                                                       title="Živý sklad z e-shopu"
@@ -2564,14 +2606,17 @@ function ProductSupplierExpandedTableRow({
                                                 className={cn(
                                                   "flex w-full flex-col items-stretch gap-1 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end sm:gap-1",
                                                   canCart &&
-                                                    offerStockUiBlocked &&
+                                                    offerCartUiBlocked &&
                                                     "rounded-md bg-slate-200/80 px-1.5 py-1 ring-1 ring-slate-300/60",
                                                 )}
                                                 title={
-                                                  canCart && offerStockUiBlocked
-                                                    ? liveScrapeMissingOffer
-                                                      ? "V e-shope sa nepodarilo načítať ponuku — košík nie je k dispozícii"
-                                                      : "Produkt nie je na sklade — košík nie je k dispozícii"
+                                                  canCart && offerCartUiBlocked
+                                                    ? hopefixActiveMissingProductId &&
+                                                        !offerStockUiBlocked
+                                                      ? "V údajoch riadku chýba product_id — API košík nie je k dispozícii (nápoveda nižšie)."
+                                                      : liveScrapeMissingOffer
+                                                        ? "V e-shope sa nepodarilo načítať ponuku — košík nie je k dispozícii"
+                                                        : "Produkt nie je na sklade — košík nie je k dispozícii"
                                                     : undefined
                                                 }
                                               >
@@ -2580,7 +2625,7 @@ function ProductSupplierExpandedTableRow({
                                                     <div
                                                       className={cn(
                                                         "flex w-full flex-col items-stretch gap-0.5 rounded-md border px-1.5 py-1 shadow-sm ring-1 sm:w-auto sm:items-start sm:px-2 sm:py-1",
-                                                        offerStockUiBlocked
+                                                        offerCartUiBlocked
                                                           ? "border-slate-300/80 bg-slate-100/90 ring-slate-200/60"
                                                           : "border-slate-200/90 bg-gradient-to-b from-slate-50 to-white ring-slate-100/50",
                                                       )}
@@ -2594,12 +2639,12 @@ function ProductSupplierExpandedTableRow({
                                                         </label>
                                                         <button
                                                           type="button"
-                                                          disabled={offerStockUiBlocked}
+                                                          disabled={offerCartUiBlocked}
                                                           aria-label="Znížiť množstvo"
                                                           title="Znížiť množstvo"
                                                           className={cn(
                                                             "flex h-8 w-7 shrink-0 items-center justify-center rounded border text-slate-600 transition-colors sm:h-7 sm:w-6",
-                                                            offerStockUiBlocked
+                                                            offerCartUiBlocked
                                                               ? "cursor-not-allowed border-slate-300 bg-slate-200/80 text-slate-400"
                                                               : "border-slate-200 bg-white hover:bg-slate-50 active:bg-slate-100",
                                                           )}
@@ -2651,12 +2696,12 @@ function ProductSupplierExpandedTableRow({
                                                                 : "Množstvo na pridanie do košíka"
                                                           }
                                                           disabled={
-                                                            offerStockUiBlocked
+                                                            offerCartUiBlocked
                                                           }
                                                           className={cn(
                                                             "h-8 w-[4.6rem] rounded border px-1 text-center text-xs tabular-nums shadow-sm focus:outline-none focus:ring-1 sm:h-7 sm:w-[4.1rem] sm:px-1 sm:text-xs",
                                                             "[appearance:textfield] [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none",
-                                                            offerStockUiBlocked
+                                                            offerCartUiBlocked
                                                               ? "cursor-not-allowed border-slate-300 bg-slate-200/80 text-slate-500 focus:border-slate-300 focus:ring-0"
                                                               : "border-slate-200 bg-white text-slate-800 focus:border-slate-200 focus:ring-slate-200/80",
                                                           )}
@@ -2691,13 +2736,13 @@ function ProductSupplierExpandedTableRow({
                                                         <button
                                                           type="button"
                                                           disabled={
-                                                            offerStockUiBlocked
+                                                            offerCartUiBlocked
                                                           }
                                                           aria-label="Zvýšiť množstvo"
                                                           title="Zvýšiť množstvo"
                                                           className={cn(
                                                             "flex h-8 w-7 shrink-0 items-center justify-center rounded border text-slate-600 transition-colors sm:h-7 sm:w-6",
-                                                            offerStockUiBlocked
+                                                            offerCartUiBlocked
                                                               ? "cursor-not-allowed border-slate-300 bg-slate-200/80 text-slate-400"
                                                               : "border-slate-200 bg-white hover:bg-slate-50 active:bg-slate-100",
                                                           )}
@@ -2778,22 +2823,22 @@ function ProductSupplierExpandedTableRow({
                                                           cartKey
                                                         ]
                                                           ? "default"
-                                                          : offerStockUiBlocked
+                                                          : offerCartUiBlocked
                                                             ? "secondary"
                                                             : "default"
                                                       }
                                                       disabled={Boolean(
                                                         cartFeedback[cartKey] ||
-                                                          offerStockUiBlocked,
+                                                          offerCartUiBlocked,
                                                       )}
                                                       className={cn(
                                                         "h-8 w-full shrink-0 gap-1 px-2 text-xs shadow-sm sm:h-9 sm:w-auto sm:px-3 sm:text-sm",
-                                                        !offerStockUiBlocked &&
+                                                        !offerCartUiBlocked &&
                                                           !cartAddSuccessByKey[
                                                             cartKey
                                                           ] &&
                                                           "shadow-sky-600/15",
-                                                        offerStockUiBlocked &&
+                                                        offerCartUiBlocked &&
                                                           !cartAddSuccessByKey[
                                                             cartKey
                                                           ] &&
@@ -2802,10 +2847,13 @@ function ProductSupplierExpandedTableRow({
                                                           "border border-emerald-600 bg-emerald-50 text-emerald-900 shadow-sm hover:bg-emerald-100",
                                                       )}
                                                       title={
-                                                        offerStockUiBlocked
-                                                          ? liveScrapeMissingOffer
-                                                            ? "Ponuka z e-shopu sa nenašla"
-                                                            : "Produkt nie je na sklade"
+                                                        offerCartUiBlocked
+                                                          ? hopefixActiveMissingProductId &&
+                                                              !offerStockUiBlocked
+                                                            ? "Chýba product_id — API košík nie je k dispozícii"
+                                                            : liveScrapeMissingOffer
+                                                              ? "Ponuka z e-shopu sa nenašla"
+                                                              : "Produkt nie je na sklade"
                                                           : "Vložiť do košíka"
                                                       }
                                                       onClick={() =>
@@ -2886,13 +2934,15 @@ function ProductSupplierExpandedTableRow({
                                                             ? (activePv.mekrs_variant_id ??
                                                               null)
                                                             : null,
-                                                          hopefixHttpVariants &&
-                                                            activePv
+                                                          supplierNameIsHopefix(
+                                                            offer.supplier,
+                                                          ) && activePv
                                                             ? (activePv.hopefix_product_id ??
                                                               null)
                                                             : null,
-                                                          hopefixHttpVariants &&
-                                                            activePv
+                                                          supplierNameIsHopefix(
+                                                            offer.supplier,
+                                                          ) && activePv
                                                             ? (activePv.hopefix_package_type ??
                                                               null)
                                                             : null,
@@ -2923,7 +2973,7 @@ function ProductSupplierExpandedTableRow({
                                                         <ShoppingCart
                                                           className={cn(
                                                             "h-4 w-4",
-                                                            offerStockUiBlocked &&
+                                                            offerCartUiBlocked &&
                                                               "text-slate-600",
                                                           )}
                                                         />
