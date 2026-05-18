@@ -2063,11 +2063,25 @@ async def _hopefix_get_supplier_data_via_http(
         _hopefix_login,
     )
     async with _contextlib.nullcontext(pooled_client) as client:
+        # Diagnostika pre prípad, že riadok nikde nenájdeme — chceme vidieť,
+        # aké product_nr Hopefix vracia (či len iný formát kódu) a koľko
+        # riadkov tabuľka má. Bez toho je „nenašiel sa riadok" slepá ulička.
+        parsed_samples: list[str] = []
+        total_rows_parsed = 0
+        per_url_log: list[str] = []
 
         async def _fetch_row(u: str) -> tuple[str, int, Optional[dict[str, Any]]]:
+            nonlocal total_rows_parsed
             html = await client.get_text(u)
             ln = len(html or "")
-            r = find_hopefix_row(parse_hopefix_rows(html), code)
+            rows_parsed = parse_hopefix_rows(html)
+            total_rows_parsed += len(rows_parsed)
+            for rrow in rows_parsed[:3]:
+                pn = (rrow.get("product_nr") or "").strip()
+                if pn and pn not in parsed_samples:
+                    parsed_samples.append(pn)
+            per_url_log.append(f"{u}→{ln}B/{len(rows_parsed)}r")
+            r = find_hopefix_row(rows_parsed, code)
             return u, ln, r
 
         if len(try_urls) <= 1:
@@ -2128,9 +2142,17 @@ async def _hopefix_get_supplier_data_via_http(
                 )
 
                 async def _fetch_fallback(rel: str) -> tuple[str, Optional[dict[str, Any]], int, Optional[str]]:
+                    nonlocal total_rows_parsed
                     try:
                         html_fb = await client.get_text(rel)
-                        return rel, find_hopefix_row(parse_hopefix_rows(html_fb), code), len(html_fb or ""), None
+                        rows_parsed = parse_hopefix_rows(html_fb)
+                        total_rows_parsed += len(rows_parsed)
+                        for rrow in rows_parsed[:3]:
+                            pn = (rrow.get("product_nr") or "").strip()
+                            if pn and pn not in parsed_samples:
+                                parsed_samples.append(pn)
+                        per_url_log.append(f"{rel}→{len(html_fb or '')}B/{len(rows_parsed)}r")
+                        return rel, find_hopefix_row(rows_parsed, code), len(html_fb or ""), None
                     except Exception as exc:
                         return rel, None, 0, str(exc)
 
@@ -2153,10 +2175,18 @@ async def _hopefix_get_supplier_data_via_http(
                     if r and not row:
                         row = r
     if not row:
+        login_ok = bool(getattr(pooled_client, "login_ok", False))
+        samples_part = ", ".join(parsed_samples[:6]) if parsed_samples else "žiadne"
+        urls_part = "; ".join(per_url_log[:6]) if per_url_log else "žiadne"
         raise RuntimeError(
-            f"Hopefix: v tabuľke sa nenašiel riadok pre kód {code!r} (skúšané {len(try_urls)} URL, "
-            f"posledná odpoveď ≈{last_html_len} B). Skontroluj hopefix_catalog_url_template "
-            f"a search_via_url_template — musia viesť na stránku, kde je tento kód v tabuľke."
+            f"Hopefix: v tabuľke sa nenašiel riadok pre kód {code!r}. "
+            f"login_ok={login_ok}, parsovaných riadkov spolu={total_rows_parsed}, "
+            f"vzorky kódov z tabuľky: [{samples_part}], "
+            f"skúšané URL: [{urls_part}]. "
+            f"Ak login_ok=False, skontroluj meno/heslo v admine. Ak vzorky kódov "
+            f"vyzerajú inak (napr. medzery, pomlčky, iný prefix), uprav supplier_code "
+            f"v Excel mapovaní. Inak nastav `hopefix_catalog_url_template` v "
+            f"cart_config_json na konkrétnu podkategóriu, kde je kód v tabuľke."
         )
     pkg_type = (config.hopefix_default_package_type or "box").strip() or "box"
     label = (row.get("label") or "").strip() or code

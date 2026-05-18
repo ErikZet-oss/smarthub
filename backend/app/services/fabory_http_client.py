@@ -387,6 +387,16 @@ class FaboryHttpClient:
         except (json.JSONDecodeError, ValueError) as exc:
             raise RuntimeError(f"Fabory {path}: neočakávaná odpoveď ({len(txt)} B).") from exc
 
+    @staticmethod
+    def _fabory_api_code(code: str) -> str:
+        """API endpointy `/product/price` a `/product/stock` chcú materialCode bez bodiek.
+
+        Excel/UI nesie kód v ľudskom formáte ``51010.120.016``, Fabory v URL aj
+        v Hybris API pracuje s ``51010120016``. Bez normalizácie API hádže 500
+        (server-side NumberFormatException).
+        """
+        return re.sub(r"[.\-\s]", "", (code or "").strip())
+
     async def fetch_prices(
         self,
         codes: Iterable[str],
@@ -394,11 +404,20 @@ class FaboryHttpClient:
         referer: Optional[str] = None,
     ) -> dict[str, Any]:
         """Batch: `POST /product/price` s poľom kódov. Vráti `{code: {...}}`."""
-        items = [c.strip() for c in codes if c and c.strip()]
-        if not items:
+        raw_items = [c.strip() for c in codes if c and c.strip()]
+        if not raw_items:
             return {}
+        items = [self._fabory_api_code(c) for c in raw_items]
         data = await self._post_json("/product/price", items, referer=referer)
-        return data if isinstance(data, dict) else {}
+        if not isinstance(data, dict):
+            return {}
+        # Server vracia normalizovaný kľúč (bez bodiek). Vrátime kľúč aj
+        # v pôvodnom tvare, aby downstream kód mohol pýtať obe varianty.
+        out: dict[str, Any] = dict(data)
+        for raw, norm in zip(raw_items, items):
+            if raw != norm and norm in data and raw not in out:
+                out[raw] = data[norm]
+        return out
 
     async def fetch_stock(
         self,
@@ -408,15 +427,22 @@ class FaboryHttpClient:
         referer: Optional[str] = None,
     ) -> dict[str, Any]:
         """Batch: `POST /product/stock` s {materialCodes:[...]}. Vráti `{code: {...}}`."""
-        items = [c.strip() for c in codes if c and c.strip()]
-        if not items:
+        raw_items = [c.strip() for c in codes if c and c.strip()]
+        if not raw_items:
             return {}
+        items = [self._fabory_api_code(c) for c in raw_items]
         data = await self._post_json(
             "/product/stock",
             {"pageType": page_type, "materialCodes": items},
             referer=referer,
         )
-        return data if isinstance(data, dict) else {}
+        if not isinstance(data, dict):
+            return {}
+        out: dict[str, Any] = dict(data)
+        for raw, norm in zip(raw_items, items):
+            if raw != norm and norm in data and raw not in out:
+                out[raw] = data[norm]
+        return out
 
     async def fetch_product_price_and_stock(self, code: str) -> dict[str, Any]:
         """Pre jeden kód získa cenu aj sklad v ~2 paralelných XHR-och.
