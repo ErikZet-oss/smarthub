@@ -2030,6 +2030,14 @@ async def _hopefix_get_supplier_data_via_http(
         seen_u.add(x)
         try_urls.append(x)
 
+    # Globálny vyhľadávač Hopefix-u: form `action="/search" method="get"` s
+    # input `name="search"`. Submit s presným kódom server presmeruje na
+    # konkrétnu podkategóriu (napr. `/sortiment/srouby-sestihranne-din933-nerez-a2`),
+    # kde sa hľadaný riadok zobrazí spolu s ďalšími variantmi tej istej DIN-skupiny.
+    # Pridávame ho vždy ako PRVÉHO kandidáta — `/sortiment/<seg>` má strop 100
+    # riadkov a všeobecné kategórie hľadaný kód obvykle nedoručia.
+    if code:
+        _add(f"/search?search={enc}")
     tmpl = (config.hopefix_catalog_url_template or "").strip()
     if tmpl:
         try:
