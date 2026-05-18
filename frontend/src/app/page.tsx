@@ -1718,12 +1718,10 @@ function ProductSupplierExpandedTableRow({
                                             !scrape.loading &&
                                             !scrape.error,
                                         ) &&
-                                        Boolean(activePv) &&
-                                        !(
-                                          String(
-                                            activePv.hopefix_product_id ?? "",
-                                          ).trim()
-                                        );
+                                        activePv != null &&
+                                        !String(
+                                          activePv.hopefix_product_id ?? "",
+                                        ).trim();
                                       const offerCartUiBlocked =
                                         offerStockUiBlocked ||
                                         hopefixActiveMissingProductId;
