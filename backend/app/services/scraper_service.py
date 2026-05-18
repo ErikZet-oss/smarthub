@@ -1226,6 +1226,57 @@ async def _hopefix_scroll_catalog_until_line_present(
     return await _hopefix_registration_row_index_in_tbody(page, key) >= 0
 
 
+def _hopefix_narrow_catalog_paths(product_code: str, enc: str) -> list[str]:
+    """Relatívne URL (/sortiment/…) pre prvý HTTP pokus — úzke kategórie z hopefix.cz.
+
+    Veľké ``/sortiment/srouby`` často vracia len prvú stránku tabuľky; kód ako
+    ``D933A212016`` tam nemusí byť. Podcesty z rozcestníka „Šrouby“ (2026) treba
+    skúšať skôr. Rovnaký pár pridáme s ``?_ref=`` (Hopefix scrolluje na riadok).
+    """
+    k = hopefix_norm_code(product_code)
+    if not k or not enc:
+        return []
+
+    def _pair(seg: str) -> list[str]:
+        s = seg.strip().strip("/")
+        if not s:
+            return []
+        return [f"/sortiment/{s}?_ref={enc}", f"/sortiment/{s}"]
+
+    out: list[str] = []
+
+    def _extend(slugs: list[str]) -> None:
+        for slug in slugs:
+            out.extend(_pair(slug))
+
+    # Šrouby — metrické podkategórie (nápoveda z HTML rozcestníka /sortiment/srouby)
+    if re.match(
+        r"^D9(12|13|14|16|2[0-5]|31|33|34|35|60|61|62|63|64|91)",
+        k,
+    ) or k.startswith("D6912"):
+        _extend(
+            [
+                "metricke-se-sestihranou-hlavou",
+                "metricke-s-valcovou-hlavou",
+                "metricke-s-pulkulatou-hlavou",
+                "metricke-se-zaoblenou-hlavou",
+                "metricke-se-zapustnou-hlavou",
+                "kotevni-okenni-srouby",
+            ]
+        )
+    if re.match(r"^D12[0-9]", k) or k.startswith("D9021"):
+        _extend(
+            [
+                "podlozky-ploche-kruhove-nerez-a2",
+                "podlozky",
+            ]
+        )
+    if re.match(r"^D98", k) or re.match(r"^D69", k):
+        _extend(["matice"])
+
+    return out
+
+
 def _hopefix_fallback_category_segments(product_code: str) -> list[str]:
     """Poradie podcest /sortiment/<segment>#kód podľa typického zaradenia DIN kódu."""
     k = hopefix_norm_code(product_code)
@@ -1249,7 +1300,19 @@ def _hopefix_fallback_category_segments(product_code: str) -> list[str]:
         r"^D9(12|13|14|16|2[0-5]|31|33|34|35|60|61|62|63|64|91)",
         k,
     ) or k.startswith("D6912"):
-        first = ["srouby", "vruty", "matice", "podlozky", "zavitove-tyce"]
+        first = [
+            "metricke-se-sestihranou-hlavou",
+            "metricke-s-valcovou-hlavou",
+            "metricke-s-pulkulatou-hlavou",
+            "metricke-se-zaoblenou-hlavou",
+            "metricke-se-zapustnou-hlavou",
+            "kotevni-okenni-srouby",
+            "srouby",
+            "vruty",
+            "matice",
+            "podlozky",
+            "zavitove-tyce",
+        ]
         rest = [s for s in all_seg if s not in first]
         return first + rest
     if re.match(r"^D12[0-9]", k) or k.startswith("D9021"):
@@ -2030,14 +2093,15 @@ async def _hopefix_get_supplier_data_via_http(
         seen_u.add(x)
         try_urls.append(x)
 
-    # Globálny vyhľadávač Hopefix-u: form `action="/search" method="get"` s
-    # input `name="search"`. Submit s presným kódom server presmeruje na
-    # konkrétnu podkategóriu (napr. `/sortiment/srouby-sestihranne-din933-nerez-a2`),
-    # kde sa hľadaný riadok zobrazí spolu s ďalšími variantmi tej istej DIN-skupiny.
-    # Pridávame ho vždy ako PRVÉHO kandidáta — `/sortiment/<seg>` má strop 100
-    # riadkov a všeobecné kategórie hľadaný kód obvykle nedoručia.
-    if code:
-        _add(f"/search?search={enc}")
+    # Úzke podstránky /sortiment/<slug> (aktuálny IA Hopefix-u na hopefix.cz 2026) —
+    # musia ísť PRED `/sortiment/srouby` atď. Rozcestník `srouby` je v hlavičke len hub;
+    # tabuľka pod `/sortiment/srouby` obsahuje tisíce riadkov a pri B2B zobrazení často
+    # len prvú stránku (~100 ks) — kód DIN 933 potom v nej nie je. Podkategória
+    # „metrické se šestihranou hlavou“ má ~1.2k riadkov a `D933…` je priamo v HTML.
+    # Pozn.: `GET /search?search=…` Hopefix dnes vracia 404 — vo formulári je síce
+    # `action="/search"`, ale endpoint nie je nasadený / používa iný routing.
+    for rel in _hopefix_narrow_catalog_paths(code, enc):
+        _add(rel)
     tmpl = (config.hopefix_catalog_url_template or "").strip()
     if tmpl:
         try:
