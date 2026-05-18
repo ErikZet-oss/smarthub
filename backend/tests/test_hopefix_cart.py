@@ -102,3 +102,20 @@ def test_find_row_by_td_close_pattern():
     html = "<table><tr><td>933</td><td>D933A212016</td><td>x</td></tr></table>"
     row = find_hopefix_row_in_html(html, "D933A212016")
     assert row is not None
+
+
+# HAR www.hopefix3.cz: product_id je v nasledujúcom <tr class="expander-row">, nie v riadku line-*.
+EXPANDER_SNIPPET = """
+<tr id="line-D933A212016"><td>933</td><td>D933A212016</td><td>x</td></tr>
+<tr class="expander-row"><td colspan="14">
+<form><input type="hidden" name="product_nr" value="D933A212016">
+<input type="hidden" name="product_id" value="4745"></form></td></tr>
+"""
+
+
+def test_product_id_from_expander_after_line_row():
+    rows = parse_hopefix_rows(EXPANDER_SNIPPET)
+    assert rows and (rows[0].get("hopefix_product_id") in (None, ""))
+    row = find_hopefix_row_in_html(EXPANDER_SNIPPET, "D933A212016")
+    assert row is not None
+    assert row.get("hopefix_product_id") == "4745"

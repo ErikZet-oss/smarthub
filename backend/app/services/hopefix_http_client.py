@@ -122,6 +122,44 @@ def _extract_product_id(row_inner: str) -> Optional[str]:
     return None
 
 
+def _hopefix_product_id_from_expander_html(html: str, norm_nr: str) -> Optional[str]:
+    """Hopefix dáva ``product_id`` v skrytom riadku expander-row hneď za ``tr id=line-…``."""
+    if not norm_nr:
+        return None
+    esc = re.escape(norm_nr)
+    m = re.search(
+        r"<input[^>]+name\s*=\s*[\"']product_nr[\"'][^>]+value\s*=\s*[\"']"
+        + esc
+        + r"[\"'][^>]*>\s*"
+        r"<input[^>]+name\s*=\s*[\"']product_id[\"'][^>]+value\s*=\s*[\"'](\d+)[\"']",
+        html,
+        re.I | re.DOTALL,
+    )
+    if m:
+        return m.group(1)
+    m2 = re.search(
+        r"<input[^>]+value\s*=\s*[\"']"
+        + esc
+        + r"[\"'][^>]+name\s*=\s*[\"']product_nr[\"'][^>]*>\s*"
+        r"<input[^>]+name\s*=\s*[\"']product_id[\"'][^>]+value\s*=\s*[\"'](\d+)[\"']",
+        html,
+        re.I | re.DOTALL,
+    )
+    return m2.group(1) if m2 else None
+
+
+def hopefix_merge_expander_product_id(html: str, row: dict[str, Any]) -> None:
+    """Dopočíta ``hopefix_product_id`` z expander formulára v celom HTML."""
+    if (row.get("hopefix_product_id") or "").strip():
+        return
+    nr = hopefix_norm_code((row.get("product_nr") or "").strip())
+    if not nr:
+        return
+    pid = _hopefix_product_id_from_expander_html(html, nr)
+    if pid:
+        row["hopefix_product_id"] = pid
+
+
 def _hopefix_row_dict_from_line_inner(line_key: str, inner: str) -> dict[str, Any]:
     """Jeden riadok katalógovej tabuľky z vnútra <tr>… (bez obálky <tr>)."""
     tds = re.findall(r"<td[^>]*>(.*?)</td>", inner, re.I | re.DOTALL)
@@ -290,14 +328,19 @@ def find_hopefix_row_in_html(html: str, product_code: str) -> Optional[dict[str,
     rows = parse_hopefix_rows(html)
     hit = find_hopefix_row(rows, product_code)
     if hit:
+        hopefix_merge_expander_product_id(html, hit)
         return hit
     key = hopefix_norm_code(product_code)
     if not key:
         return None
     hit = _find_hopefix_row_tr_by_registration_td(html, key)
     if hit:
+        hopefix_merge_expander_product_id(html, hit)
         return hit
-    return _find_hopefix_row_tr_by_code_occurrence(html, key)
+    hit = _find_hopefix_row_tr_by_code_occurrence(html, key)
+    if hit:
+        hopefix_merge_expander_product_id(html, hit)
+    return hit
 
 
 async def hopefix_fetch_html_anonymous(url_or_path: str) -> str:
