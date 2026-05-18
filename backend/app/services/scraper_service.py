@@ -31,6 +31,7 @@ from app.services.hopefix_http_client import (
     hopefix_parse_cart_html,
     hopefix_raw_suggests_oos,
     hopefix_row_is_oos,
+    hopefix_row_likely_no_cart_form,
 )
 from app.services.bmkco_http_client import (
     BmkcoHttpClient,
@@ -2316,19 +2317,33 @@ async def _hopefix_get_supplier_data_via_http(
     }
     _hopefix_normalize_oos_display(data)
     if anonymous_fallback:
-        data["hint"] = (
-            "Hopefix: riadok z verejného katalógu (prihlásená B2B odpoveď tento kód v HTML nemala). "
-            "Cena/sklad môžu byť neúplné oproti účtu; košík stále používa prihlásenú HTTP session."
+        base_pub = (
+            "Hopefix: riadok z verejného katalógu (prihlásená B2B odpoveď tento kód v HTML nemala)."
         )
-    if not hopefix_id:
-        pid_hint = (
-            "Hopefix: v HTML riadku sa nenašiel product_id (často až v rozbalenej časti). "
-            "Otvor riadok v prehliadači alebo zachyť HAR pri „Vložit do košíku“ a doplň mapovanie."
-        )
-        if data.get("hint"):
-            data["hint"] = f"{data['hint']} {pid_hint}"
+        if hopefix_row_likely_no_cart_form(row):
+            data["hint"] = (
+                f"{base_pub} Pri vypredaní môže v HTML chýbať aj product_id (Hopefix nezobrazí košík) — "
+                "nie je potrebné doplňovať mapovanie z HAR."
+            )
         else:
-            data["hint"] = pid_hint
+            data["hint"] = (
+                f"{base_pub} Cena/sklad môžu byť neúplné oproti účtu; košík stále používa prihlásenú HTTP session."
+            )
+    if not hopefix_id:
+        if hopefix_row_likely_no_cart_form(row):
+            if not data.get("hint"):
+                data["hint"] = (
+                    "Hopefix: product_id v HTML chýba — pri vypredaní / bez košíka v riadku je to očakávané."
+                )
+        else:
+            pid_hint = (
+                "Hopefix: v HTML riadku sa nenašiel product_id (často až v rozbalenej časti). "
+                "Otvor riadok v prehliadači alebo zachyť HAR pri „Vložit do košíku“ a doplň mapovanie."
+            )
+            if data.get("hint"):
+                data["hint"] = f"{data['hint']} {pid_hint}"
+            else:
+                data["hint"] = pid_hint
     _log(
         run_label,
         supplier,

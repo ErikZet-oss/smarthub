@@ -65,6 +65,28 @@ def hopefix_row_is_oos(row: dict[str, Any]) -> bool:
     return any(m in raw for m in _HOPEFIX_OOS_MARKERS)
 
 
+def hopefix_row_likely_no_cart_form(row: dict[str, Any]) -> bool:
+    """Hopefix pri OOS / plánovanom naskladnení často nevykreslí expander s ``product_id`` / košíkom."""
+    if hopefix_row_is_oos(row):
+        return True
+    raw = _strip_tags((row.get("raw_stock") or "")).lower()
+    if any(
+        x in raw
+        for x in (
+            "nasklad",
+            "naskladnění",
+            "naskladneni",
+            "dočasn",
+            "docasn",
+            "termín dod",
+            "termin dod",
+            "nedostup",
+        )
+    ):
+        return True
+    return False
+
+
 def _strip_tags(html: str) -> str:
     t = re.sub(r"(?is)<script.*?>.*?</script>", " ", html)
     t = re.sub(r"(?is)<style.*?>.*?</style>", " ", t)

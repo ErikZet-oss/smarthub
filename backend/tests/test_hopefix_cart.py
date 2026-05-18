@@ -3,6 +3,7 @@ from app.services.hopefix_http_client import (
     find_hopefix_row_in_html,
     hopefix_norm_code,
     hopefix_parse_cart_html,
+    hopefix_row_likely_no_cart_form,
     parse_hopefix_rows,
 )
 
@@ -119,3 +120,11 @@ def test_product_id_from_expander_after_line_row():
     row = find_hopefix_row_in_html(EXPANDER_SNIPPET, "D933A212016")
     assert row is not None
     assert row.get("hopefix_product_id") == "4745"
+
+
+def test_row_likely_no_cart_when_oos_or_restock():
+    assert hopefix_row_likely_no_cart_form({"stock": 0, "raw_stock": ""})
+    assert hopefix_row_likely_no_cart_form(
+        {"stock": None, "raw_stock": "Další naskladnění od 15.6.2026"}
+    )
+    assert not hopefix_row_likely_no_cart_form({"stock": 50, "raw_stock": "100 ks"})
