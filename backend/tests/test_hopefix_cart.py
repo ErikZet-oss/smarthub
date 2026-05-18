@@ -6,6 +6,8 @@ from app.services.hopefix_http_client import (
     hopefix_norm_code,
     hopefix_parse_cart_html,
     hopefix_row_likely_no_cart_form,
+    hopefix_row_parse_quality,
+    hopefix_row_pick_better,
     parse_hopefix_rows,
 )
 
@@ -194,6 +196,8 @@ def test_hopefix_b1_anchor_align_when_leading_empty_td():
     assert row is not None
     assert row["stock"] == 4400
     assert row["pack_quantity"] == 200
+
+
 EXPANDER_SNIPPET = """
 <tr id="line-D933A212016"><td>933</td><td>D933A212016</td><td>x</td></tr>
 <tr class="expander-row"><td colspan="14">
@@ -216,3 +220,23 @@ def test_row_likely_no_cart_when_oos_or_restock():
         {"stock": None, "raw_stock": "Další naskladnění od 15.6.2026"}
     )
     assert not hopefix_row_likely_no_cart_form({"stock": 50, "raw_stock": "100 ks"})
+
+
+def test_hopefix_pick_better_prefers_numeric_row_over_login_gate():
+    gate = {"product_nr": "X", "_hopefix_login_gate": True, "price_eur": None}
+    live = {
+        "product_nr": "X",
+        "_hopefix_login_gate": False,
+        "price_eur": 1.5,
+        "stock": 10,
+    }
+    assert hopefix_row_pick_better(gate, live) == live
+    assert hopefix_row_pick_better(live, gate) == live
+
+
+def test_hopefix_parse_quality_orders_login_last():
+    gate = {"_hopefix_login_gate": True}
+    empty = {"_hopefix_login_gate": False}
+    num = {"_hopefix_login_gate": False, "price_eur": 1.0}
+    assert hopefix_row_parse_quality(num) < hopefix_row_parse_quality(empty)
+    assert hopefix_row_parse_quality(empty) < hopefix_row_parse_quality(gate)

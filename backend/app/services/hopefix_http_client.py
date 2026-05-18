@@ -87,6 +87,42 @@ def hopefix_row_likely_no_cart_form(row: dict[str, Any]) -> bool:
     return False
 
 
+def hopefix_row_parse_quality(row: Optional[dict[str, Any]]) -> tuple[int, int]:
+    """Nižšia hodnota = užitočnejší riadok (B2B bunky, nie /prihlaseni)."""
+    if not row:
+        return (9, 0)
+    gate = 1 if row.get("_hopefix_login_gate") else 0
+    has_live = 0
+    if row.get("price_eur") is not None or row.get("stock") is not None:
+        has_live = 2
+    elif (row.get("raw_price") or "").strip() or (row.get("raw_stock") or "").strip():
+        has_live = 1
+    return (gate, -has_live)
+
+
+def hopefix_row_has_live_offer_cells(row: Optional[dict[str, Any]]) -> bool:
+    """Má riadok reálnu ponuku (číselnú alebo text sklad/cena), nie len login placeholder."""
+    if not row:
+        return False
+    if row.get("_hopefix_login_gate"):
+        return False
+    if row.get("price_eur") is not None or row.get("stock") is not None:
+        return True
+    if (row.get("raw_price") or "").strip() or (row.get("raw_stock") or "").strip():
+        return True
+    return False
+
+
+def hopefix_row_pick_better(
+    a: Optional[dict[str, Any]], b: Optional[dict[str, Any]]
+) -> Optional[dict[str, Any]]:
+    if b is None:
+        return a
+    if a is None or hopefix_row_parse_quality(b) < hopefix_row_parse_quality(a):
+        return b
+    return a
+
+
 def _strip_tags(html: str) -> str:
     t = re.sub(r"(?is)<script.*?>.*?</script>", " ", html)
     t = re.sub(r"(?is)<style.*?>.*?</style>", " ", t)

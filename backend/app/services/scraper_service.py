@@ -29,7 +29,9 @@ from app.services.hopefix_http_client import (
     hopefix_fetch_html_anonymous,
     hopefix_norm_code,
     hopefix_parse_cart_html,
+    hopefix_row_pick_better,
     hopefix_raw_suggests_oos,
+    hopefix_row_has_live_offer_cells,
     hopefix_row_is_oos,
     hopefix_row_likely_no_cart_form,
 )
@@ -2150,6 +2152,8 @@ async def _hopefix_get_supplier_data_via_http(
             nonlocal row, last_html_len
             row = None
             try_urls, seen_u = _build_hopefix_try_urls()
+            cur: Optional[dict[str, Any]] = None
+
             if len(try_urls) <= 1:
                 for attempt in try_urls:
                     _log(
@@ -2158,8 +2162,9 @@ async def _hopefix_get_supplier_data_via_http(
                         run_id,
                         f"Hopefix HTTP: GET katalóg {attempt!r}",
                     )
-                    _, last_html_len, row = await _fetch_row(attempt)
-                    if row:
+                    _, last_html_len, r = await _fetch_row(attempt)
+                    cur = hopefix_row_pick_better(cur, r)
+                    if hopefix_row_has_live_offer_cells(cur):
                         break
             elif try_urls:
                 _log(
@@ -2171,12 +2176,13 @@ async def _hopefix_get_supplier_data_via_http(
                 packed = await asyncio.gather(*[_fetch_row(u) for u in try_urls])
                 for _url, ln, r in packed:
                     last_html_len = max(last_html_len, ln)
-                    if r:
-                        row = r
-                        break
-            if not row and try_urls:
+                    cur = hopefix_row_pick_better(cur, r)
+            row = cur
+
+            if try_urls and not hopefix_row_has_live_offer_cells(row):
                 anchored = _hopefix_url_with_row_anchor(try_urls[-1], key)
                 if anchored not in seen_u:
+                    seen_u.add(anchored)
                     _log(
                         run_label,
                         supplier,
@@ -2186,8 +2192,10 @@ async def _hopefix_get_supplier_data_via_http(
                     html = await client.get_text(anchored)
                     last_html_len = len(html or "")
                     _note_response_body(html)
-                    row = find_hopefix_row_in_html(html, code)
-            if not row:
+                    r = find_hopefix_row_in_html(html, code)
+                    row = hopefix_row_pick_better(row, r)
+
+            if not hopefix_row_has_live_offer_cells(row):
                 # Úzka podkategória v šablóne často obsahuje len časť riadkov; veľká /sortiment/<seg>
                 # (rovnaký fallback ako Playwright) má kompletnú tabuľku. Fragment #kód sa na server neposiela.
                 # Skúsime všetky podstránky paralelne — server zvládne 5-10 paralelných GET-ov bez problémov
@@ -2238,8 +2246,8 @@ async def _hopefix_get_supplier_data_via_http(
                                 "warn",
                             )
                             continue
-                        if r and not row:
-                            row = r
+                        if r:
+                            row = hopefix_row_pick_better(row, r)
 
         await _search_b2b_catalog()
         need_reauth = row is None or bool(
@@ -2260,6 +2268,15 @@ async def _hopefix_get_supplier_data_via_http(
                 force=True,
             )
             await _search_b2b_catalog()
+        if isinstance(row, dict) and row.get("_hopefix_login_gate"):
+            _log(
+                run_label,
+                supplier,
+                run_id,
+                "Hopefix HTTP: v B2B ostali len bunky „Přihlásit“ — skúšam verejný katalóg",
+                "warn",
+            )
+            row = None
     if not row:
         _log(
             run_label,
