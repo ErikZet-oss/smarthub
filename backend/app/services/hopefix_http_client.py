@@ -156,13 +156,102 @@ def _hopefix_column_headers_for_row(html: str, row_start: int) -> Optional[list[
 def _hopefix_align_row_cells_to_headers(
     texts: list[str],
     headers: list[str],
+    product_nr_hint: str = "",
 ) -> tuple[list[str], list[str]]:
-    """Jedna extra bunka (checkbox) bez hlavičky → posun o 1."""
-    if len(texts) == len(headers) + 1:
-        return headers, texts[1:]
+    """Jedna extra bunka (checkbox) bez hlavičky → posun o 1; inak zarovnanie podľa bunky s kódom vs. „registr…“."""
     if len(texts) == len(headers):
         return headers, texts
+    if len(texts) == len(headers) + 1:
+        return headers, texts[1:]
+    key = hopefix_norm_code((product_nr_hint or "").strip())
+    if key and len(texts) >= 4 and len(headers) >= 3:
+        ti_match: Optional[int] = None
+        for ti, tv in enumerate(texts):
+            if hopefix_norm_code(_strip_tags(tv)) == key:
+                ti_match = ti
+                break
+        if ti_match is not None:
+            hi_match: Optional[int] = None
+            for hi, hraw in enumerate(headers):
+                hl = _strip_tags(hraw).lower()
+                if "registr" in hl:
+                    hi_match = hi
+                    break
+                if ("číslo" in hl or "cislo" in hl) and (
+                    "kód" in hl or "kod" in hl or "číslo" in hl
+                ):
+                    hi_match = hi
+                    break
+            if hi_match is not None:
+                offset = ti_match - hi_match
+                if offset >= 0 and offset + len(headers) <= len(texts):
+                    return headers, texts[offset : offset + len(headers)]
     return headers, texts
+
+
+def _hopefix_parse_price_cell(cell: str, header_plain: str = "") -> Optional[float]:
+    """Cena v EUR — bunka môže mať iba číslo, hlavička „EUR/100 pcs“."""
+    pe = _parse_eur_cell(cell)
+    if pe is not None:
+        return pe
+    hl = _strip_tags(header_plain).lower()
+    if "eur" in hl or "€" in (header_plain or ""):
+        return _cz_float(cell)
+    return None
+
+
+def _hopefix_first_eur_column_index(texts: list[str]) -> Optional[int]:
+    for i, plain in enumerate(texts):
+        if _parse_eur_cell(plain) is not None:
+            return i
+    for i, plain in enumerate(texts):
+        pl = plain.replace("\xa0", " ").strip().lower()
+        if "€" in plain or "eur" in pl or "kč" in pl or "kc" in pl:
+            v = _cz_float(plain)
+            if v is not None and 0 < v < 1_000_000:
+                return i
+    if len(texts) >= 9:
+        for i in (len(texts) - 5, len(texts) - 4):
+            if i < 1 or i >= len(texts):
+                continue
+            v = _cz_float(texts[i])
+            prev = _cz_float(texts[i - 1])
+            if (
+                v is not None
+                and prev is not None
+                and 0.01 <= v < 50_000
+                and 0 <= prev < 1_000_000
+            ):
+                return i
+    return None
+
+
+def _hopefix_price_header_implies_per_100(header_plain: str, price_cell: str) -> bool:
+    hp = _strip_tags(header_plain).lower()
+    if "100" in hp and ("pcs" in hp or "ks" in hp or "/100" in hp.replace(" ", "")):
+        return True
+    pc = (price_cell or "").replace("\xa0", " ").lower()
+    return "/100" in pc.replace(" ", "") or bool(re.search(r"\b100\s*pcs\b", pc))
+
+
+def _hopefix_legacy_stock_from_texts(texts: list[str]) -> tuple[Optional[int], Optional[str]]:
+    """Sklad je typicky vľavo od prvého stĺpca s cenou v € — nie paleta (posledné bunky)."""
+    eur_i = _hopefix_first_eur_column_index(texts)
+    if eur_i is None or eur_i < 1:
+        return None, None
+    cand = (texts[eur_i - 1] or "").strip()
+    if not cand or cand.upper() in ("N/A", "-"):
+        return None, None
+    plain = _strip_tags(cand)
+    if hopefix_raw_suggests_oos(plain):
+        return 0, plain[:120]
+    val = _cz_float(cand)
+    if val is None or val < 0:
+        return None, None
+    h100 = _hopefix_price_header_implies_per_100("", texts[eur_i])
+    if h100:
+        return max(0, int(round(val * 100))), cand[:120]
+    return max(0, int(round(val))), cand[:120]
 
 
 def _hopefix_pick_column_indices(headers: list[str]) -> dict[str, Any]:
@@ -187,7 +276,9 @@ def _hopefix_pick_column_indices(headers: list[str]) -> dict[str, Any]:
         if "box" in flat and "carton" not in flat and "pallet" not in flat:
             box_idx = i
             box_h100 = _hopefix_header_implies_100_pcs_unit(plain)
-        if ("sklad" in flat or "stock" in flat) and not skip_stock.search(flat):
+        if (
+            re.search(r"\bsklad\b", flat) or re.search(r"\bstock\b", flat)
+        ) and not skip_stock.search(flat):
             stock_idx = i
             stock_h100 = _hopefix_header_implies_100_pcs_unit(plain)
         plain_u = plain.upper()
@@ -309,7 +400,9 @@ def _hopefix_row_dict_from_line_inner(
     raw_stock: Optional[str] = None
 
     if column_headers and len(column_headers) >= 3:
-        h_aln, t_aln = _hopefix_align_row_cells_to_headers(texts, column_headers)
+        h_aln, t_aln = _hopefix_align_row_cells_to_headers(
+            texts, column_headers, product_nr
+        )
         if len(h_aln) == len(t_aln) and len(t_aln) >= 3:
             idxmap = _hopefix_pick_column_indices(h_aln)
             li = idxmap.get("label_idx")
@@ -318,8 +411,8 @@ def _hopefix_row_dict_from_line_inner(
                 if lab:
                     label = lab
             ei = idxmap.get("eur_idx")
-            if ei is not None and 0 <= ei < len(t_aln):
-                pe = _parse_eur_cell(t_aln[ei])
+            if ei is not None and 0 <= ei < len(t_aln) and ei < len(h_aln):
+                pe = _hopefix_parse_price_cell(t_aln[ei], h_aln[ei])
                 if pe is not None:
                     price_eur = pe
                     raw_price = (t_aln[ei] or "").strip()[:120]
@@ -369,41 +462,23 @@ def _hopefix_row_dict_from_line_inner(
     if pack_quantity is None and len(texts) >= 3:
         pq_f = _cz_float(texts[-3])
         if pq_f is not None and pq_f > 0:
-            pack_quantity = (
-                int(pq_f) if abs(pq_f - int(pq_f)) < 0.001 else int(round(pq_f))
-            )
-            if pack_quantity < 1:
-                pack_quantity = 1
+            if column_headers and any(
+                _hopefix_header_implies_100_pcs_unit(x)
+                for x in (column_headers or [])[-3:]
+            ):
+                pack_quantity = max(1, int(round(pq_f * 100)))
+            else:
+                pack_quantity = (
+                    int(pq_f) if abs(pq_f - int(pq_f)) < 0.001 else int(round(pq_f))
+                )
+                if pack_quantity < 1:
+                    pack_quantity = 1
 
     if stock is None and raw_stock is None:
-        if texts:
-            tail = texts[-2:]
-            for t in reversed(tail):
-                if not t or t.upper() in ("N/A", "-"):
-                    continue
-                plain_tail = _strip_tags(t)
-                if hopefix_raw_suggests_oos(plain_tail):
-                    stock = 0
-                    raw_stock = plain_tail[:120]
-                    break
-                if re.search(r"\d", t):
-                    raw_stock = t[:120]
-                    digits = re.sub(r"[^\d]", "", t)
-                    if digits:
-                        try:
-                            stock = int(digits)
-                        except ValueError:
-                            pass
-                    break
-            if stock is None and raw_stock is None:
-                for t in reversed(texts):
-                    if not t or not str(t).strip():
-                        continue
-                    plain = _strip_tags(t)
-                    if hopefix_raw_suggests_oos(plain):
-                        stock = 0
-                        raw_stock = plain[:120]
-                        break
+        ls, lr = _hopefix_legacy_stock_from_texts(texts)
+        if ls is not None:
+            stock = ls
+            raw_stock = lr
 
     hopefix_product_id = _extract_product_id(inner)
     return {

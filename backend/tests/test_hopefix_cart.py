@@ -132,7 +132,47 @@ def test_hopefix_wide_row_stock_pack_and_price_100_units():
     assert row["label"] == "M12*40 A2"
 
 
-# HAR www.hopefix3.cz: product_id je v nasledujúcom <tr class="expander-row">, nie v riadku line-*.
+HOPEFIX_B1_ROW = """
+<table>
+<thead><tr>
+<th>DIN</th><th>Registrační číslo</th><th>Rozměr</th><th>ISO</th><th>Materiál</th><th>Vaše číslo</th>
+<th>Stock (100 pcs)</th><th>EUR/100 pcs</th><th>Další naskladnění</th><th>100 pcs Box</th><th>100 pcs Carton</th><th>100 pcs Pallet</th>
+</tr></thead>
+<tbody>
+<tr id="line-D9338810016B1"><td>933</td><td>D9338810016B1</td><td>M10x16 zn</td><td>4017</td><td>8.8</td><td></td>
+<td>44,00</td><td>3,82&nbsp;€</td><td>od 08.06.2026</td><td>2,00</td><td>10,00</td><td>360,00</td></tr>
+</tbody>
+</table>
+"""
+
+
+def test_hopefix_b1_stock_not_pallet_uses_sklad_column():
+    row = find_hopefix_row_in_html(HOPEFIX_B1_ROW, "D9338810016B1")
+    assert row is not None
+    assert row["stock"] == 4400
+    assert row["pack_quantity"] == 200
+    assert row["price_eur"] == pytest.approx(3.82)
+
+
+HOPEFIX_B1_EXTRA_TD = """
+<table>
+<thead><tr>
+<th>DIN</th><th>Registrační číslo</th><th>Rozměr</th><th>ISO</th><th>Materiál</th><th>Vaše číslo</th>
+<th>Stock (100 pcs)</th><th>EUR/100 pcs</th><th>Další naskladnění</th><th>100 pcs Box</th><th>100 pcs Carton</th><th>100 pcs Pallet</th>
+</tr></thead>
+<tbody>
+<tr id="line-D9338810016B1"><td></td><td>933</td><td>D9338810016B1</td><td>M10x16 zn</td><td>4017</td><td>8.8</td><td></td>
+<td>44,00</td><td>3,82&nbsp;€</td><td>od 08.06.2026</td><td>2,00</td><td>10,00</td><td>360,00</td></tr>
+</tbody>
+</table>
+"""
+
+
+def test_hopefix_b1_anchor_align_when_leading_empty_td():
+    row = find_hopefix_row_in_html(HOPEFIX_B1_EXTRA_TD, "D9338810016B1")
+    assert row is not None
+    assert row["stock"] == 4400
+    assert row["pack_quantity"] == 200
 EXPANDER_SNIPPET = """
 <tr id="line-D933A212016"><td>933</td><td>D933A212016</td><td>x</td></tr>
 <tr class="expander-row"><td colspan="14">
