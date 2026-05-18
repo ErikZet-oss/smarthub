@@ -56,6 +56,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { API_PROXY_PREFIX } from "@/lib/api-origin";
+import { readApiJsonOrText } from "@/lib/api-errors";
 import { cn } from "@/lib/utils";
 
 type View =
@@ -3647,7 +3648,23 @@ export default function Home() {
               body: JSON.stringify({ supplier_id: sid, supplier_code: code }),
             },
           );
-          const payload = (await response.json()) as {
+          // Render proxy / worker crash niekedy vráti plain-text „Internal
+          // Server Error" — bežný JSON.parse by to zhodil na hláške
+          // „Unexpected token 'I' …". `readApiJsonOrText` to robí robustne.
+          const parsed = await readApiJsonOrText(response);
+          if (!parsed.ok) {
+            setScrapeByKey((p) => ({
+              ...p,
+              [key]: {
+                loading: false,
+                error: parsed.detail,
+                logged_in: false,
+                login_hint: null,
+              },
+            }));
+            return;
+          }
+          const payload = parsed.data as {
             product_title?: string | null;
             price_eur?: number | null;
             raw_price?: string | null;
@@ -4422,7 +4439,11 @@ export default function Home() {
           inoxmare_referer_path: inoxmareRefererPath?.trim() || null,
         }),
       });
-      const payload = (await response.json()) as { ok?: boolean; detail?: unknown };
+      const parsed = await readApiJsonOrText(response);
+      if (!parsed.ok) {
+        throw new Error(parsed.detail);
+      }
+      const payload = parsed.data as { ok?: boolean; detail?: unknown };
       if (!response.ok) {
         throw new Error(formatApiDetail(payload.detail));
       }

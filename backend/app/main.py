@@ -8,6 +8,9 @@ from dotenv import load_dotenv
 # backend/.env — rovnaký SMARTHUB_AUTH_SECRET ako vo frontend/.env.local
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
+import logging
+import traceback
+
 import jwt
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -29,7 +32,30 @@ from app.services.smarthub_bootstrap import seed_initial_admin_if_empty
 from app.services.company_logos import company_logos_dir
 from app.services.supplier_logos import seed_supplier_logos_from_repo, supplier_logos_dir
 
+_uncaught_error_log = logging.getLogger("smarthub.uncaught")
+
 app = FastAPI(title="Smarthub API")
+
+
+@app.exception_handler(Exception)
+async def _smarthub_unhandled_exception_handler(request: Request, exc: Exception):
+    """Posledná poistka: aj neočakávaná chyba vráti JSON `{"detail": "…"}`.
+
+    Bez tohto middleware (alebo nejaký Render edge layer) niekedy vráti čistý text
+    „Internal Server Error", na čom frontend zlyhá pri `response.json()` s hláškou
+    „Unexpected token 'I' …". Vďaka tomuto handleru sa skutočná chyba dostane k UI.
+    """
+    detail = (str(exc) or exc.__class__.__name__).strip() or "Internal Server Error"
+    _uncaught_error_log.error(
+        "Neočakávaná chyba pri %s %s: %s\n%s",
+        request.method,
+        request.url.path,
+        detail,
+        "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
+    )
+    return JSONResponse({"detail": detail}, status_code=500)
+
+
 # Lokálna sieť (192.168…): inak prehliadač pri fetch z Nextu na IP zobrazí „Failed to fetch“ (CORS).
 app.add_middleware(
     CORSMiddleware,
@@ -63,50 +89,64 @@ app.mount(
 
 @app.middleware("http")
 async def smarthub_bearer_auth(request: Request, call_next):
-    if request.method == "OPTIONS":
-        return await call_next(request)
-    path = request.url.path
-    if not path.startswith("/api"):
-        return await call_next(request)
-    if path in ("/api/health", "/api/auth/smarthub-login"):
-        return await call_next(request)
-    auth = (request.headers.get("authorization") or "").strip()
-    if not auth.lower().startswith("bearer "):
-        return JSONResponse(
-            {
-                "detail": (
-                    "Chýba Authorization: Bearer token. "
-                    "Otvor aplikáciu cez Next.js a prihlás sa."
-                )
-            },
-            status_code=401,
-        )
-    token = auth[7:].strip()
-    secret = os.environ.get("SMARTHUB_AUTH_SECRET", "")
-    if len(secret) < 16:
-        return JSONResponse(
-            {"detail": "Na API nastav SMARTHUB_AUTH_SECRET (min. 16 znakov)."},
-            status_code=500,
-        )
+    # FastAPI exception_handler nepokrýva výnimky v middleware. Wrapneme všetko
+    # do try/except a vrátime JSON, aby UI nedostalo plain-text „Internal Server
+    # Error" (na ktorom by `response.json()` vyhodilo „Unexpected token 'I' …").
     try:
-        payload = jwt.decode(token, secret, algorithms=["HS256"])
-        uid = payload.get("uid")
-        if uid is None:
+        if request.method == "OPTIONS":
+            return await call_next(request)
+        path = request.url.path
+        if not path.startswith("/api"):
+            return await call_next(request)
+        if path in ("/api/health", "/api/auth/smarthub-login"):
+            return await call_next(request)
+        auth = (request.headers.get("authorization") or "").strip()
+        if not auth.lower().startswith("bearer "):
             return JSONResponse(
-                {"detail": "Token bez uid — prihlás sa znova v aplikácii."},
+                {
+                    "detail": (
+                        "Chýba Authorization: Bearer token. "
+                        "Otvor aplikáciu cez Next.js a prihlás sa."
+                    )
+                },
                 status_code=401,
             )
-        request.state.smarthub_user = AuthUserContext(
-            id=int(uid),
-            username=str(payload.get("sub") or ""),
-            is_admin=payload.get("role") == "admin",
+        token = auth[7:].strip()
+        secret = os.environ.get("SMARTHUB_AUTH_SECRET", "")
+        if len(secret) < 16:
+            return JSONResponse(
+                {"detail": "Na API nastav SMARTHUB_AUTH_SECRET (min. 16 znakov)."},
+                status_code=500,
+            )
+        try:
+            payload = jwt.decode(token, secret, algorithms=["HS256"])
+            uid = payload.get("uid")
+            if uid is None:
+                return JSONResponse(
+                    {"detail": "Token bez uid — prihlás sa znova v aplikácii."},
+                    status_code=401,
+                )
+            request.state.smarthub_user = AuthUserContext(
+                id=int(uid),
+                username=str(payload.get("sub") or ""),
+                is_admin=payload.get("role") == "admin",
+            )
+        except jwt.PyJWTError:
+            return JSONResponse(
+                {"detail": "Neplatný alebo expirovaný token."},
+                status_code=401,
+            )
+        return await call_next(request)
+    except Exception as exc:  # pragma: no cover — fallback poistka
+        detail = (str(exc) or exc.__class__.__name__).strip() or "Internal Server Error"
+        _uncaught_error_log.error(
+            "Neočakávaná chyba v middleware pri %s %s: %s\n%s",
+            request.method,
+            request.url.path,
+            detail,
+            "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
         )
-    except jwt.PyJWTError:
-        return JSONResponse(
-            {"detail": "Neplatný alebo expirovaný token."},
-            status_code=401,
-        )
-    return await call_next(request)
+        return JSONResponse({"detail": detail}, status_code=500)
 
 
 @app.on_event("startup")

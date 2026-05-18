@@ -44,3 +44,41 @@ export function formatApiFetchError(error: unknown, apiBase: string): string {
   }
   return error instanceof Error ? error.message : "Neznáma chyba.";
 }
+
+/**
+ * Robustne prečíta odpoveď zo servera ako JSON. Ak telo nie je platný JSON
+ * (napr. Render proxy alebo crash workera vráti plain-text „Internal Server
+ * Error"), vráti syntetický objekt `{ detail }` so skrátenou textovou
+ * správou, aby front-end nepadol s hláškou „Unexpected token 'I' …".
+ *
+ * Telo sa číta práve raz — funkcia konzumuje response.body.
+ */
+export async function readApiJsonOrText(
+  response: Response,
+): Promise<{ ok: true; data: unknown } | { ok: false; detail: string }> {
+  let raw = "";
+  try {
+    raw = await response.text();
+  } catch {
+    return {
+      ok: false,
+      detail: `HTTP ${response.status} ${response.statusText || ""}`.trim(),
+    };
+  }
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return {
+      ok: false,
+      detail: `HTTP ${response.status} ${response.statusText || ""}`.trim(),
+    };
+  }
+  try {
+    return { ok: true, data: JSON.parse(trimmed) };
+  } catch {
+    const short = trimmed.length > 300 ? trimmed.slice(0, 300) + "…" : trimmed;
+    return {
+      ok: false,
+      detail: `HTTP ${response.status}: ${short}`,
+    };
+  }
+}
