@@ -1357,6 +1357,7 @@ type ProductSupplierExpandedTableRowProps = {
     mekrsProductVariantId?: string | null,
     hopefixProductId?: string | null,
     hopefixPackageType?: string | null,
+    hopefixRefererPath?: string | null,
     hasplVariantCode?: string | null,
     inoxmareProductId?: string | null,
     inoxmareRefererPath?: string | null,
