@@ -239,6 +239,24 @@ def _session_reuse_enabled() -> bool:
     return v in ("1", "true", "yes", "on")
 
 
+def _playwright_fallback_disabled() -> bool:
+    """Render (a iné containery bez Chromia) — Playwright fallback nemá zmysel.
+
+    Bez nainštalovaných Playwright browser binárok `p.chromium.launch(...)` buď
+    okamžite vyhodí výnimku, alebo bude visieť až do timeout-u Render proxy,
+    ktorý potom vráti plain-text „Internal Server Error" namiesto poriadneho
+    JSON-u. Pri tomto flagu HTTP-only dodávatelia (Fabory/Hopefix/Inoxmare/
+    Schaef/Halfmann/Argip/Schachermayer/Valenta/Mekrs/BMKco) vyhodia chybu z
+    HTTP klienta priamo, namiesto cesty cez Playwright.
+
+    Aktivácia: `DISABLE_PLAYWRIGHT_FALLBACK=1` alebo automaticky pri `RENDER=true`.
+    """
+    if (os.environ.get("RENDER", "").strip().lower() in ("1", "true", "yes")):
+        return True
+    v = os.environ.get("DISABLE_PLAYWRIGHT_FALLBACK", "").strip().lower()
+    return v in ("1", "true", "yes", "on")
+
+
 # ------------------------------------------------------------------
 # Per-process HTTP supplier client pool
 # ------------------------------------------------------------------
@@ -6505,8 +6523,19 @@ class ScraperService:
                     f"get_supplier_data done (Hopefix HTTP): {hf}",
                 )
                 return await _maybe_cache(hf)
+            except ScraperProductNotFoundError:
+                raise
             except Exception as exc:
                 dev_run_log_exception(run_label, exc)
+                if _playwright_fallback_disabled():
+                    _log(
+                        run_label,
+                        supplier,
+                        run_id,
+                        f"Hopefix HTTP zlyhalo (Playwright fallback vypnutý): {exc}",
+                        "error",
+                    )
+                    raise RuntimeError(f"Hopefix HTTP zlyhalo: {exc}") from exc
                 _log(
                     run_label,
                     supplier,
@@ -6531,8 +6560,19 @@ class ScraperService:
                     f"get_supplier_data done (Fabory HTTP): {fb}",
                 )
                 return await _maybe_cache(fb)
+            except ScraperProductNotFoundError:
+                raise
             except Exception as exc:
                 dev_run_log_exception(run_label, exc)
+                if _playwright_fallback_disabled():
+                    _log(
+                        run_label,
+                        supplier,
+                        run_id,
+                        f"Fabory HTTP zlyhalo (Playwright fallback vypnutý): {exc}",
+                        "error",
+                    )
+                    raise RuntimeError(f"Fabory HTTP zlyhalo: {exc}") from exc
                 _log(
                     run_label,
                     supplier,
@@ -6574,8 +6614,19 @@ class ScraperService:
                     f"get_supplier_data done (Haspl HTTP): {hp}",
                 )
                 return hp
+            except ScraperProductNotFoundError:
+                raise
             except Exception as exc:
                 dev_run_log_exception(run_label, exc)
+                if _playwright_fallback_disabled():
+                    _log(
+                        run_label,
+                        supplier,
+                        run_id,
+                        f"Haspl HTTP zlyhalo (Playwright fallback vypnutý): {exc}",
+                        "error",
+                    )
+                    raise RuntimeError(f"Haspl HTTP zlyhalo: {exc}") from exc
                 _log(
                     run_label,
                     supplier,
@@ -6599,8 +6650,19 @@ class ScraperService:
                     f"get_supplier_data done (BMCo HTTP): {bm}",
                 )
                 return await _maybe_cache(bm)
+            except ScraperProductNotFoundError:
+                raise
             except Exception as exc:
                 dev_run_log_exception(run_label, exc)
+                if _playwright_fallback_disabled():
+                    _log(
+                        run_label,
+                        supplier,
+                        run_id,
+                        f"BMCo HTTP zlyhalo (Playwright fallback vypnutý): {exc}",
+                        "error",
+                    )
+                    raise RuntimeError(f"BMCo HTTP zlyhalo: {exc}") from exc
                 _log(
                     run_label,
                     supplier,
@@ -6624,8 +6686,19 @@ class ScraperService:
                     f"get_supplier_data done (Halfmann HTTP): {hfm}",
                 )
                 return await _maybe_cache(hfm)
+            except ScraperProductNotFoundError:
+                raise
             except Exception as exc:
                 dev_run_log_exception(run_label, exc)
+                if _playwright_fallback_disabled():
+                    _log(
+                        run_label,
+                        supplier,
+                        run_id,
+                        f"Halfmann HTTP zlyhalo (Playwright fallback vypnutý): {exc}",
+                        "error",
+                    )
+                    raise RuntimeError(f"Halfmann HTTP zlyhalo: {exc}") from exc
                 _log(
                     run_label,
                     supplier,
@@ -6650,8 +6723,19 @@ class ScraperService:
                     f"get_supplier_data done (Inoxmare HTTP): {ix}",
                 )
                 return await _maybe_cache(ix)
+            except ScraperProductNotFoundError:
+                raise
             except Exception as exc:
                 dev_run_log_exception(run_label, exc)
+                if _playwright_fallback_disabled():
+                    _log(
+                        run_label,
+                        supplier,
+                        run_id,
+                        f"Inoxmare HTTP zlyhalo (Playwright fallback vypnutý): {exc}",
+                        "error",
+                    )
+                    raise RuntimeError(f"Inoxmare HTTP zlyhalo: {exc}") from exc
                 _log(
                     run_label,
                     supplier,
@@ -6758,8 +6842,19 @@ class ScraperService:
                     f"get_supplier_data done (HTTP): {data_http}",
                 )
                 return await _maybe_cache(data_http)
+            except ScraperProductNotFoundError:
+                raise
             except Exception as exc:
                 dev_run_log_exception(run_label, exc)
+                if _playwright_fallback_disabled():
+                    _log(
+                        run_label,
+                        supplier,
+                        run_id,
+                        f"Mekrs HTTP zlyhalo (Playwright fallback vypnutý): {exc}",
+                        "error",
+                    )
+                    raise RuntimeError(f"Mekrs HTTP zlyhalo: {exc}") from exc
                 _log(
                     run_label,
                     supplier,
@@ -6769,6 +6864,15 @@ class ScraperService:
                 )
 
         async def _playwright_flow() -> dict[str, Any]:
+            if _playwright_fallback_disabled():
+                # Render (a iné minimal Python containery) nemá nainštalované
+                # browser binárky — `p.chromium.launch(...)` by skončilo na
+                # Executable doesn't exist alebo by visel až do timeout-u proxy.
+                raise RuntimeError(
+                    "Playwright fallback je vypnutý "
+                    "(env DISABLE_PLAYWRIGHT_FALLBACK / RENDER) a HTTP cesta "
+                    f"pre {supplier.name!r} zlyhala — pozri vyššie."
+                )
             try:
                 async with async_playwright() as p:
                     browser = await p.chromium.launch(
