@@ -841,7 +841,8 @@ function mekrsIsOutOfStock(scrape: SupplierScrapeState | undefined): boolean {
   if (
     raw.includes("není skladem") ||
     raw.includes("neni skladem") ||
-    raw.includes("nie je skladom")
+    raw.includes("nie je skladom") ||
+    raw.includes("nie je na sklade")
   ) {
     return true;
   }
@@ -865,6 +866,7 @@ function hopefixIsOutOfStock(scrape: SupplierScrapeState | undefined): boolean {
       raw.includes("není skladem") ||
       raw.includes("neni skladem") ||
       raw.includes("nie je skladom") ||
+      raw.includes("nie je na sklade") ||
       raw.includes("vyprodáno") ||
       raw.includes("vyprodano") ||
       raw.includes("není na sklad") ||
@@ -958,7 +960,7 @@ function faboryStockDisplayClass(displayText: string): string | undefined {
   if (!s) {
     return undefined;
   }
-  if (s.includes("nie je skladom")) {
+  if (s.includes("nie je skladom") || s.includes("nie je na sklade")) {
     return "font-medium text-red-600";
   }
   if (s.includes("čiastočne skladom")) {
@@ -1714,12 +1716,17 @@ function ProductSupplierExpandedTableRow({
                                             )
                                           : undefined;
                                       const stockSummaryText = offerStockUiBlocked
-                                        ? "Nie je skladom"
+                                        ? liveScrapeMissingOffer
+                                          ? "Ponuka sa nenašla"
+                                          : "Nie je na sklade"
                                         : rowStockText;
                                       const stockSummaryClass = cn(
                                         faboryStockCls,
-                                        offerStockUiBlocked &&
-                                          "font-medium text-red-600",
+                                        offerLiveOutOfStock &&
+                                          "font-semibold text-red-600",
+                                        liveScrapeMissingOffer &&
+                                          !offerLiveOutOfStock &&
+                                          "font-medium text-amber-800",
                                       );
                                       const rowPack =
                                         activePv != null &&
@@ -2363,13 +2370,41 @@ function ProductSupplierExpandedTableRow({
                                               ) : null}
                                             </div>
                                             <div className="flex w-full flex-col gap-1 lg:max-w-[min(100%,20rem)] lg:shrink-0 lg:items-stretch">
-                                              <div className="rounded-md border border-slate-200/80 bg-white/95 p-1 shadow-sm ring-1 ring-slate-100/60 sm:p-2">
+                                              <div
+                                                className={cn(
+                                                  "rounded-md border bg-white/95 p-1 shadow-sm ring-1 sm:p-2",
+                                                  offerLiveOutOfStock
+                                                    ? "border-red-200/90 bg-red-50/45 ring-red-100/70"
+                                                    : "border-slate-200/80 ring-slate-100/60",
+                                                )}
+                                              >
                                               <div className="grid grid-cols-1 gap-1 text-[10px] sm:flex sm:flex-nowrap sm:items-center sm:justify-between sm:gap-x-2 sm:gap-y-0 sm:text-[13px]">
-                                                <div className="flex min-w-0 items-center justify-between gap-x-2 rounded-md border border-slate-100 bg-slate-50/70 px-1.5 py-1 text-left sm:flex-1 sm:flex-wrap sm:justify-start sm:gap-x-1 sm:rounded-none sm:border-0 sm:bg-transparent sm:px-0 sm:py-0">
-                                                  <span className="mr-0.5 text-[8px] font-semibold uppercase tracking-wider text-slate-500 sm:mr-1 sm:text-[10px]">
+                                                <div
+                                                  className={cn(
+                                                    "flex min-w-0 items-center justify-between gap-x-2 rounded-md border px-1.5 py-1 text-left sm:flex-1 sm:flex-wrap sm:justify-start sm:gap-x-1 sm:rounded-none sm:border-0 sm:px-0 sm:py-0",
+                                                    offerLiveOutOfStock
+                                                      ? "border-red-100/90 bg-red-50/60 sm:border-0 sm:bg-transparent"
+                                                      : "border-slate-100 bg-slate-50/70 sm:border-0 sm:bg-transparent",
+                                                  )}
+                                                >
+                                                  <span
+                                                    className={cn(
+                                                      "mr-0.5 text-[8px] font-semibold uppercase tracking-wider sm:mr-1 sm:text-[10px]",
+                                                      offerLiveOutOfStock
+                                                        ? "text-red-600"
+                                                        : "text-slate-500",
+                                                    )}
+                                                  >
                                                     Cena
                                                   </span>
-                                                  <span className="tabular-nums text-slate-900">
+                                                  <span
+                                                    className={cn(
+                                                      "tabular-nums",
+                                                      offerLiveOutOfStock
+                                                        ? "font-medium text-red-600"
+                                                        : "text-slate-900",
+                                                    )}
+                                                  >
                                                     {!scraperApplicable ? (
                                                       <>
                                                         {rowPrice != null &&
@@ -2379,7 +2414,14 @@ function ProductSupplierExpandedTableRow({
                                                               rowPrice,
                                                             )}{" "}
                                                             {rowPriceSymbol}
-                                                            <span className="text-[9px] font-normal text-slate-500 sm:text-[11px]">
+                                                            <span
+                                                              className={cn(
+                                                                "text-[9px] font-normal sm:text-[11px]",
+                                                                offerLiveOutOfStock
+                                                                  ? "text-red-500"
+                                                                  : "text-slate-500",
+                                                              )}
+                                                            >
                                                               {rowPriceSuffix}
                                                             </span>
                                                           </>
@@ -2398,7 +2440,14 @@ function ProductSupplierExpandedTableRow({
                                                           "—"
                                                         )}{" "}
                                                         {rowPriceSymbol}
-                                                        <span className="text-[9px] font-normal text-slate-500 sm:text-[11px]">
+                                                        <span
+                                                          className={cn(
+                                                            "text-[9px] font-normal sm:text-[11px]",
+                                                            offerLiveOutOfStock
+                                                              ? "text-red-500"
+                                                              : "text-slate-500",
+                                                          )}
+                                                        >
                                                           {rowPriceSuffix}
                                                         </span>
                                                       </>
@@ -2410,7 +2459,8 @@ function ProductSupplierExpandedTableRow({
                                                     <span className="ml-0.5 text-[9px] text-slate-400 sm:ml-1 sm:text-xs">
                                                       načítavam…
                                                     </span>
-                                                  ) : rowPriceLive ? (
+                                                  ) : rowPriceLive &&
+                                                    !offerLiveOutOfStock ? (
                                                     <span
                                                       className="ml-0.5 inline-flex shrink-0 items-center align-middle"
                                                       title="Živá cena z e-shopu"
@@ -2428,11 +2478,31 @@ function ProductSupplierExpandedTableRow({
                                                     </span>
                                                   )}
                                                 </div>
-                                                <div className="flex min-w-0 items-center justify-between gap-x-2 rounded-md border border-slate-100 bg-slate-50/70 px-1.5 py-1 text-right sm:flex-1 sm:flex-wrap sm:justify-end sm:gap-x-1 sm:rounded-none sm:border-0 sm:bg-transparent sm:px-0 sm:py-0">
-                                                    <span className="mr-0.5 text-[8px] font-semibold uppercase tracking-wider text-slate-500 sm:mr-1 sm:text-[10px]">
+                                                <div
+                                                  className={cn(
+                                                    "flex min-w-0 items-center justify-between gap-x-2 rounded-md border px-1.5 py-1 text-right sm:flex-1 sm:flex-wrap sm:justify-end sm:gap-x-1 sm:rounded-none sm:border-0 sm:px-0 sm:py-0",
+                                                    offerLiveOutOfStock
+                                                      ? "border-red-100/90 bg-red-50/60 sm:border-0 sm:bg-transparent"
+                                                      : "border-slate-100 bg-slate-50/70 sm:border-0 sm:bg-transparent",
+                                                  )}
+                                                >
+                                                    <span
+                                                      className={cn(
+                                                        "mr-0.5 text-[8px] font-semibold uppercase tracking-wider sm:mr-1 sm:text-[10px]",
+                                                        offerLiveOutOfStock
+                                                          ? "text-red-600"
+                                                          : "text-slate-500",
+                                                      )}
+                                                    >
                                                     Sklad
                                                   </span>
-                                                  <span className="text-slate-900">
+                                                  <span
+                                                    className={cn(
+                                                      offerLiveOutOfStock
+                                                        ? "font-medium text-red-600"
+                                                        : "text-slate-900",
+                                                    )}
+                                                  >
                                                     {!scraperApplicable ? (
                                                       stockSummaryClass ? (
                                                         <span
@@ -2703,15 +2773,31 @@ function ProductSupplierExpandedTableRow({
                                                     <Button
                                                       type="button"
                                                       size="sm"
-                                                      variant="default"
+                                                      variant={
+                                                        cartAddSuccessByKey[
+                                                          cartKey
+                                                        ]
+                                                          ? "default"
+                                                          : offerStockUiBlocked
+                                                            ? "secondary"
+                                                            : "default"
+                                                      }
                                                       disabled={Boolean(
                                                         cartFeedback[cartKey] ||
                                                           offerStockUiBlocked,
                                                       )}
                                                       className={cn(
-                                                        "h-8 w-full shrink-0 gap-1 px-2 text-xs shadow-sm shadow-sky-600/15 sm:h-9 sm:w-auto sm:px-3 sm:text-sm",
+                                                        "h-8 w-full shrink-0 gap-1 px-2 text-xs shadow-sm sm:h-9 sm:w-auto sm:px-3 sm:text-sm",
+                                                        !offerStockUiBlocked &&
+                                                          !cartAddSuccessByKey[
+                                                            cartKey
+                                                          ] &&
+                                                          "shadow-sky-600/15",
                                                         offerStockUiBlocked &&
-                                                          "opacity-60",
+                                                          !cartAddSuccessByKey[
+                                                            cartKey
+                                                          ] &&
+                                                          "border border-slate-300 bg-slate-300 text-slate-700 shadow-none hover:bg-slate-300 disabled:cursor-not-allowed disabled:opacity-100",
                                                         cartAddSuccessByKey[cartKey] &&
                                                           "border border-emerald-600 bg-emerald-50 text-emerald-900 shadow-sm hover:bg-emerald-100",
                                                       )}
@@ -2834,7 +2920,13 @@ function ProductSupplierExpandedTableRow({
                                                           strokeWidth={2.5}
                                                         />
                                                       ) : (
-                                                        <ShoppingCart className="h-4 w-4" />
+                                                        <ShoppingCart
+                                                          className={cn(
+                                                            "h-4 w-4",
+                                                            offerStockUiBlocked &&
+                                                              "text-slate-600",
+                                                          )}
+                                                        />
                                                       )}
                                                       <span>
                                                         {cartAddSuccessByKey[cartKey]
