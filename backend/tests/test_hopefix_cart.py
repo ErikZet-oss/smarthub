@@ -7,6 +7,7 @@ from app.services.hopefix_http_client import (
     find_hopefix_row_in_html,
     hopefix_norm_code,
     hopefix_parse_cart_html,
+    hopefix_referer_path_from_catalog_url,
     hopefix_row_has_live_offer_cells,
     hopefix_row_is_guest_price_row,
     hopefix_row_likely_no_cart_form,
@@ -287,6 +288,20 @@ def test_hopefix_pick_better_keeps_priced_row_even_if_login_gate_flag():
     }
     assert hopefix_row_pick_better(empty, priced_gate) == priced_gate
     assert hopefix_row_pick_better(priced_gate, empty) == priced_gate
+
+
+def test_hopefix_referer_path_strips_host_keeps_query():
+    assert (
+        hopefix_referer_path_from_catalog_url(
+            "https://www.hopefix.cz/sortiment/foo?_ref=ABC"
+        )
+        == "/sortiment/foo?_ref=ABC"
+    )
+    assert (
+        hopefix_referer_path_from_catalog_url("/sortiment/pevnost?_ref=X")
+        == "/sortiment/pevnost?_ref=X"
+    )
+    assert hopefix_referer_path_from_catalog_url("") == "/"
 
 
 def test_hopefix_narrow_catalog_prefers_pevnost_88_for_hex_8_8():

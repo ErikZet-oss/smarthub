@@ -733,6 +733,23 @@ def build_hopefix_catalog_url(template: str, product_code: str) -> str:
     return tmpl
 
 
+def hopefix_referer_path_from_catalog_url(url_or_path: str) -> str:
+    """Relatívna cesta + optional query pre hlavičku ``Referer`` pri ``POST /api/add_to_cart``."""
+    raw = (url_or_path or "").strip()
+    if not raw:
+        return "/"
+    if raw.startswith("http://") or raw.startswith("https://"):
+        p = urlparse(raw)
+    else:
+        if not raw.startswith("/"):
+            raw = "/" + raw.lstrip("/")
+        p = urlparse(f"https://placeholder.invalid{raw}")
+    path = p.path or "/"
+    if p.query:
+        return f"{path}?{p.query}"
+    return path
+
+
 class HopefixHttpClient:
     """Jedna async session: login, GET stránky, POST add_to_cart."""
 

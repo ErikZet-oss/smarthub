@@ -767,6 +767,8 @@ type PackagingVariantRow = {
   /** Hopefix HTTP: product_id pre POST /api/add_to_cart */
   hopefix_product_id?: string | null;
   hopefix_package_type?: string | null;
+  /** Hopefix HTTP: cesta katalógu (Referer), zvyčajne z packaging_variants po scrape */
+  hopefix_referer_path?: string | null;
   /** Haspl HTTP: Sylius variant ``code`` pre POST …/orders/…/items */
   haspl_variant_code?: string | null;
   /** Inoxmare HTTP: Magento ``product`` ID a relatívna cesta PDP. */
@@ -3018,6 +3020,12 @@ function ProductSupplierExpandedTableRow({
                                                             ? (activePv.hopefix_package_type ??
                                                               null)
                                                             : null,
+                                                          supplierNameIsHopefix(
+                                                            offer.supplier,
+                                                          ) && activePv
+                                                            ? (activePv.hopefix_referer_path ??
+                                                              null)
+                                                            : null,
                                                           hasplHttpVariants &&
                                                             activePv
                                                             ? (activePv.haspl_variant_code ??
@@ -4603,6 +4611,7 @@ export default function Home() {
     mekrsProductVariantId: string | null = null,
     hopefixProductId: string | null = null,
     hopefixPackageType: string | null = null,
+    hopefixRefererPath: string | null = null,
     hasplVariantCode: string | null = null,
     inoxmareProductId: string | null = null,
     inoxmareRefererPath: string | null = null,
@@ -4648,6 +4657,7 @@ export default function Home() {
           mekrs_product_variant_id: mekrsProductVariantId?.trim() || null,
           hopefix_product_id: hopefixProductId?.trim() || null,
           hopefix_package_type: hopefixPackageType?.trim() || null,
+          hopefix_referer_path: hopefixRefererPath?.trim() || null,
           haspl_variant_code: hasplVariantCode?.trim() || null,
           inoxmare_product_id: inoxmareProductId?.trim() || null,
           inoxmare_referer_path: inoxmareRefererPath?.trim() || null,

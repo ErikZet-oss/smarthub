@@ -29,6 +29,7 @@ from app.services.hopefix_http_client import (
     hopefix_fetch_html_anonymous,
     hopefix_norm_code,
     hopefix_parse_cart_html,
+    hopefix_referer_path_from_catalog_url,
     hopefix_row_pick_better,
     hopefix_raw_suggests_oos,
     hopefix_row_has_live_offer_cells,
@@ -1332,6 +1333,38 @@ def _hopefix_fallback_category_segments(product_code: str) -> list[str]:
     return all_seg
 
 
+def _hopefix_row_pick_with_path(
+    cur: Optional[dict[str, Any]],
+    cur_path: Optional[str],
+    url: str,
+    cand: Optional[dict[str, Any]],
+) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+    """Ako ``hopefix_row_pick_better``, ale pri výbere nového riadku si pamätá URL zdroja (Referer pre košík)."""
+    nxt = hopefix_row_pick_better(cur, cand)
+    if nxt is cur:
+        return cur, cur_path
+    if nxt is cand:
+        return nxt, hopefix_referer_path_from_catalog_url(url)
+    return nxt, cur_path
+
+
+def _hopefix_fallback_cart_referer_path(product_code: str, config: ScraperConfig) -> str:
+    """Keď v scrape nie je známa presná stránka — šablóna, inak prvá úzka cesta /sortiment/…"""
+    enc = quote((product_code or "").strip(), safe=".-_~")
+    tmpl = (config.hopefix_catalog_url_template or "").strip()
+    if tmpl:
+        try:
+            return hopefix_referer_path_from_catalog_url(
+                build_hopefix_catalog_url(tmpl, product_code)
+            )
+        except ValueError:
+            pass
+    rels = _hopefix_narrow_catalog_paths(product_code, enc)
+    if rels:
+        return hopefix_referer_path_from_catalog_url(rels[0])
+    return "/sortiment/srouby"
+
+
 async def _hopefix_try_catalog_categories_with_hash(
     page: Page,
     product_code: str,
@@ -2143,6 +2176,7 @@ async def _hopefix_get_supplier_data_via_http(
         _hopefix_factory,
         _hopefix_login,
     )
+    catalog_source_path: Optional[str] = None
     async with _contextlib.nullcontext(pooled_client) as client:
 
         async def _fetch_row(u: str) -> tuple[str, int, Optional[dict[str, Any]]]:
@@ -2153,10 +2187,12 @@ async def _hopefix_get_supplier_data_via_http(
             return u, ln, r
 
         async def _search_b2b_catalog() -> None:
-            nonlocal row, last_html_len
+            nonlocal row, last_html_len, catalog_source_path
             row = None
+            win_path: Optional[str] = None
             try_urls, seen_u = _build_hopefix_try_urls()
             cur: Optional[dict[str, Any]] = None
+            cur_path: Optional[str] = None
 
             if len(try_urls) <= 1:
                 for attempt in try_urls:
@@ -2167,7 +2203,9 @@ async def _hopefix_get_supplier_data_via_http(
                         f"Hopefix HTTP: GET katalóg {attempt!r}",
                     )
                     _, last_html_len, r = await _fetch_row(attempt)
-                    cur = hopefix_row_pick_better(cur, r)
+                    cur, cur_path = _hopefix_row_pick_with_path(
+                        cur, cur_path, attempt, r
+                    )
                     if hopefix_row_has_live_offer_cells(cur):
                         break
             elif try_urls:
@@ -2180,8 +2218,9 @@ async def _hopefix_get_supplier_data_via_http(
                 packed = await asyncio.gather(*[_fetch_row(u) for u in try_urls])
                 for _url, ln, r in packed:
                     last_html_len = max(last_html_len, ln)
-                    cur = hopefix_row_pick_better(cur, r)
+                    cur, cur_path = _hopefix_row_pick_with_path(cur, cur_path, _url, r)
             row = cur
+            win_path = cur_path
 
             if try_urls and not hopefix_row_has_live_offer_cells(row):
                 anchored = _hopefix_url_with_row_anchor(try_urls[-1], key)
@@ -2197,7 +2236,7 @@ async def _hopefix_get_supplier_data_via_http(
                     last_html_len = len(html or "")
                     _note_response_body(html)
                     r = find_hopefix_row_in_html(html, code)
-                    row = hopefix_row_pick_better(row, r)
+                    row, win_path = _hopefix_row_pick_with_path(row, win_path, anchored, r)
 
             if not hopefix_row_has_live_offer_cells(row):
                 # Úzka podkategória v šablóne často obsahuje len časť riadkov; veľká /sortiment/<seg>
@@ -2251,7 +2290,10 @@ async def _hopefix_get_supplier_data_via_http(
                             )
                             continue
                         if r:
-                            row = hopefix_row_pick_better(row, r)
+                            row, win_path = _hopefix_row_pick_with_path(
+                                row, win_path, rel, r
+                            )
+            catalog_source_path = win_path
 
         await _search_b2b_catalog()
         need_reauth = row is None or hopefix_row_is_guest_price_row(row)
@@ -2306,6 +2348,9 @@ async def _hopefix_get_supplier_data_via_http(
                 row = find_hopefix_row_in_html(html_pub, code)
                 if row:
                     anonymous_fallback = True
+                    catalog_source_path = hopefix_referer_path_from_catalog_url(
+                        pub_u
+                    )
                     _log(
                         run_label,
                         supplier,
@@ -2349,6 +2394,7 @@ async def _hopefix_get_supplier_data_via_http(
     pq = row.get("pack_quantity")
     pack_q = int(pq) if isinstance(pq, int) and pq >= 1 else 1
     hopefix_id = row.get("hopefix_product_id")
+    hf_ref = catalog_source_path or _hopefix_fallback_cart_referer_path(code, config)
     pv: dict[str, Any] = {
         "label": label,
         "pack_quantity": pack_q,
@@ -2358,6 +2404,7 @@ async def _hopefix_get_supplier_data_via_http(
         "raw_stock": row.get("raw_stock"),
         "hopefix_product_id": hopefix_id,
         "hopefix_package_type": pkg_type,
+        "hopefix_referer_path": hf_ref,
     }
     packaging_variants = [pv]
     data: dict[str, Any] = {
@@ -2371,6 +2418,7 @@ async def _hopefix_get_supplier_data_via_http(
         "logged_in": True,
         "hopefix_via_http": True,
         "hopefix_public_catalog_fallback": anonymous_fallback,
+        "hopefix_referer_path": hf_ref,
     }
     if data.get("price_eur") is None and pv.get("price_eur") is not None:
         data["price_eur"] = pv.get("price_eur")
@@ -7356,6 +7404,7 @@ class ScraperService:
         mekrs_product_variant_id: Optional[str] = None,
         hopefix_product_id: Optional[str] = None,
         hopefix_package_type: Optional[str] = None,
+        hopefix_referer_path: Optional[str] = None,
         haspl_variant_code: Optional[str] = None,
         inoxmare_product_id: Optional[str] = None,
         inoxmare_referer_path: Optional[str] = None,
@@ -7423,14 +7472,12 @@ class ScraperService:
             code_hf = (product_code or "").strip()
             if not code_hf:
                 raise ValueError("Prázdny kód produktu.")
-            cat_url = build_hopefix_catalog_url(
-                config.hopefix_catalog_url_template or "", code_hf
-            )
-            ref_path = urlparse(cat_url).path or "/"
+            ref_path = (hopefix_referer_path or "").strip()
             pid_hf = (hopefix_product_id or "").strip()
             pkg_hf = (hopefix_package_type or "").strip() or (
                 (config.hopefix_default_package_type or "box").strip() or "box"
             )
+            row_hf: Optional[dict[str, Any]] = None
             if not pid_hf:
                 data_hf = await _hopefix_get_supplier_data_via_http(
                     supplier,
@@ -7455,6 +7502,10 @@ class ScraperService:
                 p2 = str(row_hf.get("hopefix_package_type") or "").strip()
                 if p2:
                     pkg_hf = p2
+            if not ref_path and row_hf is not None:
+                ref_path = str(row_hf.get("hopefix_referer_path") or "").strip()
+            if not ref_path:
+                ref_path = _hopefix_fallback_cart_referer_path(code_hf, config)
             if not pid_hf:
                 raise RuntimeError(
                     "Hopefix: chýba product_id (v HTML riadku alebo po rozbalení) — bez neho API košík nepridá."
