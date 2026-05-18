@@ -24,13 +24,12 @@ from app.models.entities import Supplier
 from app.services.hopefix_http_client import (
     HopefixHttpClient,
     build_hopefix_catalog_url,
-    find_hopefix_row,
+    find_hopefix_row_in_html,
     hopefix_cart_url,
     hopefix_norm_code,
     hopefix_parse_cart_html,
     hopefix_raw_suggests_oos,
     hopefix_row_is_oos,
-    parse_hopefix_rows,
 )
 from app.services.bmkco_http_client import (
     BmkcoHttpClient,
@@ -2129,7 +2128,7 @@ async def _hopefix_get_supplier_data_via_http(
         async def _fetch_row(u: str) -> tuple[str, int, Optional[dict[str, Any]]]:
             html = await client.get_text(u)
             ln = len(html or "")
-            r = find_hopefix_row(parse_hopefix_rows(html), code)
+            r = find_hopefix_row_in_html(html, code)
             return u, ln, r
 
         if len(try_urls) <= 1:
@@ -2167,8 +2166,7 @@ async def _hopefix_get_supplier_data_via_http(
                 )
                 html = await client.get_text(anchored)
                 last_html_len = len(html or "")
-                rows = parse_hopefix_rows(html)
-                row = find_hopefix_row(rows, code)
+                row = find_hopefix_row_in_html(html, code)
         if not row:
             # Úzka podkategória v šablóne často obsahuje len časť riadkov; veľká /sortiment/<seg>
             # (rovnaký fallback ako Playwright) má kompletnú tabuľku. Fragment #kód sa na server neposiela.
@@ -2192,7 +2190,7 @@ async def _hopefix_get_supplier_data_via_http(
                 async def _fetch_fallback(rel: str) -> tuple[str, Optional[dict[str, Any]], int, Optional[str]]:
                     try:
                         html_fb = await client.get_text(rel)
-                        return rel, find_hopefix_row(parse_hopefix_rows(html_fb), code), len(html_fb or ""), None
+                        return rel, find_hopefix_row_in_html(html_fb, code), len(html_fb or ""), None
                     except Exception as exc:
                         return rel, None, 0, str(exc)
 

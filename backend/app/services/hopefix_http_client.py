@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from typing import Any, Optional
 from urllib.parse import quote, urlparse
 
@@ -22,7 +23,10 @@ DEFAULT_UA = (
 
 
 def hopefix_norm_code(text: str) -> str:
-    t = (text or "").strip().upper().replace("\xa0", "")
+    """Kód z Excel/URL zjednotí (NBSP, zero-width, Unicode kompatibilné tvary)."""
+    t = unicodedata.normalize("NFKC", (text or "").strip())
+    t = t.upper().replace("\xa0", "")
+    t = re.sub(r"[\u200b-\u200f\ufeff\u2060]", "", t)
     t = re.sub(r"\s+", "", t)
     return t
 
@@ -118,6 +122,78 @@ def _extract_product_id(row_inner: str) -> Optional[str]:
     return None
 
 
+def _hopefix_row_dict_from_line_inner(line_key: str, inner: str) -> dict[str, Any]:
+    """Jeden riadok katalógovej tabuľky z vnútra <tr>… (bez obálky <tr>)."""
+    tds = re.findall(r"<td[^>]*>(.*?)</td>", inner, re.I | re.DOTALL)
+    texts = [_strip_tags(td) for td in tds]
+    product_nr = hopefix_norm_code(line_key)
+    if not product_nr and len(texts) > 1:
+        product_nr = hopefix_norm_code(texts[1])
+    label = texts[2] if len(texts) > 2 else None
+
+    price_eur: Optional[float] = None
+    raw_price: Optional[str] = None
+    for td_html, plain in zip(tds, texts):
+        if "prihlaseni" in td_html.lower():
+            continue
+        pe = _parse_eur_cell(plain)
+        if pe is not None:
+            price_eur = pe
+            raw_price = plain.strip()[:120]
+            break
+
+    pack_quantity: Optional[int] = None
+    if len(texts) >= 3:
+        pq_f = _cz_float(texts[-3])
+        if pq_f is not None and pq_f > 0:
+            pack_quantity = int(pq_f) if abs(pq_f - int(pq_f)) < 0.001 else int(round(pq_f))
+            if pack_quantity < 1:
+                pack_quantity = 1
+
+    stock: Optional[int] = None
+    raw_stock: Optional[str] = None
+    if texts:
+        tail = texts[-2:]
+        for t in reversed(tail):
+            if not t or t.upper() in ("N/A", "-"):
+                continue
+            plain_tail = _strip_tags(t)
+            if hopefix_raw_suggests_oos(plain_tail):
+                stock = 0
+                raw_stock = plain_tail[:120]
+                break
+            if re.search(r"\d", t):
+                raw_stock = t[:120]
+                digits = re.sub(r"[^\d]", "", t)
+                if digits:
+                    try:
+                        stock = int(digits)
+                    except ValueError:
+                        pass
+                break
+        if stock is None and raw_stock is None:
+            for t in reversed(texts):
+                if not t or not str(t).strip():
+                    continue
+                plain = _strip_tags(t)
+                if hopefix_raw_suggests_oos(plain):
+                    stock = 0
+                    raw_stock = plain[:120]
+                    break
+
+    hopefix_product_id = _extract_product_id(inner)
+    return {
+        "product_nr": product_nr,
+        "hopefix_product_id": hopefix_product_id,
+        "label": label,
+        "price_eur": price_eur,
+        "raw_price": raw_price,
+        "pack_quantity": pack_quantity,
+        "stock": stock,
+        "raw_stock": raw_stock,
+    }
+
+
 def parse_hopefix_rows(html: str) -> list[dict[str, Any]]:
     """Parsuje <tr id="line-…"> z #rows — funguje na verejnej aj prihlásenej tabuľke."""
     out: list[dict[str, Any]] = []
@@ -128,77 +204,7 @@ def parse_hopefix_rows(html: str) -> list[dict[str, Any]]:
     ):
         line_key = m.group(1).strip()
         inner = m.group(2)
-        tds = re.findall(r"<td[^>]*>(.*?)</td>", inner, re.I | re.DOTALL)
-        texts = [_strip_tags(td) for td in tds]
-        product_nr = hopefix_norm_code(line_key)
-        if not product_nr and len(texts) > 1:
-            product_nr = hopefix_norm_code(texts[1])
-        label = texts[2] if len(texts) > 2 else None
-
-        price_eur: Optional[float] = None
-        raw_price: Optional[str] = None
-        for td_html, plain in zip(tds, texts):
-            if "prihlaseni" in td_html.lower():
-                continue
-            pe = _parse_eur_cell(plain)
-            if pe is not None:
-                price_eur = pe
-                raw_price = plain.strip()[:120]
-                break
-
-        pack_quantity: Optional[int] = None
-        if len(texts) >= 3:
-            pq_f = _cz_float(texts[-3])
-            if pq_f is not None and pq_f > 0:
-                pack_quantity = int(pq_f) if abs(pq_f - int(pq_f)) < 0.001 else int(round(pq_f))
-                if pack_quantity < 1:
-                    pack_quantity = 1
-
-        stock: Optional[int] = None
-        raw_stock: Optional[str] = None
-        if texts:
-            tail = texts[-2:]
-            for t in reversed(tail):
-                if not t or t.upper() in ("N/A", "-"):
-                    continue
-                plain_tail = _strip_tags(t)
-                if hopefix_raw_suggests_oos(plain_tail):
-                    stock = 0
-                    raw_stock = plain_tail[:120]
-                    break
-                if re.search(r"\d", t):
-                    raw_stock = t[:120]
-                    digits = re.sub(r"[^\d]", "", t)
-                    if digits:
-                        try:
-                            stock = int(digits)
-                        except ValueError:
-                            pass
-                    break
-            if stock is None and raw_stock is None:
-                for t in reversed(texts):
-                    if not t or not str(t).strip():
-                        continue
-                    plain = _strip_tags(t)
-                    if hopefix_raw_suggests_oos(plain):
-                        stock = 0
-                        raw_stock = plain[:120]
-                        break
-
-        hopefix_product_id = _extract_product_id(inner)
-
-        out.append(
-            {
-                "product_nr": product_nr,
-                "hopefix_product_id": hopefix_product_id,
-                "label": label,
-                "price_eur": price_eur,
-                "raw_price": raw_price,
-                "pack_quantity": pack_quantity,
-                "stock": stock,
-                "raw_stock": raw_stock,
-            }
-        )
+        out.append(_hopefix_row_dict_from_line_inner(line_key, inner))
     return out
 
 
@@ -209,7 +215,43 @@ def find_hopefix_row(rows: list[dict[str, Any]], product_code: str) -> Optional[
     for r in rows:
         if r.get("product_nr") == key:
             return r
+    for r in rows:
+        pn = (r.get("product_nr") or "")
+        if pn.startswith(key) and len(pn) > len(key):
+            suf = pn[len(key) :]
+            if re.match(r"^[A-Z0-9]{1,6}$", suf):
+                return r
     return None
+
+
+def _find_hopefix_row_tr_by_registration_td(html: str, key: str) -> Optional[dict[str, Any]]:
+    """Záloha: nájde <tr> podľa bunky „Registrační číslo“ (2. <td>), ak chýba atribút id=line-…."""
+    if not key:
+        return None
+    for m in re.finditer(r"<tr\b([^>]*)>(.*?)</tr>", html, re.I | re.DOTALL):
+        open_attrs, inner = m.group(1), m.group(2)
+        tds = re.findall(r"<td[^>]*>(.*?)</td>", inner, re.I | re.DOTALL)
+        if len(tds) < 2:
+            continue
+        reg = hopefix_norm_code(_strip_tags(tds[1]))
+        if reg != key:
+            continue
+        im = re.search(r'\bid\s*=\s*["\']line-([^"\']+)["\']', open_attrs, re.I)
+        line_key = (im.group(1).strip() if im else "") or key
+        return _hopefix_row_dict_from_line_inner(line_key, inner)
+    return None
+
+
+def find_hopefix_row_in_html(html: str, product_code: str) -> Optional[dict[str, Any]]:
+    """Štandardné parsovanie line-* + tolerancia variantov + záloha cez 2. stĺpec tabuľky."""
+    rows = parse_hopefix_rows(html)
+    hit = find_hopefix_row(rows, product_code)
+    if hit:
+        return hit
+    key = hopefix_norm_code(product_code)
+    if not key:
+        return None
+    return _find_hopefix_row_tr_by_registration_td(html, key)
 
 
 def build_hopefix_catalog_url(template: str, product_code: str) -> str:
