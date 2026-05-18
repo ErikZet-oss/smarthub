@@ -211,14 +211,19 @@ def test_normalize_supplier_code_handles_nbsp_and_tabs() -> None:
     assert norm("") == ""
 
 
+async def _stub_algolia_none(self, supplier_code: str) -> None:  # noqa: ARG001
+    return None
+
+
 @pytest.mark.asyncio
-async def test_search_to_pdp_uses_normalized_code_for_nbsp() -> None:
+async def test_search_to_pdp_uses_normalized_code_for_nbsp(monkeypatch) -> None:
     """Excel-ový kód s NBSP nezhodí search-er — ide cez %20 priamo na PDP.
 
     Regresia z prevádzky: kód ``"0933212\\xa016"`` v Exceli prešiel ako
     ``%C2%A0`` v query a Schäf-server vrátil 200 s prázdnym výsledkom
     (na PDP nepresmeroval). Klient teraz najprv normalizuje whitespace
-    a posiela query s bežnou medzerou (``%20``).
+    a posiela query s bežnou medzerou (``%20``). Algolia tu vypneme,
+    aby sme overili HTML cestu samostatne.
     """
     attempts: list[str] = []
 
@@ -232,7 +237,6 @@ async def test_search_to_pdp_uses_normalized_code_for_nbsp() -> None:
         if path.startswith("/b2b/en/search/"):
             attempts.append(query)
             if "%C2%A0" in query:
-                # NBSP varianta → server nezhoduje, vráti prázdny zoznam.
                 return httpx.Response(
                     200, text="<html><body>No results</body></html>"
                 )
@@ -254,13 +258,16 @@ async def test_search_to_pdp_uses_normalized_code_for_nbsp() -> None:
         follow_redirects=True,
     )
     client._login_ok = True
+    # Vypneme Algolia cestu — chceme overiť čisto HTML logiku (regresia z prevádzky).
+    monkeypatch.setattr(
+        SchaefHttpClient, "_algolia_find_product", _stub_algolia_none
+    )
     try:
         pdp_path, body = await client._search_to_pdp("0933212\xa016")
     finally:
         await client.aclose()
     assert pdp_path == "/b2b/en/din-933-a2-70-m-12x16-p133790/"
     assert 'value="133790"' in body
-    # Najprv MUSÍ skúsiť normalizovaný kód (%20), nie surový NBSP.
     assert attempts, "search sa nezavolal vôbec"
     assert "%C2%A0" not in attempts[0], (
         f"Prvý pokus mal byť %20, dostali sme: {attempts[0]!r}"
@@ -269,8 +276,81 @@ async def test_search_to_pdp_uses_normalized_code_for_nbsp() -> None:
 
 
 @pytest.mark.asyncio
-async def test_search_to_pdp_falls_back_to_first_link_from_results() -> None:
-    """Žiadny redirect nepríde, ale v HTML zozname je prvý PDP hit — má ho použiť."""
+async def test_search_to_pdp_uses_algolia_when_available(monkeypatch) -> None:
+    """Algolia vráti exact match → klient skočí priamo na PDP bez /search/.
+
+    Hlavná regresia z prevádzky (`response body 1,014,677 znakov` =
+    plná stránka výsledkov, ale `name="item_id"` tam pre nás nebol
+    dostupný): teraz najprv pýtame Algolia, ktorá dáva ``itemId``
+    + ``itemLink`` deterministicky.
+    """
+
+    fake_hit = {
+        "itemId": 133778,
+        "itemLink": "/din-933-a2-70-m-12x16-p133778/",
+        "itemNo": "0933212 16",
+        "description": "DIN 933 A2-70 M 12X16",
+        "units_per_parcel": "50",
+    }
+
+    async def _stub_algolia(self, supplier_code: str):  # noqa: ARG001
+        return fake_hit
+
+    monkeypatch.setattr(
+        SchaefHttpClient, "_algolia_find_product", _stub_algolia
+    )
+
+    search_paths_hit: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.startswith("/b2b/en/search/"):
+            search_paths_hit.append(path)
+            return httpx.Response(404, text="should not be called")
+        if path == "/b2b/en/din-933-a2-70-m-12x16-p133778/":
+            return httpx.Response(
+                200,
+                text='<html><body><input name="item_id" value="133778"></body></html>',
+            )
+        return httpx.Response(404)
+
+    client = SchaefHttpClient(base_url="https://shop.schaefer-peters.com")
+    client._client = httpx.AsyncClient(
+        base_url=client._base,
+        transport=httpx.MockTransport(handler),
+        follow_redirects=True,
+    )
+    client._login_ok = True
+    try:
+        pdp_path, body = await client._search_to_pdp("0933212\xa016")
+    finally:
+        await client.aclose()
+    assert pdp_path == "/b2b/en/din-933-a2-70-m-12x16-p133778/"
+    assert 'value="133778"' in body
+    # Algolia priamy hit ⇒ HTML /search/ vôbec nesmieme zavolať.
+    assert search_paths_hit == [], (
+        f"HTML search sa nemal volať, ale boli: {search_paths_hit}"
+    )
+
+
+def test_code_match_key_canonicalizes_separators() -> None:
+    """Algolia môže vrátiť ``itemNo`` s rôznymi oddeľovačmi — máme byť tolerantní."""
+    norm = SchaefHttpClient._code_match_key
+    assert norm("0933212 16") == norm("0933212\xa016")
+    assert norm("0933212 16") == norm("0933212-16")
+    assert norm("0933212 16") == norm("093321216")
+    # Case insensitive (Algolia tu vracia upper case, my hľadáme lower case).
+    assert norm("AB-12 cd") == norm("ab12CD")
+
+
+@pytest.mark.asyncio
+async def test_search_to_pdp_falls_back_to_first_link_from_results(monkeypatch) -> None:
+    """Algolia nič nenájde, server-side search nepresmeruje, ale v HTML
+    zozname je prvý PDP hit — klient ho má použiť."""
+
+    monkeypatch.setattr(
+        SchaefHttpClient, "_algolia_find_product", _stub_algolia_none
+    )
 
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -306,7 +386,12 @@ async def test_search_to_pdp_falls_back_to_first_link_from_results() -> None:
 
 
 @pytest.mark.asyncio
-async def test_fetch_product_price_and_stock_via_mock_transport() -> None:
+async def test_fetch_product_price_and_stock_via_mock_transport(monkeypatch) -> None:
+    # Algolia volá externý host (CDN), v unit-testoch ho zámerne vypneme,
+    # aby sme overili tok pri Algolia výpadku → HTML search fallback.
+    monkeypatch.setattr(
+        SchaefHttpClient, "_algolia_find_product", _stub_algolia_none
+    )
     client = _build_mock_client_for_pdp(PDP_SNIPPET)
     try:
         data = await client.fetch_product_price_and_stock("0933212 40")

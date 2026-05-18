@@ -37,6 +37,14 @@ DEFAULT_UA = (
     "(KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
 )
 
+# Algolia kľúče zo Schäf front-endu (public read-only, dostupné v HAR-e i v JS
+# bundlovi v ``/layout/frontend/.../algolia-config.js``). Použité na rýchle
+# rozlíšenie itemId + PDP slugu bez nutnosti chodiť cez server-side search.
+SCHAEF_ALGOLIA_APP_ID = "KLANID5F8G"
+SCHAEF_ALGOLIA_API_KEY = "49cac20b0727fe2f5d4e3cd79be617d1"
+SCHAEF_ALGOLIA_INDEX = "SP_B2B_LIVE_ENU"
+SCHAEF_ALGOLIA_HOST = f"https://{SCHAEF_ALGOLIA_APP_ID.lower()}-dsn.algolia.net"
+
 # --- Regulárky na parsing PDP -------------------------------------------------
 _ITEM_ID_RE = re.compile(
     r'<input\s+name=["\']item_id["\']\s+value=["\'](\d+)["\']',
@@ -484,14 +492,101 @@ class SchaefHttpClient:
         s = re.sub(r"\s+", " ", code, flags=re.UNICODE).strip()
         return s
 
-    async def _try_search(self, query: str) -> Tuple[Optional[str], str]:
-        """Jeden search pokus. Vráti ``(pdp_path | None, body)``.
-
-        Ak server presmeroval na PDP, vráti aj cestu. Inak vráti len HTML
-        výsledkov, aby caller mohol skúsiť ďalší variant alebo extrahovať
-        prvý PDP link zo zoznamu.
+    @staticmethod
+    def _code_match_key(code: str) -> str:
+        """Kanonická forma na porovnanie itemNo z Algolia-y s naším supplier_code:
+        bez whitespace, ASCII lower-case. Schäf zobrazuje „0933212 16" v Algolii
+        a aj my po normalizácii ten istý string vidíme, ale chceme robustnosť
+        proti dashom / nonprinting characters.
         """
-        # Kódujeme s ``%20`` — Schäf-search prijíma rovnako ako bežný používateľ.
+        if not code:
+            return ""
+        return re.sub(r"[\s\-_\u00a0]", "", str(code)).casefold()
+
+    async def _algolia_find_product(
+        self, supplier_code: str
+    ) -> Optional[dict[str, Any]]:
+        """Algolia search → vráti exact-match hit alebo ``None``.
+
+        Schäf používa Algolia ako primárny katalógový index (HAR jasne ukazuje,
+        že server-side ``/b2b/en/search/`` interne tiež volá Algolia a podľa
+        výsledku 302-uje na PDP, ak je exact match). My idealne preskakujeme
+        celé HTML rendrovanie a pýtame sa Algolia priamo — vráti
+        ``itemId`` (= numerický product id pre cart) a ``itemLink``
+        (= PDP slug bez ``/b2b/en`` prefixu).
+        """
+        query = self._normalize_supplier_code(supplier_code)
+        if not query:
+            return None
+        body = json.dumps(
+            {
+                "requests": [
+                    {
+                        "indexName": SCHAEF_ALGOLIA_INDEX,
+                        "query": query,
+                        "params": "hitsPerPage=10",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        )
+        url = (
+            f"{SCHAEF_ALGOLIA_HOST}/1/indexes/*/queries"
+            f"?x-algolia-application-id={SCHAEF_ALGOLIA_APP_ID}"
+            f"&x-algolia-api-key={SCHAEF_ALGOLIA_API_KEY}"
+        )
+        try:
+            # Cross-origin call mimo nášho ``self._client`` (iný host, žiadna
+            # closed-session cookie nepotrebujeme). Krátky timeout — Algolia je CDN.
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(10.0, connect=4.0),
+                headers={
+                    "User-Agent": self._headers.get("User-Agent", DEFAULT_UA),
+                    "Origin": self._base,
+                    "Referer": f"{self._base}/",
+                    "X-Algolia-Application-Id": SCHAEF_ALGOLIA_APP_ID,
+                    "X-Algolia-API-Key": SCHAEF_ALGOLIA_API_KEY,
+                    "Accept": "application/json",
+                },
+            ) as ag:
+                r = await ag.post(url, content=body)
+        except (httpx.HTTPError, httpx.NetworkError):
+            # Algolia môže byť dočasne nedostupná — fallback na HTML search.
+            return None
+        if r.status_code >= 400:
+            return None
+        try:
+            payload = r.json()
+        except (json.JSONDecodeError, ValueError):
+            return None
+        results = payload.get("results") if isinstance(payload, dict) else None
+        if not isinstance(results, list) or not results:
+            return None
+        first = results[0]
+        if not isinstance(first, dict):
+            return None
+        hits = first.get("hits") or []
+        if not isinstance(hits, list) or not hits:
+            return None
+
+        # Exact match na itemNo (canonicalized). Algolia môže vrátiť aj „0933212 160"
+        # pri hľadaní „0933212 16" — to si filtrujeme my, nie server.
+        wanted = self._code_match_key(query)
+        for hit in hits:
+            if not isinstance(hit, dict):
+                continue
+            itemno = self._code_match_key(str(hit.get("itemNo") or ""))
+            old_itemno = self._code_match_key(str(hit.get("oldItemNo") or ""))
+            itemno2 = self._code_match_key(str(hit.get("itemNo2") or ""))
+            parent = self._code_match_key(str(hit.get("parentItemNo") or ""))
+            if wanted and wanted in {itemno, old_itemno, itemno2, parent}:
+                return hit
+        # Žiadny exact — vrátime prvý hit ako best-effort (UI ho potom môže
+        # explicitne potvrdiť po načítaní mena produktu).
+        return hits[0] if isinstance(hits[0], dict) else None
+
+    async def _try_search(self, query: str) -> Tuple[Optional[str], str]:
+        """Jeden HTML-search pokus. Vráti ``(pdp_path | None, body)``."""
         enc = quote(query, safe="")
         path = (
             f"/b2b/en/search/?SP_B2B_LIVE_ENU%5Bquery%5D={enc}&searchAlgolia={enc}"
@@ -508,18 +603,80 @@ class SchaefHttpClient:
             return final_path, body
         return None, body
 
-    async def _search_to_pdp(self, supplier_code: str) -> Tuple[str, str]:
-        """GET search → 302 na PDP. Vracia ``(pdp_path, html)``.
+    @staticmethod
+    def _extract_pdp_path_from_results(body: str) -> Optional[str]:
+        """Z HTML zoznamu výsledkov vyber prvý relevantný PDP odkaz.
 
-        Schäf-server vie fuzzy aj Algolia hľadanie — pri presnom čísle článku
-        („0933212 40") spravidla okamžite presmeruje na PDP. Ak prvý variant
-        nezasiahne (napr. iný oddeľovač medzery), skúsi sa kód bez medzier
-        a potom ako fallback prvý PDP link z výsledkov.
+        Schäf má dva tvary linkov:
+          - relatívny ``/b2b/en/<slug>-pNNNN/``
+          - absolútny ``https://shop.schaefer-peters.com/b2b/en/<slug>-pNNNN/``
+        a niektoré PDP odkazy končia query stringom (?utm=…). Regex preto
+        akceptuje aj voliteľné ``?`` resp. zachytí len cestu.
+        """
+        if not body:
+            return None
+        for pat in (
+            r'href=["\'](\/b2b\/en\/[^"\'?#]+-p\d+\/)',
+            r'href=["\']https?:\/\/[^"\']*\/b2b\/en\/([^"\'?#]+-p\d+\/)',
+            r'data-href=["\'](\/b2b\/en\/[^"\']+-p\d+\/)',
+            r'itemid=["\'](\/b2b\/en\/[^"\']+-p\d+\/)',
+        ):
+            m = re.search(pat, body, re.IGNORECASE)
+            if m:
+                path = m.group(1)
+                if not path.startswith("/"):
+                    path = f"/b2b/en/{path}"
+                return path
+        return None
+
+    async def _search_to_pdp(self, supplier_code: str) -> Tuple[str, str]:
+        """Vráti ``(pdp_path, html)``.
+
+        Stratégia (najrýchlejšie → najpomalšie):
+          1. **Algolia API** — JSON s ``itemLink`` (PDP slug) a ``itemId``.
+             Public read-only key, 300-500 ms, žiadna autentifikácia.
+          2. **HTML search ``/b2b/en/search/?...``** — server-side fuzzy
+             match; pri exact-i 302-uje priamo na PDP. Vyžaduje login session.
+          3. **Extract z HTML zoznamu** — ak ani 2) nepresmeroval, vyberieme
+             prvý PDP link z výsledkov a otvoríme ho.
         """
         raw_code = (supplier_code or "").strip()
         if not raw_code:
             raise ValueError("Schäfer-Peters: prázdny kód produktu.")
 
+        # 1) Algolia: najspoľahlivejšia cesta. Stačí jeden POST a vieme
+        # presný PDP path, ku ktorému prejdeme len pre live cenu/sklad.
+        hit = await self._algolia_find_product(raw_code)
+        if hit and isinstance(hit, dict):
+            item_link = str(hit.get("itemLink") or "").strip()
+            if item_link:
+                pdp_path = item_link
+                if not pdp_path.startswith("/"):
+                    pdp_path = "/" + pdp_path
+                if not pdp_path.startswith("/b2b/en"):
+                    pdp_path = "/b2b/en" + pdp_path
+                r = await self._client.get(pdp_path)
+                if r.status_code >= 400:
+                    raise RuntimeError(
+                        f"Schäfer-Peters: PDP {pdp_path!r} status {r.status_code} "
+                        f"(Algolia hit itemId={hit.get('itemId')!r})"
+                    )
+                body = r.text or ""
+                if 'name="item_id"' in body:
+                    return pdp_path, body
+                # Schäf v zriedkavých prípadoch vráti login stránku, ak session
+                # expirovala — vyhodíme špecifickú chybu, aby ju vonkajší
+                # handler invalidoval ako 401/403 ekvivalent.
+                if 'name="input_login"' in body and 'name="input_password"' in body:
+                    raise RuntimeError(
+                        "Schäfer-Peters: PDP vrátilo login stránku — "
+                        "session expirovala (skúsim relogin)."
+                    )
+                # Algolia hit existuje, ale PDP HTML nemá očakávaný form-tag.
+                # Padáme do HTML cesty s tým, čo Algolia stihla získať.
+
+        # 2) HTML search: skúsime postupne normalizovanú formu, bez medzier
+        # a surový raw.
         normalized = self._normalize_supplier_code(raw_code)
         candidates: list[str] = []
         for c in (normalized, normalized.replace(" ", ""), raw_code):
@@ -527,35 +684,32 @@ class SchaefHttpClient:
                 candidates.append(c)
 
         last_body = ""
+        last_body_path = ""
         for candidate in candidates:
             pdp_path, body = await self._try_search(candidate)
             if pdp_path:
                 return pdp_path, body
             last_body = body
-            # Skús extrahovať prvý PDP link zo zoznamu výsledkov — pri viacerých
-            # zhodách na variant kódu (napr. „0933212 16" vs „0933212-16") server
-            # zobrazí list a my otvoríme prvý hit.
-            m = re.search(
-                r'href=["\'](\/b2b\/en\/[^"\']+-p\d+\/)["\']',
-                body,
-            )
-            if m:
-                pdp_path = m.group(1)
-                r2 = await self._client.get(pdp_path)
+            last_body_path = candidate
+            # 3) HTML fallback: prvý PDP link zo zoznamu výsledkov.
+            extracted = self._extract_pdp_path_from_results(body)
+            if extracted:
+                r2 = await self._client.get(extracted)
                 if r2.status_code >= 400:
                     raise RuntimeError(
-                        f"Schäfer-Peters: PDP {pdp_path!r} status {r2.status_code}"
+                        f"Schäfer-Peters: PDP {extracted!r} status {r2.status_code}"
                     )
-                return pdp_path, r2.text or ""
+                body2 = r2.text or ""
+                if 'name="item_id"' in body2:
+                    return extracted, body2
 
-        # Posledný pokus zlyhal — pridáme indíciu (počet znakov tela), nech sa
-        # dá v logu rýchlo overiť, či sme dostali prázdnu / login stránku.
         tried = ", ".join(repr(c) for c in candidates)
         body_len = len(last_body)
         raise RuntimeError(
             f"Schäfer-Peters: pre kód {raw_code!r} sa nenašiel produkt "
-            f"(search nepresmeroval na PDP; skúšané varianty: {tried}; "
-            f"posledný response body {body_len} znakov)."
+            f"(Algolia ani HTML search nepresmerovali na PDP; "
+            f"skúšané varianty: {tried}; "
+            f"posledný body {body_len} znakov pri kóde {last_body_path!r})."
         )
 
     async def fetch_product_price_and_stock(
