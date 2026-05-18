@@ -1,3 +1,5 @@
+import pytest
+
 from app.services.hopefix_http_client import (
     find_hopefix_row,
     find_hopefix_row_in_html,
@@ -103,6 +105,31 @@ def test_find_row_by_td_close_pattern():
     html = "<table><tr><td>933</td><td>D933A212016</td><td>x</td></tr></table>"
     row = find_hopefix_row_in_html(html, "D933A212016")
     assert row is not None
+
+
+# Široká tabuľka Hopefix: sklad a box sú v „100 ks“ jednotkách (41 → 4100 ks, 0,50 box → 50 ks).
+HOPEFIX_WIDE_CATALOG = """
+<table>
+<thead><tr>
+<th>DIN</th><th>Registrační číslo</th><th>Rozměr</th><th>ISO</th><th>Materiál</th><th>Vaše číslo</th>
+<th>Sklad (100 ks)</th><th>EUR / 100 ks</th><th>Další naskladnění</th><th>100 pcs Box</th><th>100 pcs Carton</th><th>100 pcs Pallet</th>
+</tr></thead>
+<tbody>
+<tr id="line-D933A212040"><td>933</td><td>D933A212040</td><td>M12*40 A2</td><td>4017</td><td>A2</td><td></td>
+<td>41,00</td><td>13,76&nbsp;€</td><td></td><td>0,50</td><td>N/A</td><td>N/A</td></tr>
+</tbody>
+</table>
+"""
+
+
+def test_hopefix_wide_row_stock_pack_and_price_100_units():
+    row = find_hopefix_row_in_html(HOPEFIX_WIDE_CATALOG, "D933A212040")
+    assert row is not None
+    assert row["product_nr"] == "D933A212040"
+    assert row["price_eur"] == pytest.approx(13.76)
+    assert row["pack_quantity"] == 50
+    assert row["stock"] == 4100
+    assert row["label"] == "M12*40 A2"
 
 
 # HAR www.hopefix3.cz: product_id je v nasledujúcom <tr class="expander-row">, nie v riadku line-*.

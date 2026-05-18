@@ -99,12 +99,119 @@ def _cz_float(text: str) -> Optional[float]:
     t = _strip_tags(text)
     if not t or t.upper() in ("N/A", "-"):
         return None
-    t = t.replace(" ", "").replace("\xa0", "")
+    t = t.replace("\xa0", " ").strip()
+    while re.search(r"(?<=\d)\s+(?=\d)", t):
+        t = re.sub(r"(?<=\d)\s+(?=\d)", "", t, count=1)
+    t = t.replace(" ", "")
     t = t.replace(",", ".")
     try:
         return float(t)
     except ValueError:
         return None
+
+
+def _hopefix_parse_pack_cell(text: str) -> Optional[float]:
+    """Počet z bunky Box (0,50 → 0.5); N/A → None — zladené s Playwright scraperom."""
+    t = (text or "").replace("\xa0", " ").strip()
+    if not t or t.upper() in ("N/A", "-"):
+        return None
+    while re.search(r"(?<=\d)\s+(?=\d)", t):
+        t = re.sub(r"(?<=\d)\s+(?=\d)", "", t, count=1)
+    t = t.replace(" ", "").replace(",", ".")
+    try:
+        return float(t)
+    except ValueError:
+        return None
+
+
+def _hopefix_header_implies_100_pcs_unit(header_plain: str) -> bool:
+    h = re.sub(r"\s+", " ", (header_plain or "").lower())
+    if re.search(r"100\s*pcs", h) or "100pcs" in h.replace(" ", ""):
+        return True
+    if re.search(r"100\s*ks", h) or re.search(r"100\s*kus", h):
+        return True
+    if re.search(r"\(\s*100\s*", h):
+        return True
+    return False
+
+
+def _hopefix_column_headers_for_row(html: str, row_start: int) -> Optional[list[str]]:
+    """Z nájdeného <tr> vezme nadradenú tabuľku a texty <th> z prvého thead."""
+    if row_start < 0:
+        return None
+    before = html[:row_start]
+    tbl = before.rfind("<table")
+    if tbl < 0:
+        return None
+    chunk = html[tbl:row_start]
+    thead_m = re.search(r"<thead[^>]*>(.*?)</thead>", chunk, re.I | re.DOTALL)
+    if not thead_m:
+        return None
+    ths = re.findall(r"<th[^>]*>(.*?)</th>", thead_m.group(1), re.I | re.DOTALL)
+    if not ths:
+        return None
+    return [_strip_tags(t).strip() for t in ths]
+
+
+def _hopefix_align_row_cells_to_headers(
+    texts: list[str],
+    headers: list[str],
+) -> tuple[list[str], list[str]]:
+    """Jedna extra bunka (checkbox) bez hlavičky → posun o 1."""
+    if len(texts) == len(headers) + 1:
+        return headers, texts[1:]
+    if len(texts) == len(headers):
+        return headers, texts
+    return headers, texts
+
+
+def _hopefix_pick_column_indices(headers: list[str]) -> dict[str, Any]:
+    """Indices: eur (cena / 100 ks), sklad (100 ks), box (100 pcs Box)."""
+    eur_candidates: list[tuple[int, int]] = []
+    stock_idx: Optional[int] = None
+    stock_h100 = False
+    box_idx: Optional[int] = None
+    box_h100 = False
+    label_idx: Optional[int] = None
+    skip_stock = re.compile(
+        r"nasklad|naskladnění|další|dalsi|restock|dodání|termin|termín",
+        re.I,
+    )
+    for i, raw in enumerate(headers):
+        plain = _strip_tags(raw).strip()
+        flat = re.sub(r"\s+", " ", plain.lower())
+        if not flat:
+            continue
+        if re.search(r"rozměr|rozmer|dimension", flat):
+            label_idx = i
+        if "box" in flat and "carton" not in flat and "pallet" not in flat:
+            box_idx = i
+            box_h100 = _hopefix_header_implies_100_pcs_unit(plain)
+        if ("sklad" in flat or "stock" in flat) and not skip_stock.search(flat):
+            stock_idx = i
+            stock_h100 = _hopefix_header_implies_100_pcs_unit(plain)
+        plain_u = plain.upper()
+        if "€" in plain or "EUR" in plain_u:
+            if any(x in flat for x in ("celkem", "total", "součet", "soucet")):
+                continue
+            score = 0
+            if "100" in flat or "/100" in flat or "pcs" in flat or "ks" in flat:
+                score = 2
+            elif "kus" in flat:
+                score = 1
+            eur_candidates.append((i, score))
+    eur_idx: Optional[int] = None
+    if eur_candidates:
+        eur_candidates.sort(key=lambda x: -x[1])
+        eur_idx = eur_candidates[0][0]
+    return {
+        "eur_idx": eur_idx,
+        "stock_idx": stock_idx,
+        "stock_header_100": stock_h100,
+        "box_idx": box_idx,
+        "box_header_100": box_h100,
+        "label_idx": label_idx,
+    }
 
 
 def _parse_eur_cell(text: str) -> Optional[float]:
@@ -182,7 +289,11 @@ def hopefix_merge_expander_product_id(html: str, row: dict[str, Any]) -> None:
         row["hopefix_product_id"] = pid
 
 
-def _hopefix_row_dict_from_line_inner(line_key: str, inner: str) -> dict[str, Any]:
+def _hopefix_row_dict_from_line_inner(
+    line_key: str,
+    inner: str,
+    column_headers: Optional[list[str]] = None,
+) -> dict[str, Any]:
     """Jeden riadok katalógovej tabuľky z vnútra <tr>… (bez obálky <tr>)."""
     tds = re.findall(r"<td[^>]*>(.*?)</td>", inner, re.I | re.DOTALL)
     texts = [_strip_tags(td) for td in tds]
@@ -193,53 +304,106 @@ def _hopefix_row_dict_from_line_inner(line_key: str, inner: str) -> dict[str, An
 
     price_eur: Optional[float] = None
     raw_price: Optional[str] = None
-    for td_html, plain in zip(tds, texts):
-        if "prihlaseni" in td_html.lower():
-            continue
-        pe = _parse_eur_cell(plain)
-        if pe is not None:
-            price_eur = pe
-            raw_price = plain.strip()[:120]
-            break
-
     pack_quantity: Optional[int] = None
-    if len(texts) >= 3:
+    stock: Optional[int] = None
+    raw_stock: Optional[str] = None
+
+    if column_headers and len(column_headers) >= 3:
+        h_aln, t_aln = _hopefix_align_row_cells_to_headers(texts, column_headers)
+        if len(h_aln) == len(t_aln) and len(t_aln) >= 3:
+            idxmap = _hopefix_pick_column_indices(h_aln)
+            li = idxmap.get("label_idx")
+            if li is not None and 0 <= li < len(t_aln):
+                lab = (t_aln[li] or "").strip()
+                if lab:
+                    label = lab
+            ei = idxmap.get("eur_idx")
+            if ei is not None and 0 <= ei < len(t_aln):
+                pe = _parse_eur_cell(t_aln[ei])
+                if pe is not None:
+                    price_eur = pe
+                    raw_price = (t_aln[ei] or "").strip()[:120]
+            si = idxmap.get("stock_idx")
+            if si is not None and 0 <= si < len(t_aln):
+                cell = (t_aln[si] or "").strip()
+                if cell and cell.upper() not in ("N/A", "-"):
+                    plain_s = _strip_tags(cell)
+                    if hopefix_raw_suggests_oos(plain_s):
+                        stock = 0
+                        raw_stock = plain_s[:120]
+                    else:
+                        val = _cz_float(cell)
+                        if val is not None and val >= 0:
+                            if idxmap.get("stock_header_100"):
+                                stock = max(0, int(round(val * 100)))
+                            else:
+                                stock = max(0, int(round(val)))
+                            raw_stock = cell[:120]
+            bi = idxmap.get("box_idx")
+            if bi is not None and 0 <= bi < len(t_aln):
+                cell_b = (t_aln[bi] or "").strip()
+                if cell_b and cell_b.upper() not in ("N/A", "-"):
+                    pq_f = _hopefix_parse_pack_cell(cell_b)
+                    if pq_f is not None and pq_f > 0:
+                        if idxmap.get("box_header_100"):
+                            pack_quantity = max(1, int(round(pq_f * 100)))
+                        else:
+                            pq_r = round(pq_f)
+                            pack_quantity = max(
+                                1,
+                                int(pq_r)
+                                if abs(pq_f - pq_r) < 0.001
+                                else int(round(pq_f)),
+                            )
+
+    if price_eur is None:
+        for td_html, plain in zip(tds, texts):
+            if "prihlaseni" in td_html.lower():
+                continue
+            pe = _parse_eur_cell(plain)
+            if pe is not None:
+                price_eur = pe
+                raw_price = plain.strip()[:120]
+                break
+
+    if pack_quantity is None and len(texts) >= 3:
         pq_f = _cz_float(texts[-3])
         if pq_f is not None and pq_f > 0:
-            pack_quantity = int(pq_f) if abs(pq_f - int(pq_f)) < 0.001 else int(round(pq_f))
+            pack_quantity = (
+                int(pq_f) if abs(pq_f - int(pq_f)) < 0.001 else int(round(pq_f))
+            )
             if pack_quantity < 1:
                 pack_quantity = 1
 
-    stock: Optional[int] = None
-    raw_stock: Optional[str] = None
-    if texts:
-        tail = texts[-2:]
-        for t in reversed(tail):
-            if not t or t.upper() in ("N/A", "-"):
-                continue
-            plain_tail = _strip_tags(t)
-            if hopefix_raw_suggests_oos(plain_tail):
-                stock = 0
-                raw_stock = plain_tail[:120]
-                break
-            if re.search(r"\d", t):
-                raw_stock = t[:120]
-                digits = re.sub(r"[^\d]", "", t)
-                if digits:
-                    try:
-                        stock = int(digits)
-                    except ValueError:
-                        pass
-                break
-        if stock is None and raw_stock is None:
-            for t in reversed(texts):
-                if not t or not str(t).strip():
+    if stock is None and raw_stock is None:
+        if texts:
+            tail = texts[-2:]
+            for t in reversed(tail):
+                if not t or t.upper() in ("N/A", "-"):
                     continue
-                plain = _strip_tags(t)
-                if hopefix_raw_suggests_oos(plain):
+                plain_tail = _strip_tags(t)
+                if hopefix_raw_suggests_oos(plain_tail):
                     stock = 0
-                    raw_stock = plain[:120]
+                    raw_stock = plain_tail[:120]
                     break
+                if re.search(r"\d", t):
+                    raw_stock = t[:120]
+                    digits = re.sub(r"[^\d]", "", t)
+                    if digits:
+                        try:
+                            stock = int(digits)
+                        except ValueError:
+                            pass
+                    break
+            if stock is None and raw_stock is None:
+                for t in reversed(texts):
+                    if not t or not str(t).strip():
+                        continue
+                    plain = _strip_tags(t)
+                    if hopefix_raw_suggests_oos(plain):
+                        stock = 0
+                        raw_stock = plain[:120]
+                        break
 
     hopefix_product_id = _extract_product_id(inner)
     return {
@@ -264,7 +428,8 @@ def parse_hopefix_rows(html: str) -> list[dict[str, Any]]:
     for m in pat.finditer(html):
         line_key = (m.group(1) or m.group(2) or m.group(3) or "").strip()
         inner = m.group(4)
-        out.append(_hopefix_row_dict_from_line_inner(line_key, inner))
+        headers = _hopefix_column_headers_for_row(html, m.start())
+        out.append(_hopefix_row_dict_from_line_inner(line_key, inner, headers))
     return out
 
 
@@ -293,6 +458,7 @@ def _find_hopefix_row_tr_by_registration_td(html: str, key: str) -> Optional[dic
         re.I,
     )
     for m in re.finditer(r"<tr\b([^>]*)>(.*?)</tr>", html, re.I | re.DOTALL):
+        tr_start = m.start()
         open_attrs, inner = m.group(1), m.group(2)
         tds = re.findall(r"<td[^>]*>(.*?)</td>", inner, re.I | re.DOTALL)
         matched = any(hopefix_norm_code(_strip_tags(td)) == key for td in tds)
@@ -304,7 +470,8 @@ def _find_hopefix_row_tr_by_registration_td(html: str, key: str) -> Optional[dic
             line_key = (im.group(1) or im.group(2) or im.group(3) or "").strip()
         if not line_key:
             line_key = key
-        return _hopefix_row_dict_from_line_inner(line_key, inner)
+        headers = _hopefix_column_headers_for_row(html, tr_start)
+        return _hopefix_row_dict_from_line_inner(line_key, inner, headers)
     return None
 
 
@@ -341,7 +508,8 @@ def _find_hopefix_row_tr_by_code_occurrence(html: str, key: str) -> Optional[dic
         line_key = key
         if im:
             line_key = (im.group(1) or im.group(2) or im.group(3) or "").strip() or key
-        return _hopefix_row_dict_from_line_inner(line_key, inner)
+        headers = _hopefix_column_headers_for_row(html, tr_start)
+        return _hopefix_row_dict_from_line_inner(line_key, inner, headers)
     return None
 
 
