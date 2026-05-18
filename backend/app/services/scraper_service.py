@@ -26,6 +26,7 @@ from app.services.hopefix_http_client import (
     build_hopefix_catalog_url,
     find_hopefix_row_in_html,
     hopefix_cart_url,
+    hopefix_fetch_html_anonymous,
     hopefix_norm_code,
     hopefix_parse_cart_html,
     hopefix_raw_suggests_oos,
@@ -2105,6 +2106,7 @@ async def _hopefix_get_supplier_data_via_http(
     row: Optional[dict[str, Any]] = None
     last_html_len = 0
     best_html: list[str] = [""]
+    anonymous_fallback = False
 
     def _note_response_body(html: str) -> None:
         h = html or ""
@@ -2222,13 +2224,54 @@ async def _hopefix_get_supplier_data_via_http(
                     if r and not row:
                         row = r
     if not row:
+        _log(
+            run_label,
+            supplier,
+            run_id,
+            "Hopefix HTTP: prihlásený katalóg neobsahuje kód v HTML — skúšam verejný (bez cookies)",
+            "warn",
+        )
+        pub_candidates: list[str] = []
+        for u in try_urls:
+            if u not in pub_candidates:
+                pub_candidates.append(u)
+        for seg in _hopefix_fallback_category_segments(code):
+            for rel in (f"/sortiment/{seg}?_ref={enc}", f"/sortiment/{seg}"):
+                abs_u = urljoin("https://www.hopefix.cz/", rel.lstrip("/"))
+                if abs_u not in pub_candidates:
+                    pub_candidates.append(abs_u)
+        for pub_u in pub_candidates[:48]:
+            try:
+                html_pub = await hopefix_fetch_html_anonymous(pub_u)
+                ln_pub = len(html_pub or "")
+                last_html_len = max(last_html_len, ln_pub)
+                _note_response_body(html_pub)
+                row = find_hopefix_row_in_html(html_pub, code)
+                if row:
+                    anonymous_fallback = True
+                    _log(
+                        run_label,
+                        supplier,
+                        run_id,
+                        f"Hopefix HTTP: riadok z verejného katalógu {pub_u!r}",
+                    )
+                    break
+            except Exception as exc:
+                _log(
+                    run_label,
+                    supplier,
+                    run_id,
+                    f"Hopefix HTTP: verejný GET {pub_u!r}: {exc}",
+                    "warn",
+                )
+    if not row:
         blob = best_html[0] or ""
         presence = ""
         if key and blob:
             if key.upper() not in blob.upper():
                 presence = (
-                    " Kód sa v najväčšej odpovedi nevyskytuje — over heslo dodávateľa v admine, "
-                    "či Hopefix tento artikel vôbec zobrazuje prihlásenému B2B účtu (filter / sortiment)."
+                    " Po prihlásenom aj verejnom katalógue sa kód v HTML nenašiel — over heslo v admine, "
+                    "sortiment B2B účtu u Hopefix a správnosť mapovania kódu."
                 )
             else:
                 presence = (
@@ -2267,13 +2310,23 @@ async def _hopefix_get_supplier_data_via_http(
         "packaging_variants": packaging_variants,
         "logged_in": True,
         "hopefix_via_http": True,
+        "hopefix_public_catalog_fallback": anonymous_fallback,
     }
     _hopefix_normalize_oos_display(data)
-    if not hopefix_id:
+    if anonymous_fallback:
         data["hint"] = (
+            "Hopefix: riadok z verejného katalógu (prihlásená B2B odpoveď tento kód v HTML nemala). "
+            "Cena/sklad môžu byť neúplné oproti účtu; košík stále používa prihlásenú HTTP session."
+        )
+    if not hopefix_id:
+        pid_hint = (
             "Hopefix: v HTML riadku sa nenašiel product_id (často až v rozbalenej časti). "
             "Otvor riadok v prehliadači alebo zachyť HAR pri „Vložit do košíku“ a doplň mapovanie."
         )
+        if data.get("hint"):
+            data["hint"] = f"{data['hint']} {pid_hint}"
+        else:
+            data["hint"] = pid_hint
     _log(
         run_label,
         supplier,

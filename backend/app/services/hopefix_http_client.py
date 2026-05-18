@@ -300,6 +300,30 @@ def find_hopefix_row_in_html(html: str, product_code: str) -> Optional[dict[str,
     return _find_hopefix_row_tr_by_code_occurrence(html, key)
 
 
+async def hopefix_fetch_html_anonymous(url_or_path: str) -> str:
+    """GET bez cookies — verejný katalóg (inkognito). Hopefix B2B niekedy vôbec nevloží artikel do HTML."""
+    raw = (url_or_path or "").strip()
+    if not raw:
+        raise ValueError("Hopefix: prázdna URL katalógu.")
+    if raw.startswith("http://") or raw.startswith("https://"):
+        target = raw
+    else:
+        target = urljoin(f"{DEFAULT_BASE}/", raw.lstrip("/"))
+    async with httpx.AsyncClient(
+        follow_redirects=True,
+        timeout=httpx.Timeout(28.0, connect=5.0),
+        http2=False,
+        headers={
+            "User-Agent": DEFAULT_UA,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "cs,sk;q=0.9,en;q=0.8",
+        },
+    ) as ac:
+        r = await ac.get(target)
+        r.raise_for_status()
+        return r.text
+
+
 def build_hopefix_catalog_url(template: str, product_code: str) -> str:
     tmpl = (template or "").strip()
     if not tmpl:
@@ -366,6 +390,25 @@ class HopefixHttpClient:
             },
         )
         r.raise_for_status()
+        final_u = str(r.url).lower()
+        body_lo = (r.text or "").lower()
+        if "prihlaseni" in final_u and any(
+            x in body_lo
+            for x in (
+                "neplatné přihlašovací",
+                "neplatne prihlasovaci",
+                "chybně zadan",
+                "chybne zadan",
+                "špatné heslo",
+                "spatne heslo",
+                "incorrect password",
+                "přihlášení se nezdařilo",
+                "prihlaseni se nezdarilo",
+            )
+        ):
+            raise ValueError(
+                "Hopefix: prihlásenie zlyhalo — v odpovedi je chyba prihlásenia (skontroluj email a heslo v admine)."
+            )
         # Doplnkový GET „úvod“ niekedy dokončí JSESSION / následné katalógové GET-y.
         try:
             home = await self._client.get("/")
