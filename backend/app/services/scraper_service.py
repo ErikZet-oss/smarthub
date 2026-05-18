@@ -723,7 +723,13 @@ def supplier_allows_empty_cart_config(supplier: Supplier) -> bool:
 
 
 def _hopefix_http_enabled(config: ScraperConfig) -> bool:
-    return bool((config.hopefix_catalog_url_template or "").strip())
+    """Hopefix HTTP vždy (úzke /sortiment/… + `_hopefix_fallback_category_segments`).
+
+    Bez toho na Renderi (`RENDER` / `DISABLE_PLAYWRIGHT_FALLBACK`) po vynechaní HTTP
+    zostane len Playwright, ktorý tam nie je — používateľ by videl len generickú hlášku.
+    Šablóna `hopefix_catalog_url_template` je voliteľná doplnok k úzkym URL.
+    """
+    return True
 
 
 def _hopefix_apply_oos_zero_pricing(target: dict[str, Any]) -> None:
@@ -1218,6 +1224,56 @@ async def _hopefix_scroll_catalog_until_line_present(
     return await _hopefix_registration_row_index_in_tbody(page, key) >= 0
 
 
+def _hopefix_narrow_catalog_paths(product_code: str, enc: str) -> list[str]:
+    """Relatívne URL (/sortiment/…) pre prvý HTTP pokus — úzke kategórie z hopefix.cz.
+
+    Veľké ``/sortiment/srouby`` často vracia len prvú stránku tabuľky; kód ako
+    ``D933A212016`` tam nemusí byť. Podcesty z rozcestníka „Šrouby“ treba
+    skúšať skôr. Rovnaký pár pridáme s ``?_ref=`` (Hopefix scrolluje na riadok).
+    """
+    k = hopefix_norm_code(product_code)
+    if not k or not enc:
+        return []
+
+    def _pair(seg: str) -> list[str]:
+        s = seg.strip().strip("/")
+        if not s:
+            return []
+        return [f"/sortiment/{s}?_ref={enc}", f"/sortiment/{s}"]
+
+    out: list[str] = []
+
+    def _extend(slugs: list[str]) -> None:
+        for slug in slugs:
+            out.extend(_pair(slug))
+
+    if re.match(
+        r"^D9(12|13|14|16|2[0-5]|31|33|34|35|60|61|62|63|64|91)",
+        k,
+    ) or k.startswith("D6912"):
+        _extend(
+            [
+                "metricke-se-sestihranou-hlavou",
+                "metricke-s-valcovou-hlavou",
+                "metricke-s-pulkulatou-hlavou",
+                "metricke-se-zaoblenou-hlavou",
+                "metricke-se-zapustnou-hlavou",
+                "kotevni-okenni-srouby",
+            ]
+        )
+    if re.match(r"^D12[0-9]", k) or k.startswith("D9021"):
+        _extend(
+            [
+                "podlozky-ploche-kruhove-nerez-a2",
+                "podlozky",
+            ]
+        )
+    if re.match(r"^D98", k) or re.match(r"^D69", k):
+        _extend(["matice"])
+
+    return out
+
+
 def _hopefix_fallback_category_segments(product_code: str) -> list[str]:
     """Poradie podcest /sortiment/<segment>#kód podľa typického zaradenia DIN kódu."""
     k = hopefix_norm_code(product_code)
@@ -1241,7 +1297,19 @@ def _hopefix_fallback_category_segments(product_code: str) -> list[str]:
         r"^D9(12|13|14|16|2[0-5]|31|33|34|35|60|61|62|63|64|91)",
         k,
     ) or k.startswith("D6912"):
-        first = ["srouby", "vruty", "matice", "podlozky", "zavitove-tyce"]
+        first = [
+            "metricke-se-sestihranou-hlavou",
+            "metricke-s-valcovou-hlavou",
+            "metricke-s-pulkulatou-hlavou",
+            "metricke-se-zaoblenou-hlavou",
+            "metricke-se-zapustnou-hlavou",
+            "kotevni-okenni-srouby",
+            "srouby",
+            "vruty",
+            "matice",
+            "podlozky",
+            "zavitove-tyce",
+        ]
         rest = [s for s in all_seg if s not in first]
         return first + rest
     if re.match(r"^D12[0-9]", k) or k.startswith("D9021"):
@@ -2022,7 +2090,14 @@ async def _hopefix_get_supplier_data_via_http(
         seen_u.add(x)
         try_urls.append(x)
 
-    _add(build_hopefix_catalog_url(config.hopefix_catalog_url_template or "", code))
+    for rel in _hopefix_narrow_catalog_paths(code, enc):
+        _add(rel)
+    tmpl = (config.hopefix_catalog_url_template or "").strip()
+    if tmpl:
+        try:
+            _add(build_hopefix_catalog_url(tmpl, code))
+        except ValueError:
+            pass
     su = (config.search_via_url_template or "").strip()
     if su and "{code}" in su:
         _add(su.replace("{code}", enc))
@@ -6525,6 +6600,15 @@ class ScraperService:
                 return await _maybe_cache(hf)
             except Exception as exc:
                 dev_run_log_exception(run_label, exc)
+                if _playwright_fallback_disabled():
+                    _log(
+                        run_label,
+                        supplier,
+                        run_id,
+                        f"Hopefix HTTP zlyhalo (Playwright fallback vypnutý): {exc}",
+                        "error",
+                    )
+                    raise RuntimeError(f"Hopefix HTTP zlyhalo: {exc}") from exc
                 _log(
                     run_label,
                     supplier,
