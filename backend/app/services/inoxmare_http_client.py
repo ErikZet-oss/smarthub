@@ -706,7 +706,11 @@ class InoxmareHttpClient:
         if path_after.rstrip("/").endswith("/customer/account/login"):
             raise RuntimeError(
                 "Inoxmare: prihlásenie zlyhalo — ostáva prihlasovacia stránka. "
-                "Skontroluj meno a heslo."
+                "Skontroluj meno a heslo. Ak server tlačí CAPTCHA (typicky pri "
+                "prihlasovaní z cloudového IP, napr. Render), v admin paneli "
+                "v cart_config_json dopíš `inoxmare_session_cookie_header` "
+                "s hodnotou hlavičky Cookie z prihláseného Chrome (DevTools → "
+                "Network → request → Request Headers → Cookie)."
             )
         if "loginpost" in path_after and "login[password]" in low:
             raise RuntimeError("Inoxmare: prihlásenie zlyhalo — skontroluj údaje.")

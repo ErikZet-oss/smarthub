@@ -368,7 +368,17 @@ class FaboryHttpClient:
                 "X-Requested-With": "XMLHttpRequest",
             },
         )
-        r.raise_for_status()
+        if r.status_code >= 400:
+            # Bez raw body sa nedá zistiť, prečo Fabory backend vrátil 5xx
+            # (často signalizuje vypadnutú session, zmenený payload formát
+            # alebo bot-detekciu). Detailný excerpt sa propaguje do logu aj do UI.
+            body_excerpt = (r.text or "").strip().replace("\n", " ")[:400]
+            ref_short = (ref or "")[:160]
+            raise RuntimeError(
+                f"Fabory {path} → HTTP {r.status_code} "
+                f"(referer={ref_short!r}, payload={body[:120]!r}, "
+                f"odpoveď: {body_excerpt!r})"
+            )
         txt = (r.text or "").strip()
         if not txt:
             return {}

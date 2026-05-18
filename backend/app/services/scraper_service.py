@@ -723,7 +723,15 @@ def supplier_allows_empty_cart_config(supplier: Supplier) -> bool:
 
 
 def _hopefix_http_enabled(config: ScraperConfig) -> bool:
-    return bool((config.hopefix_catalog_url_template or "").strip())
+    """HTTP cestu pre Hopefix vždy povoľujeme.
+
+    Aj bez `hopefix_catalog_url_template` v `cart_config_json` má klient
+    fallback na `_hopefix_fallback_category_segments` (kategórie /sortiment/<seg>).
+    Predtým sme to vypínali, čo na Renderi (kde Playwright nie je nainštalovaný)
+    spôsobovalo, že požiadavka padla na generickú hlášku „Playwright fallback je
+    vypnutý" namiesto skutočného HTTP errora.
+    """
+    return True
 
 
 def _hopefix_apply_oos_zero_pricing(target: dict[str, Any]) -> None:
@@ -2022,7 +2030,12 @@ async def _hopefix_get_supplier_data_via_http(
         seen_u.add(x)
         try_urls.append(x)
 
-    _add(build_hopefix_catalog_url(config.hopefix_catalog_url_template or "", code))
+    tmpl = (config.hopefix_catalog_url_template or "").strip()
+    if tmpl:
+        try:
+            _add(build_hopefix_catalog_url(tmpl, code))
+        except ValueError:
+            pass
     su = (config.search_via_url_template or "").strip()
     if su and "{code}" in su:
         _add(su.replace("{code}", enc))
