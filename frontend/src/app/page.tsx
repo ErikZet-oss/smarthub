@@ -1792,7 +1792,10 @@ function ProductSupplierExpandedTableRow({
                                           : undefined;
                                       const stockSummaryText = offerStockUiBlocked
                                         ? liveScrapeMissingOffer
-                                          ? "Ponuka sa nenašla"
+                                          ? displayStock != null &&
+                                              Number.isFinite(displayStock)
+                                            ? `${formatKsQuantity(displayStock)} · katalóg`
+                                            : "Ponuka sa nenašla"
                                           : "Nie je na sklade"
                                         : rowStockText;
                                       const stockSummaryClass = cn(
@@ -2518,13 +2521,11 @@ function ProductSupplierExpandedTableRow({
                                                       </>
                                                     ) : priceUiLoading ? (
                                                       <Loader2 className="inline h-3.5 w-3.5 animate-spin text-sky-600 align-middle sm:h-4 sm:w-4" />
-                                                    ) : rowPriceLive ? (
+                                                    ) : rowPrice != null &&
+                                                      Number.isFinite(rowPrice) ? (
                                                       <>
-                                                        {rowPrice != null &&
-                                                        Number.isFinite(rowPrice) ? (
-                                                          formatScrapePriceAmount(rowPrice)
-                                                        ) : (
-                                                          "—"
+                                                        {formatScrapePriceAmount(
+                                                          rowPrice,
                                                         )}{" "}
                                                         {rowPriceSymbol}
                                                         <span
@@ -2562,11 +2563,16 @@ function ProductSupplierExpandedTableRow({
                                                         aria-hidden
                                                       />
                                                     </span>
-                                                  ) : liveScrapeMissingOffer ? null : (
-                                                    <span className="ml-0.5 text-[10px] text-slate-400 sm:ml-1 sm:text-xs">
-                                                      demo
+                                                  ) : rowPrice != null &&
+                                                    Number.isFinite(rowPrice) &&
+                                                    !offerLiveOutOfStock ? (
+                                                    <span
+                                                      className="ml-0.5 text-[10px] text-slate-400 sm:ml-1 sm:text-xs"
+                                                      title="Cena z lokálnych dát (nie živý e-shop)"
+                                                    >
+                                                      katalóg
                                                     </span>
-                                                  )}
+                                                  ) : null}
                                                 </div>
                                                 <div
                                                   className={cn(
@@ -2646,6 +2652,18 @@ function ProductSupplierExpandedTableRow({
                                                         strokeWidth={2.25}
                                                         aria-hidden
                                                       />
+                                                    </span>
+                                                  ) : liveScrapeMissingOffer &&
+                                                    displayStock != null &&
+                                                    Number.isFinite(
+                                                      displayStock,
+                                                    ) &&
+                                                    !offerLiveOutOfStock ? (
+                                                    <span
+                                                      className="ml-0.5 text-[9px] text-slate-400 sm:ml-1 sm:text-xs"
+                                                      title="Sklad z lokálnych dát (nie živý e-shop)"
+                                                    >
+                                                      katalóg
                                                     </span>
                                                   ) : !rowStockLive &&
                                                     !liveScrapeMissingOffer ? (

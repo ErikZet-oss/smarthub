@@ -149,9 +149,30 @@ HOPEFIX_B1_ROW = """
 def test_hopefix_b1_stock_not_pallet_uses_sklad_column():
     row = find_hopefix_row_in_html(HOPEFIX_B1_ROW, "D9338810016B1")
     assert row is not None
+    assert row.get("_hopefix_login_gate") is False
     assert row["stock"] == 4400
     assert row["pack_quantity"] == 200
     assert row["price_eur"] == pytest.approx(3.82)
+
+
+HOPEFIX_PUBLIC_LOGIN_CELLS = """
+<table>
+<thead><tr>
+<th>DIN</th><th>Registrační číslo</th><th>Rozměr</th><th>Sklad</th><th>EUR</th>
+</tr></thead>
+<tbody>
+<tr id="line-D9338810016B1"><td>933</td><td>D9338810016B1</td><td>M10</td>
+<td class="center"><a href="/prihlaseni">Přihlásit se</a></td>
+<td class="center"><a href="/prihlaseni">Přihlásit se</a></td></tr>
+</tbody>
+</table>
+"""
+
+
+def test_hopefix_login_gate_when_price_cells_are_login_links():
+    row = find_hopefix_row_in_html(HOPEFIX_PUBLIC_LOGIN_CELLS, "D9338810016B1")
+    assert row is not None
+    assert row.get("_hopefix_login_gate") is True
 
 
 HOPEFIX_B1_EXTRA_TD = """

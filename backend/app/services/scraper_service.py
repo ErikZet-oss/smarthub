@@ -2079,31 +2079,6 @@ async def _hopefix_get_supplier_data_via_http(
     if not code:
         raise ValueError("Prázdny kód produktu.")
     enc = quote(code, safe=".-_~")
-    try_urls: list[str] = []
-    seen_u: set[str] = set()
-
-    def _add(u: str) -> None:
-        x = (u or "").strip()
-        if not x:
-            return
-        if not x.startswith("http"):
-            x = urljoin("https://www.hopefix.cz/", x.lstrip("/"))
-        if x in seen_u:
-            return
-        seen_u.add(x)
-        try_urls.append(x)
-
-    for rel in _hopefix_narrow_catalog_paths(code, enc):
-        _add(rel)
-    tmpl = (config.hopefix_catalog_url_template or "").strip()
-    if tmpl:
-        try:
-            _add(build_hopefix_catalog_url(tmpl, code))
-        except ValueError:
-            pass
-    su = (config.search_via_url_template or "").strip()
-    if su and "{code}" in su:
-        _add(su.replace("{code}", enc))
     key = hopefix_norm_code(code)
 
     row: Optional[dict[str, Any]] = None
@@ -2115,6 +2090,34 @@ async def _hopefix_get_supplier_data_via_http(
         h = html or ""
         if len(h) > len(best_html[0]):
             best_html[0] = h
+
+    def _build_hopefix_try_urls() -> tuple[list[str], set[str]]:
+        try_urls: list[str] = []
+        seen_u: set[str] = set()
+
+        def _add(u: str) -> None:
+            x = (u or "").strip()
+            if not x:
+                return
+            if not x.startswith("http"):
+                x = urljoin("https://www.hopefix.cz/", x.lstrip("/"))
+            if x in seen_u:
+                return
+            seen_u.add(x)
+            try_urls.append(x)
+
+        for rel in _hopefix_narrow_catalog_paths(code, enc):
+            _add(rel)
+        tmpl = (config.hopefix_catalog_url_template or "").strip()
+        if tmpl:
+            try:
+                _add(build_hopefix_catalog_url(tmpl, code))
+            except ValueError:
+                pass
+        su = (config.search_via_url_template or "").strip()
+        if su and "{code}" in su:
+            _add(su.replace("{code}", enc))
+        return try_urls, seen_u
 
     def _hopefix_factory() -> HopefixHttpClient:
         return HopefixHttpClient()
@@ -2143,89 +2146,120 @@ async def _hopefix_get_supplier_data_via_http(
             r = find_hopefix_row_in_html(html, code)
             return u, ln, r
 
-        if len(try_urls) <= 1:
-            for attempt in try_urls:
+        async def _search_b2b_catalog() -> None:
+            nonlocal row, last_html_len
+            row = None
+            try_urls, seen_u = _build_hopefix_try_urls()
+            if len(try_urls) <= 1:
+                for attempt in try_urls:
+                    _log(
+                        run_label,
+                        supplier,
+                        run_id,
+                        f"Hopefix HTTP: GET katalóg {attempt!r}",
+                    )
+                    _, last_html_len, row = await _fetch_row(attempt)
+                    if row:
+                        break
+            elif try_urls:
                 _log(
                     run_label,
                     supplier,
                     run_id,
-                    f"Hopefix HTTP: GET katalóg {attempt!r}",
+                    f"Hopefix HTTP: paralelné GET ({len(try_urls)} URL)",
                 )
-                _, last_html_len, row = await _fetch_row(attempt)
-                if row:
-                    break
-        elif try_urls:
+                packed = await asyncio.gather(*[_fetch_row(u) for u in try_urls])
+                for _url, ln, r in packed:
+                    last_html_len = max(last_html_len, ln)
+                    if r:
+                        row = r
+                        break
+            if not row and try_urls:
+                anchored = _hopefix_url_with_row_anchor(try_urls[-1], key)
+                if anchored not in seen_u:
+                    _log(
+                        run_label,
+                        supplier,
+                        run_id,
+                        f"Hopefix HTTP: GET s _ref+hash (fallback) {anchored!r}",
+                    )
+                    html = await client.get_text(anchored)
+                    last_html_len = len(html or "")
+                    _note_response_body(html)
+                    row = find_hopefix_row_in_html(html, code)
+            if not row:
+                # Úzka podkategória v šablóne často obsahuje len časť riadkov; veľká /sortiment/<seg>
+                # (rovnaký fallback ako Playwright) má kompletnú tabuľku. Fragment #kód sa na server neposiela.
+                # Skúsime všetky podstránky paralelne — server zvládne 5-10 paralelných GET-ov bez problémov
+                # a šetríme tým 2-5 s pri ne-trefe v hlavnej URL.
+                segs = _hopefix_fallback_category_segments(code)
+                fallback_urls: list[str] = []
+                for seg in segs:
+                    for rel in (f"/sortiment/{seg}?_ref={enc}", f"/sortiment/{seg}"):
+                        if rel not in seen_u:
+                            seen_u.add(rel)
+                            fallback_urls.append(rel)
+                if fallback_urls:
+                    _log(
+                        run_label,
+                        supplier,
+                        run_id,
+                        f"Hopefix HTTP: paralelný fallback {len(fallback_urls)} podstránok",
+                    )
+
+                    async def _fetch_fallback(
+                        rel: str,
+                    ) -> tuple[str, Optional[dict[str, Any]], int, Optional[str]]:
+                        try:
+                            html_fb = await client.get_text(rel)
+                            _note_response_body(html_fb)
+                            return (
+                                rel,
+                                find_hopefix_row_in_html(html_fb, code),
+                                len(html_fb or ""),
+                                None,
+                            )
+                        except Exception as exc:
+                            return rel, None, 0, str(exc)
+
+                    fb_results = await asyncio.gather(
+                        *[_fetch_fallback(u) for u in fallback_urls],
+                        return_exceptions=False,
+                    )
+                    for rel, r, ln, err in fb_results:
+                        if ln:
+                            last_html_len = max(last_html_len, ln)
+                        if err:
+                            _log(
+                                run_label,
+                                supplier,
+                                run_id,
+                                f"Hopefix HTTP: fallback {rel!r}: {err}",
+                                "warn",
+                            )
+                            continue
+                        if r and not row:
+                            row = r
+
+        await _search_b2b_catalog()
+        need_reauth = row is None or bool(
+            isinstance(row, dict) and row.get("_hopefix_login_gate")
+        )
+        if need_reauth:
             _log(
                 run_label,
                 supplier,
                 run_id,
-                f"Hopefix HTTP: paralelné GET ({len(try_urls)} URL)",
+                "Hopefix HTTP: B2B katalóg bez riadku alebo ako neprihlásený — "
+                "čistím cookies a opakujem prihlásenie",
+                "warn",
             )
-            packed = await asyncio.gather(*[_fetch_row(u) for u in try_urls])
-            for _url, ln, r in packed:
-                last_html_len = max(last_html_len, ln)
-                if r:
-                    row = r
-                    break
-        if not row and try_urls:
-            anchored = _hopefix_url_with_row_anchor(try_urls[-1], key)
-            if anchored not in seen_u:
-                _log(
-                    run_label,
-                    supplier,
-                    run_id,
-                    f"Hopefix HTTP: GET s _ref+hash (fallback) {anchored!r}",
-                )
-                html = await client.get_text(anchored)
-                last_html_len = len(html or "")
-                _note_response_body(html)
-                row = find_hopefix_row_in_html(html, code)
-        if not row:
-            # Úzka podkategória v šablóne často obsahuje len časť riadkov; veľká /sortiment/<seg>
-            # (rovnaký fallback ako Playwright) má kompletnú tabuľku. Fragment #kód sa na server neposiela.
-            # Skúsime všetky podstránky paralelne — server zvládne 5-10 paralelných GET-ov bez problémov
-            # a šetríme tým 2-5 s pri ne-trefe v hlavnej URL.
-            segs = _hopefix_fallback_category_segments(code)
-            fallback_urls: list[str] = []
-            for seg in segs:
-                for rel in (f"/sortiment/{seg}?_ref={enc}", f"/sortiment/{seg}"):
-                    if rel not in seen_u:
-                        seen_u.add(rel)
-                        fallback_urls.append(rel)
-            if fallback_urls:
-                _log(
-                    run_label,
-                    supplier,
-                    run_id,
-                    f"Hopefix HTTP: paralelný fallback {len(fallback_urls)} podstránok",
-                )
-
-                async def _fetch_fallback(rel: str) -> tuple[str, Optional[dict[str, Any]], int, Optional[str]]:
-                    try:
-                        html_fb = await client.get_text(rel)
-                        _note_response_body(html_fb)
-                        return rel, find_hopefix_row_in_html(html_fb, code), len(html_fb or ""), None
-                    except Exception as exc:
-                        return rel, None, 0, str(exc)
-
-                fb_results = await asyncio.gather(
-                    *[_fetch_fallback(u) for u in fallback_urls],
-                    return_exceptions=False,
-                )
-                for rel, r, ln, err in fb_results:
-                    if ln:
-                        last_html_len = max(last_html_len, ln)
-                    if err:
-                        _log(
-                            run_label,
-                            supplier,
-                            run_id,
-                            f"Hopefix HTTP: fallback {rel!r}: {err}",
-                            "warn",
-                        )
-                        continue
-                    if r and not row:
-                        row = r
+            await client.ensure_login(
+                supplier.username,
+                supplier.password,
+                force=True,
+            )
+            await _search_b2b_catalog()
     if not row:
         _log(
             run_label,
@@ -2234,8 +2268,9 @@ async def _hopefix_get_supplier_data_via_http(
             "Hopefix HTTP: prihlásený katalóg neobsahuje kód v HTML — skúšam verejný (bez cookies)",
             "warn",
         )
+        try_urls_pub, _ = _build_hopefix_try_urls()
         pub_candidates: list[str] = []
-        for u in try_urls:
+        for u in try_urls_pub:
             if u not in pub_candidates:
                 pub_candidates.append(u)
         for seg in _hopefix_fallback_category_segments(code):
@@ -2281,12 +2316,15 @@ async def _hopefix_get_supplier_data_via_http(
                     " Kód v HTML je, ale riadok tabuľky sa nepodarilo extrahovať — po deployi skús znova; "
                     "ak pretrváva, je potrebný export úseku stránky."
                 )
+        try_list, _ = _build_hopefix_try_urls()
         raise RuntimeError(
-            f"Hopefix: v tabuľke sa nenašiel riadok pre kód {code!r} (skúšané {len(try_urls)} URL, "
+            f"Hopefix: v tabuľke sa nenašiel riadok pre kód {code!r} (skúšané {len(try_list)} URL, "
             f"posledná odpoveď ≈{last_html_len} B). Skontroluj hopefix_catalog_url_template "
             f"a search_via_url_template — musia viesť na stránku, kde je tento kód v tabuľke."
             f"{presence}"
         )
+    if isinstance(row, dict):
+        row.pop("_hopefix_login_gate", None)
     pkg_type = (config.hopefix_default_package_type or "box").strip() or "box"
     label = (row.get("label") or "").strip() or code
     pq = row.get("pack_quantity")

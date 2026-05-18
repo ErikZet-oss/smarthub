@@ -481,6 +481,9 @@ def _hopefix_row_dict_from_line_inner(
             raw_stock = lr
 
     hopefix_product_id = _extract_product_id(inner)
+    login_gate = bool(
+        re.search(r'href\s*=\s*["\']/prihlaseni\b', inner, re.I)
+    )
     return {
         "product_nr": product_nr,
         "hopefix_product_id": hopefix_product_id,
@@ -490,6 +493,7 @@ def _hopefix_row_dict_from_line_inner(
         "pack_quantity": pack_quantity,
         "stock": stock,
         "raw_stock": raw_stock,
+        "_hopefix_login_gate": login_gate,
     }
 
 
@@ -682,7 +686,15 @@ class HopefixHttpClient:
         except Exception:
             pass
 
-    async def ensure_login(self, email: str, password: str) -> None:
+    async def ensure_login(
+        self, email: str, password: str, *, force: bool = False
+    ) -> None:
+        if force:
+            self._login_ok = False
+            try:
+                self._client.cookies.clear()
+            except Exception:
+                pass
         if self._login_ok:
             return
         em = (email or "").strip()
