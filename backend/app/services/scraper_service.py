@@ -1253,8 +1253,11 @@ def _hopefix_narrow_catalog_paths(product_code: str, enc: str) -> list[str]:
         for slug in slugs:
             out.extend(_pair(slug))
 
-    if re.match(
-        r"^D9(12|13|14|16|2[0-5]|31|33|34|35|60|61|62|63|64|91)",
+    # DIN 934 = šesťhranná matica — kód začína D934 (nie D9+34 skrutka).
+    if re.match(r"^D934", k):
+        _extend(["matice-sestihranne", "matice"])
+    elif re.match(
+        r"^D9(12|13|14|16|2[0-5]|31|33|35|60|61|62|63|64|91)",
         k,
     ) or k.startswith("D6912"):
         _extend(
@@ -1301,9 +1304,21 @@ def _hopefix_fallback_category_segments(product_code: str) -> list[str]:
     ]
     if not k:
         return all_seg
+    # DIN 934 matice — tabuľka je v /sortiment/matice-sestihranne (nie v /srouby).
+    if re.match(r"^D934", k):
+        first = [
+            "matice-sestihranne",
+            "matice",
+            "srouby",
+            "podlozky",
+            "vruty",
+            "zavitove-tyce",
+        ]
+        rest = [s for s in all_seg if s not in first]
+        return first + rest
     # Skrutky / závit (DIN 933, 931, 912, …) — na /sortiment je len rozcestník, tabuľka je v /srouby
     if re.match(
-        r"^D9(12|13|14|16|2[0-5]|31|33|34|35|60|61|62|63|64|91)",
+        r"^D9(12|13|14|16|2[0-5]|31|33|35|60|61|62|63|64|91)",
         k,
     ) or k.startswith("D6912"):
         first = [

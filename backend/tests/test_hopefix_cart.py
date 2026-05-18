@@ -304,6 +304,15 @@ def test_hopefix_referer_path_strips_host_keeps_query():
     assert hopefix_referer_path_from_catalog_url("") == "/"
 
 
+def test_hopefix_narrow_catalog_prefers_matice_sestihranne_for_d934():
+    """D934820000B1 je matica na /sortiment/matice-sestihranne, nie v /srouby."""
+    code = "D934820000B1"
+    enc = quote(code, safe=".-_~")
+    paths = _hopefix_narrow_catalog_paths(code, enc)
+    assert paths[0].startswith("/sortiment/matice-sestihranne?_ref=")
+    assert "/sortiment/srouby-se-sestihrannou-hlavou-pevnost-88" not in paths[0]
+
+
 def test_hopefix_narrow_catalog_prefers_pevnost_88_for_hex_8_8():
     """HAR D9338810016B1: B2B riadok je na /sortiment/srouby-…-pevnost-88."""
     code = "D9338810016B1"
