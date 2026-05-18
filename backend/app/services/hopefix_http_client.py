@@ -88,29 +88,44 @@ def hopefix_row_likely_no_cart_form(row: dict[str, Any]) -> bool:
 
 
 def hopefix_row_parse_quality(row: Optional[dict[str, Any]]) -> tuple[int, int]:
-    """Nižšia hodnota = užitočnejší riadok (B2B bunky, nie /prihlaseni)."""
+    """Nižšia hodnota = užitočnejší riadok.
+
+    Najprv uprednostníme skutočnú cenu/sklad (``has_live``); až potom to, či je v ``<tr>``
+    aj odkaz ``/prihlaseni`` (napr. v stĺpci „Vaše číslo“)—ten **nesmie** prepísať dobrý B2B riadok.
+    """
     if not row:
-        return (9, 0)
+        return (1, 1)
     gate = 1 if row.get("_hopefix_login_gate") else 0
     has_live = 0
     if row.get("price_eur") is not None or row.get("stock") is not None:
         has_live = 2
     elif (row.get("raw_price") or "").strip() or (row.get("raw_stock") or "").strip():
         has_live = 1
-    return (gate, -has_live)
+    return (-has_live, gate)
 
 
 def hopefix_row_has_live_offer_cells(row: Optional[dict[str, Any]]) -> bool:
-    """Má riadok reálnu ponuku (číselnú alebo text sklad/cena), nie len login placeholder."""
+    """Má riadok reálnu ponuku (číselnú alebo text sklad/cena).
+
+    ``_hopefix_login_gate`` znamená len „niekde v riadku je /prihlaseni“ — pri B2B to často
+    nie je stĺpec ceny. Ak už máme ``price_eur`` / ``stock``, považujeme riadok za platný.
+    """
     if not row:
-        return False
-    if row.get("_hopefix_login_gate"):
         return False
     if row.get("price_eur") is not None or row.get("stock") is not None:
         return True
     if (row.get("raw_price") or "").strip() or (row.get("raw_stock") or "").strip():
         return True
     return False
+
+
+def hopefix_row_is_guest_price_row(row: Optional[dict[str, Any]]) -> bool:
+    """Riadok kde v HTML sú len hostovské bunky (Prihlásit) — bez vyčítanej ponuky."""
+    if not row:
+        return False
+    return bool(row.get("_hopefix_login_gate")) and not hopefix_row_has_live_offer_cells(
+        row
+    )
 
 
 def hopefix_row_pick_better(

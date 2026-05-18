@@ -32,6 +32,7 @@ from app.services.hopefix_http_client import (
     hopefix_row_pick_better,
     hopefix_raw_suggests_oos,
     hopefix_row_has_live_offer_cells,
+    hopefix_row_is_guest_price_row,
     hopefix_row_is_oos,
     hopefix_row_likely_no_cart_form,
 )
@@ -2250,9 +2251,7 @@ async def _hopefix_get_supplier_data_via_http(
                             row = hopefix_row_pick_better(row, r)
 
         await _search_b2b_catalog()
-        need_reauth = row is None or bool(
-            isinstance(row, dict) and row.get("_hopefix_login_gate")
-        )
+        need_reauth = row is None or hopefix_row_is_guest_price_row(row)
         if need_reauth:
             _log(
                 run_label,
@@ -2268,7 +2267,7 @@ async def _hopefix_get_supplier_data_via_http(
                 force=True,
             )
             await _search_b2b_catalog()
-        if isinstance(row, dict) and row.get("_hopefix_login_gate"):
+        if isinstance(row, dict) and hopefix_row_is_guest_price_row(row):
             _log(
                 run_label,
                 supplier,

@@ -5,6 +5,8 @@ from app.services.hopefix_http_client import (
     find_hopefix_row_in_html,
     hopefix_norm_code,
     hopefix_parse_cart_html,
+    hopefix_row_has_live_offer_cells,
+    hopefix_row_is_guest_price_row,
     hopefix_row_likely_no_cart_form,
     hopefix_row_parse_quality,
     hopefix_row_pick_better,
@@ -240,3 +242,25 @@ def test_hopefix_parse_quality_orders_login_last():
     num = {"_hopefix_login_gate": False, "price_eur": 1.0}
     assert hopefix_row_parse_quality(num) < hopefix_row_parse_quality(empty)
     assert hopefix_row_parse_quality(empty) < hopefix_row_parse_quality(gate)
+
+
+def test_hopefix_has_live_offer_ignores_spurious_login_gate_when_priced():
+    row = {
+        "_hopefix_login_gate": True,
+        "price_eur": 1.0,
+        "stock": 5,
+    }
+    assert hopefix_row_has_live_offer_cells(row) is True
+    assert hopefix_row_is_guest_price_row(row) is False
+
+
+def test_hopefix_pick_better_keeps_priced_row_even_if_login_gate_flag():
+    empty = {"product_nr": "X", "_hopefix_login_gate": False}
+    priced_gate = {
+        "product_nr": "X",
+        "_hopefix_login_gate": True,
+        "price_eur": 3.82,
+        "stock": 100,
+    }
+    assert hopefix_row_pick_better(empty, priced_gate) == priced_gate
+    assert hopefix_row_pick_better(priced_gate, empty) == priced_gate
