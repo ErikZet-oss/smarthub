@@ -548,16 +548,49 @@ def _hopefix_row_dict_from_line_inner(
     }
 
 
+_LINE_TR_OPEN = re.compile(
+    r'<tr\b[^>]*\bid\s*=\s*(?:"line-([^"]+)"|\'line-([^\']+)\'|line-([^\s>]+))[^>]*>',
+    re.I,
+)
+
+
+def _hopefix_balanced_tr_inner(html: str, content_after_open_gt: int) -> Optional[tuple[str, int]]:
+    """Vnútro ``<tr>`` od pozície hneď za ``>`` otváracieho tagu po párové ``</tr>``.
+
+    Hopefix vkladá vnorené ``<tr>`` (rozbalenie, vnútorné tabuľky) — prvé ``</tr>`` nie je
+    koniec katalógového riadku; jednoduchý regex ``(.*?)</tr>`` by odrezal cenu/sklad.
+    """
+    depth = 1
+    i = content_after_open_gt
+    n = len(html)
+    tr_open = re.compile(r"<tr\b", re.I)
+    tr_close = re.compile(r"</tr\s*>", re.I)
+    while i < n and depth > 0:
+        mo = tr_open.search(html, i)
+        mc = tr_close.search(html, i)
+        if mc is None:
+            return None
+        if mo is not None and mo.start() < mc.start():
+            depth += 1
+            i = mo.end()
+        else:
+            depth -= 1
+            end_tag = mc.end()
+            if depth == 0:
+                return (html[content_after_open_gt : mc.start()], end_tag)
+            i = end_tag
+    return None
+
+
 def parse_hopefix_rows(html: str) -> list[dict[str, Any]]:
     """Parsuje <tr id=line-…> / id=\"line-…\" — aj variant bez úvodzoviek okolo hodnoty."""
     out: list[dict[str, Any]] = []
-    pat = re.compile(
-        r'<tr\b[^>]*\bid\s*=\s*(?:"line-([^"]+)"|\'line-([^\']+)\'|line-([^\s>]+))[^>]*>(.*?)</tr>',
-        re.I | re.DOTALL,
-    )
-    for m in pat.finditer(html):
+    for m in _LINE_TR_OPEN.finditer(html):
         line_key = (m.group(1) or m.group(2) or m.group(3) or "").strip()
-        inner = m.group(4)
+        bal = _hopefix_balanced_tr_inner(html, m.end())
+        if bal is None:
+            continue
+        inner, _ = bal
         headers = _hopefix_column_headers_for_row(html, m.start())
         out.append(_hopefix_row_dict_from_line_inner(line_key, inner, headers))
     return out
@@ -587,9 +620,13 @@ def _find_hopefix_row_tr_by_registration_td(html: str, key: str) -> Optional[dic
         r'\bid\s*=\s*(?:"line-([^"]+)"|\'line-([^\']+)\'|line-([^\s>]+))',
         re.I,
     )
-    for m in re.finditer(r"<tr\b([^>]*)>(.*?)</tr>", html, re.I | re.DOTALL):
+    for m in re.finditer(r"<tr\b([^>]*)>", html, re.I):
         tr_start = m.start()
-        open_attrs, inner = m.group(1), m.group(2)
+        open_attrs = m.group(1)
+        bal = _hopefix_balanced_tr_inner(html, m.end())
+        if bal is None:
+            continue
+        inner, _ = bal
         tds = re.findall(r"<td[^>]*>(.*?)</td>", inner, re.I | re.DOTALL)
         matched = any(hopefix_norm_code(_strip_tags(td)) == key for td in tds)
         if not matched:
@@ -619,21 +656,18 @@ def _find_hopefix_row_tr_by_code_occurrence(html: str, key: str) -> Optional[dic
         tr_start = html.rfind("<tr", 0, pos)
         if tr_start < 0:
             continue
-        tr_end = html.find("</tr>", pos)
-        if tr_end < 0:
-            continue
-        tr_end += 5
-        frag = html[tr_start:tr_end]
-        if frag.lower().count("<td") < 1:
-            continue
-        open_m = re.match(r"<tr\b([^>]*)>", frag, re.I)
+        open_m = re.match(r"<tr\b[^>]*>", html[tr_start:], re.I)
         if not open_m:
             continue
-        open_attrs = open_m.group(1)
-        inner = frag[open_m.end() : tr_end - 5]
+        bal = _hopefix_balanced_tr_inner(html, tr_start + open_m.end())
+        if bal is None:
+            continue
+        inner, _ = bal
         tds_raw = re.findall(r"<td[^>]*>(.*?)</td>", inner, re.I | re.DOTALL)
         if not any(hopefix_norm_code(_strip_tags(td)) == key for td in tds_raw):
             continue
+        open_attrs_m = re.match(r"<tr\b([^>]*)>", html[tr_start:], re.I)
+        open_attrs = open_attrs_m.group(1) if open_attrs_m else ""
         im = line_pat.search(open_attrs)
         line_key = key
         if im:
@@ -680,6 +714,7 @@ async def hopefix_fetch_html_anonymous(url_or_path: str) -> str:
             "User-Agent": DEFAULT_UA,
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "cs,sk;q=0.9,en;q=0.8",
+            "Referer": f"{DEFAULT_BASE}/",
         },
     ) as ac:
         r = await ac.get(target)
@@ -802,7 +837,12 @@ class HopefixHttpClient:
 
     async def get_text(self, url_or_path: str) -> str:
         abs_url = self._abs_url(url_or_path)
-        r = await self._client.get(abs_url)
+        r = await self._client.get(
+            abs_url,
+            headers={
+                "Referer": f"{self._origin}/",
+            },
+        )
         r.raise_for_status()
         return r.text
 

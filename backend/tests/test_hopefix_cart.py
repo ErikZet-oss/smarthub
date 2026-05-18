@@ -94,6 +94,26 @@ def test_parse_unquoted_line_id():
     assert rows[0]["product_nr"] == "D933X1"
 
 
+HOPEFIX_NESTED_TR_INSIDE_LINE = """
+<table>
+<thead><tr><th>DIN</th><th>Reg</th><th>Rozměr</th><th>EUR/100 pcs</th></tr></thead>
+<tbody>
+<tr id="line-D933NEST1"><td>933</td>
+<td><table><tr><td>nested</td></tr></table></td>
+<td>M10</td>
+<td class="t-right tdprice">5,00&nbsp;€</td>
+</tr>
+</tbody>
+</table>
+"""
+
+
+def test_find_row_balanced_tr_when_inner_table_before_price():
+    row = find_hopefix_row_in_html(HOPEFIX_NESTED_TR_INSIDE_LINE, "D933NEST1")
+    assert row is not None
+    assert row["price_eur"] == pytest.approx(5.0)
+
+
 def test_find_row_with_extra_leading_td():
     html = (
         "<tbody><tr>"
