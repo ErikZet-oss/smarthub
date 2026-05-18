@@ -723,15 +723,7 @@ def supplier_allows_empty_cart_config(supplier: Supplier) -> bool:
 
 
 def _hopefix_http_enabled(config: ScraperConfig) -> bool:
-    """HTTP cestu pre Hopefix vždy povoľujeme.
-
-    Aj bez `hopefix_catalog_url_template` v `cart_config_json` má klient
-    fallback na `_hopefix_fallback_category_segments` (kategórie /sortiment/<seg>).
-    Predtým sme to vypínali, čo na Renderi (kde Playwright nie je nainštalovaný)
-    spôsobovalo, že požiadavka padla na generickú hlášku „Playwright fallback je
-    vypnutý" namiesto skutočného HTTP errora.
-    """
-    return True
+    return bool((config.hopefix_catalog_url_template or "").strip())
 
 
 def _hopefix_apply_oos_zero_pricing(target: dict[str, Any]) -> None:
@@ -1226,57 +1218,6 @@ async def _hopefix_scroll_catalog_until_line_present(
     return await _hopefix_registration_row_index_in_tbody(page, key) >= 0
 
 
-def _hopefix_narrow_catalog_paths(product_code: str, enc: str) -> list[str]:
-    """Relatívne URL (/sortiment/…) pre prvý HTTP pokus — úzke kategórie z hopefix.cz.
-
-    Veľké ``/sortiment/srouby`` často vracia len prvú stránku tabuľky; kód ako
-    ``D933A212016`` tam nemusí byť. Podcesty z rozcestníka „Šrouby“ (2026) treba
-    skúšať skôr. Rovnaký pár pridáme s ``?_ref=`` (Hopefix scrolluje na riadok).
-    """
-    k = hopefix_norm_code(product_code)
-    if not k or not enc:
-        return []
-
-    def _pair(seg: str) -> list[str]:
-        s = seg.strip().strip("/")
-        if not s:
-            return []
-        return [f"/sortiment/{s}?_ref={enc}", f"/sortiment/{s}"]
-
-    out: list[str] = []
-
-    def _extend(slugs: list[str]) -> None:
-        for slug in slugs:
-            out.extend(_pair(slug))
-
-    # Šrouby — metrické podkategórie (nápoveda z HTML rozcestníka /sortiment/srouby)
-    if re.match(
-        r"^D9(12|13|14|16|2[0-5]|31|33|34|35|60|61|62|63|64|91)",
-        k,
-    ) or k.startswith("D6912"):
-        _extend(
-            [
-                "metricke-se-sestihranou-hlavou",
-                "metricke-s-valcovou-hlavou",
-                "metricke-s-pulkulatou-hlavou",
-                "metricke-se-zaoblenou-hlavou",
-                "metricke-se-zapustnou-hlavou",
-                "kotevni-okenni-srouby",
-            ]
-        )
-    if re.match(r"^D12[0-9]", k) or k.startswith("D9021"):
-        _extend(
-            [
-                "podlozky-ploche-kruhove-nerez-a2",
-                "podlozky",
-            ]
-        )
-    if re.match(r"^D98", k) or re.match(r"^D69", k):
-        _extend(["matice"])
-
-    return out
-
-
 def _hopefix_fallback_category_segments(product_code: str) -> list[str]:
     """Poradie podcest /sortiment/<segment>#kód podľa typického zaradenia DIN kódu."""
     k = hopefix_norm_code(product_code)
@@ -1300,19 +1241,7 @@ def _hopefix_fallback_category_segments(product_code: str) -> list[str]:
         r"^D9(12|13|14|16|2[0-5]|31|33|34|35|60|61|62|63|64|91)",
         k,
     ) or k.startswith("D6912"):
-        first = [
-            "metricke-se-sestihranou-hlavou",
-            "metricke-s-valcovou-hlavou",
-            "metricke-s-pulkulatou-hlavou",
-            "metricke-se-zaoblenou-hlavou",
-            "metricke-se-zapustnou-hlavou",
-            "kotevni-okenni-srouby",
-            "srouby",
-            "vruty",
-            "matice",
-            "podlozky",
-            "zavitove-tyce",
-        ]
+        first = ["srouby", "vruty", "matice", "podlozky", "zavitove-tyce"]
         rest = [s for s in all_seg if s not in first]
         return first + rest
     if re.match(r"^D12[0-9]", k) or k.startswith("D9021"):
@@ -2093,21 +2022,7 @@ async def _hopefix_get_supplier_data_via_http(
         seen_u.add(x)
         try_urls.append(x)
 
-    # Úzke podstránky /sortiment/<slug> (aktuálny IA Hopefix-u na hopefix.cz 2026) —
-    # musia ísť PRED `/sortiment/srouby` atď. Rozcestník `srouby` je v hlavičke len hub;
-    # tabuľka pod `/sortiment/srouby` obsahuje tisíce riadkov a pri B2B zobrazení často
-    # len prvú stránku (~100 ks) — kód DIN 933 potom v nej nie je. Podkategória
-    # „metrické se šestihranou hlavou“ má ~1.2k riadkov a `D933…` je priamo v HTML.
-    # Pozn.: `GET /search?search=…` Hopefix dnes vracia 404 — vo formulári je síce
-    # `action="/search"`, ale endpoint nie je nasadený / používa iný routing.
-    for rel in _hopefix_narrow_catalog_paths(code, enc):
-        _add(rel)
-    tmpl = (config.hopefix_catalog_url_template or "").strip()
-    if tmpl:
-        try:
-            _add(build_hopefix_catalog_url(tmpl, code))
-        except ValueError:
-            pass
+    _add(build_hopefix_catalog_url(config.hopefix_catalog_url_template or "", code))
     su = (config.search_via_url_template or "").strip()
     if su and "{code}" in su:
         _add(su.replace("{code}", enc))
@@ -2135,25 +2050,11 @@ async def _hopefix_get_supplier_data_via_http(
         _hopefix_login,
     )
     async with _contextlib.nullcontext(pooled_client) as client:
-        # Diagnostika pre prípad, že riadok nikde nenájdeme — chceme vidieť,
-        # aké product_nr Hopefix vracia (či len iný formát kódu) a koľko
-        # riadkov tabuľka má. Bez toho je „nenašiel sa riadok" slepá ulička.
-        parsed_samples: list[str] = []
-        total_rows_parsed = 0
-        per_url_log: list[str] = []
 
         async def _fetch_row(u: str) -> tuple[str, int, Optional[dict[str, Any]]]:
-            nonlocal total_rows_parsed
             html = await client.get_text(u)
             ln = len(html or "")
-            rows_parsed = parse_hopefix_rows(html)
-            total_rows_parsed += len(rows_parsed)
-            for rrow in rows_parsed[:3]:
-                pn = (rrow.get("product_nr") or "").strip()
-                if pn and pn not in parsed_samples:
-                    parsed_samples.append(pn)
-            per_url_log.append(f"{u}→{ln}B/{len(rows_parsed)}r")
-            r = find_hopefix_row(rows_parsed, code)
+            r = find_hopefix_row(parse_hopefix_rows(html), code)
             return u, ln, r
 
         if len(try_urls) <= 1:
@@ -2214,17 +2115,9 @@ async def _hopefix_get_supplier_data_via_http(
                 )
 
                 async def _fetch_fallback(rel: str) -> tuple[str, Optional[dict[str, Any]], int, Optional[str]]:
-                    nonlocal total_rows_parsed
                     try:
                         html_fb = await client.get_text(rel)
-                        rows_parsed = parse_hopefix_rows(html_fb)
-                        total_rows_parsed += len(rows_parsed)
-                        for rrow in rows_parsed[:3]:
-                            pn = (rrow.get("product_nr") or "").strip()
-                            if pn and pn not in parsed_samples:
-                                parsed_samples.append(pn)
-                        per_url_log.append(f"{rel}→{len(html_fb or '')}B/{len(rows_parsed)}r")
-                        return rel, find_hopefix_row(rows_parsed, code), len(html_fb or ""), None
+                        return rel, find_hopefix_row(parse_hopefix_rows(html_fb), code), len(html_fb or ""), None
                     except Exception as exc:
                         return rel, None, 0, str(exc)
 
@@ -2247,18 +2140,10 @@ async def _hopefix_get_supplier_data_via_http(
                     if r and not row:
                         row = r
     if not row:
-        login_ok = bool(getattr(pooled_client, "login_ok", False))
-        samples_part = ", ".join(parsed_samples[:6]) if parsed_samples else "žiadne"
-        urls_part = "; ".join(per_url_log[:6]) if per_url_log else "žiadne"
         raise RuntimeError(
-            f"Hopefix: v tabuľke sa nenašiel riadok pre kód {code!r}. "
-            f"login_ok={login_ok}, parsovaných riadkov spolu={total_rows_parsed}, "
-            f"vzorky kódov z tabuľky: [{samples_part}], "
-            f"skúšané URL: [{urls_part}]. "
-            f"Ak login_ok=False, skontroluj meno/heslo v admine. Ak vzorky kódov "
-            f"vyzerajú inak (napr. medzery, pomlčky, iný prefix), uprav supplier_code "
-            f"v Excel mapovaní. Inak nastav `hopefix_catalog_url_template` v "
-            f"cart_config_json na konkrétnu podkategóriu, kde je kód v tabuľke."
+            f"Hopefix: v tabuľke sa nenašiel riadok pre kód {code!r} (skúšané {len(try_urls)} URL, "
+            f"posledná odpoveď ≈{last_html_len} B). Skontroluj hopefix_catalog_url_template "
+            f"a search_via_url_template — musia viesť na stránku, kde je tento kód v tabuľke."
         )
     pkg_type = (config.hopefix_default_package_type or "box").strip() or "box"
     label = (row.get("label") or "").strip() or code
@@ -6638,19 +6523,8 @@ class ScraperService:
                     f"get_supplier_data done (Hopefix HTTP): {hf}",
                 )
                 return await _maybe_cache(hf)
-            except ScraperProductNotFoundError:
-                raise
             except Exception as exc:
                 dev_run_log_exception(run_label, exc)
-                if _playwright_fallback_disabled():
-                    _log(
-                        run_label,
-                        supplier,
-                        run_id,
-                        f"Hopefix HTTP zlyhalo (Playwright fallback vypnutý): {exc}",
-                        "error",
-                    )
-                    raise RuntimeError(f"Hopefix HTTP zlyhalo: {exc}") from exc
                 _log(
                     run_label,
                     supplier,
