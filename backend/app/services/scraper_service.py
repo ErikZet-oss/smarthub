@@ -2315,6 +2315,14 @@ async def _hopefix_get_supplier_data_via_http(
         "hopefix_via_http": True,
         "hopefix_public_catalog_fallback": anonymous_fallback,
     }
+    if data.get("price_eur") is None and pv.get("price_eur") is not None:
+        data["price_eur"] = pv.get("price_eur")
+    if not (data.get("raw_price") or "").strip() and (pv.get("raw_price") or "").strip():
+        data["raw_price"] = pv.get("raw_price")
+    if data.get("stock") is None and pv.get("stock") is not None:
+        data["stock"] = pv.get("stock")
+    if not (data.get("raw_stock") or "").strip() and (pv.get("raw_stock") or "").strip():
+        data["raw_stock"] = pv.get("raw_stock")
     _hopefix_normalize_oos_display(data)
     if anonymous_fallback:
         base_pub = (

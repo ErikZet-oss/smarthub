@@ -860,7 +860,15 @@ function hopefixIsOutOfStock(scrape: SupplierScrapeState | undefined): boolean {
   if (!scrape || scrape.loading || scrape.error) {
     return false;
   }
-  const raw = (scrape.raw_stock || "").trim().toLowerCase();
+  const v0 =
+    Array.isArray(scrape.packaging_variants) &&
+    scrape.packaging_variants.length >= 1
+      ? scrape.packaging_variants[0]
+      : null;
+  const raw = (
+    (scrape.raw_stock || "").trim() ||
+    (v0?.raw_stock || "").trim()
+  ).toLowerCase();
   if (raw) {
     if (
       raw.includes("není skladem") ||
@@ -880,8 +888,13 @@ function hopefixIsOutOfStock(scrape: SupplierScrapeState | undefined): boolean {
       return true;
     }
   }
-  const qty = scrape.stock;
-  if (qty != null && Number.isFinite(qty) && qty <= 0) {
+  const qty =
+    scrape.stock != null && Number.isFinite(scrape.stock)
+      ? scrape.stock
+      : v0?.stock != null && Number.isFinite(v0.stock)
+        ? v0.stock
+        : null;
+  if (qty != null && qty <= 0) {
     return true;
   }
   return false;
@@ -1386,6 +1399,13 @@ function ProductSupplierExpandedTableRow({
                                               )
                                             ]
                                           : undefined;
+                                      const scrapePv0 =
+                                        scrape &&
+                                        !scrape.loading &&
+                                        Array.isArray(scrape.packaging_variants) &&
+                                        scrape.packaging_variants.length >= 1
+                                          ? scrape.packaging_variants[0]
+                                          : undefined;
                                       const mekrsNoStock =
                                         supplierNameIsMekrs(offer.supplier) &&
                                         mekrsIsOutOfStock(scrape);
@@ -1401,25 +1421,38 @@ function ProductSupplierExpandedTableRow({
                                                 !scrape.loading &&
                                                 scrape.price_eur != null
                                               ? scrape.price_eur
-                                              : offer.price_eur;
+                                              : scrape &&
+                                                  !scrape.loading &&
+                                                  scrapePv0?.price_eur != null
+                                                ? scrapePv0.price_eur
+                                                : offer.price_eur;
                                       const displayStock =
                                         scrape &&
                                         !scrape.loading &&
                                         scrape.stock != null
                                           ? scrape.stock
-                                          : offer.stock;
+                                          : scrape &&
+                                              !scrape.loading &&
+                                              scrapePv0?.stock != null
+                                            ? scrapePv0.stock
+                                            : offer.stock;
                                       const hasLiveStockQty =
                                         Boolean(
                                           scrape &&
                                             !scrape.loading &&
-                                            scrape.stock != null,
+                                            (scrape.stock != null ||
+                                              scrapePv0?.stock != null),
                                         );
                                       const hasLiveStockText =
                                         Boolean(
                                           scrape &&
                                             !scrape.loading &&
                                             scrape.stock == null &&
-                                            scrape.raw_stock?.trim(),
+                                            scrapePv0?.stock == null &&
+                                            (Boolean(scrape.raw_stock?.trim()) ||
+                                              Boolean(
+                                                (scrapePv0?.raw_stock || "").trim(),
+                                              )),
                                         );
                                       const stockLive =
                                         hasLiveStockQty || hasLiveStockText;
@@ -1430,14 +1463,24 @@ function ProductSupplierExpandedTableRow({
                                           ? formatKsQuantity(scrape.stock)
                                           : scrape &&
                                               !scrape.loading &&
-                                              scrape.raw_stock?.trim()
-                                            ? formatDigitsInTextCsThousands(
-                                                scrape.raw_stock.trim(),
-                                              )
-                                            : typeof displayStock === "number" &&
-                                                Number.isFinite(displayStock)
-                                              ? formatKsQuantity(displayStock)
-                                              : `${displayStock} ks`;
+                                              scrapePv0?.stock != null
+                                            ? formatKsQuantity(scrapePv0.stock)
+                                            : scrape &&
+                                                !scrape.loading &&
+                                                scrape.raw_stock?.trim()
+                                              ? formatDigitsInTextCsThousands(
+                                                  scrape.raw_stock.trim(),
+                                                )
+                                              : scrape &&
+                                                  !scrape.loading &&
+                                                  (scrapePv0?.raw_stock || "").trim()
+                                                ? formatDigitsInTextCsThousands(
+                                                    (scrapePv0?.raw_stock || "").trim(),
+                                                  )
+                                                : typeof displayStock === "number" &&
+                                                    Number.isFinite(displayStock)
+                                                  ? formatKsQuantity(displayStock)
+                                                  : `${displayStock} ks`;
                                       const hasLivePriceSignal = Boolean(
                                         scrape &&
                                           !scrape.loading &&
@@ -1445,6 +1488,13 @@ function ProductSupplierExpandedTableRow({
                                           (scrape.price_eur != null ||
                                             Boolean(
                                               (scrape.raw_price || "").trim(),
+                                            ) ||
+                                            Boolean(
+                                              scrapePv0 &&
+                                                (scrapePv0.price_eur != null ||
+                                                  Boolean(
+                                                    (scrapePv0.raw_price || "").trim(),
+                                                  )),
                                             )),
                                       );
                                       const priceLive =
@@ -1657,7 +1707,13 @@ function ProductSupplierExpandedTableRow({
                                             (scrape.stock != null ||
                                               Boolean(
                                                 (scrape.raw_stock || "").trim(),
-                                              )),
+                                              ) ||
+                                              (scrapePv0 != null &&
+                                                (scrapePv0.stock != null ||
+                                                  Boolean(
+                                                    (scrapePv0.raw_stock || "")
+                                                      .trim(),
+                                                  )))),
                                         );
                                       const rowStockLive =
                                         mekrsStockSummaryOnly
