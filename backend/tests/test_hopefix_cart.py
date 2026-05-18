@@ -73,3 +73,32 @@ def test_find_row_variant_suffix_b1():
 def test_hopefix_norm_code_nfkc_and_zwsp():
     s = "D933A212016\u200b"
     assert hopefix_norm_code(s) == "D933A212016"
+
+
+UNQUOTED_LINE = (
+    '<tr id=line-D933X1><td>933</td><td>D933X1</td><td class="t-right">M12</td>'
+    '<td>10,00&nbsp;€</td></tr>'
+)
+
+
+def test_parse_unquoted_line_id():
+    rows = parse_hopefix_rows(UNQUOTED_LINE)
+    assert len(rows) == 1
+    assert rows[0]["product_nr"] == "D933X1"
+
+
+def test_find_row_with_extra_leading_td():
+    html = (
+        "<tbody><tr>"
+        "<td>chk</td><td>933</td><td>D933A212016</td><td>x</td><td>5,00&nbsp;€</td>"
+        "</tr></tbody>"
+    )
+    row = find_hopefix_row_in_html(html, "D933A212016")
+    assert row is not None
+    assert row["product_nr"] == "D933A212016"
+
+
+def test_find_row_by_td_close_pattern():
+    html = "<table><tr><td>933</td><td>D933A212016</td><td>x</td></tr></table>"
+    row = find_hopefix_row_in_html(html, "D933A212016")
+    assert row is not None

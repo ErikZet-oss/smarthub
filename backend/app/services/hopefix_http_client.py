@@ -195,15 +195,15 @@ def _hopefix_row_dict_from_line_inner(line_key: str, inner: str) -> dict[str, An
 
 
 def parse_hopefix_rows(html: str) -> list[dict[str, Any]]:
-    """Parsuje <tr id="line-…"> z #rows — funguje na verejnej aj prihlásenej tabuľke."""
+    """Parsuje <tr id=line-…> / id=\"line-…\" — aj variant bez úvodzoviek okolo hodnoty."""
     out: list[dict[str, Any]] = []
-    for m in re.finditer(
-        r'<tr\b[^>]*\bid\s*=\s*["\']line-([^"\']+)["\'][^>]*>(.*?)</tr>',
-        html,
+    pat = re.compile(
+        r'<tr\b[^>]*\bid\s*=\s*(?:"line-([^"]+)"|\'line-([^\']+)\'|line-([^\s>]+))[^>]*>(.*?)</tr>',
         re.I | re.DOTALL,
-    ):
-        line_key = m.group(1).strip()
-        inner = m.group(2)
+    )
+    for m in pat.finditer(html):
+        line_key = (m.group(1) or m.group(2) or m.group(3) or "").strip()
+        inner = m.group(4)
         out.append(_hopefix_row_dict_from_line_inner(line_key, inner))
     return out
 
@@ -225,25 +225,68 @@ def find_hopefix_row(rows: list[dict[str, Any]], product_code: str) -> Optional[
 
 
 def _find_hopefix_row_tr_by_registration_td(html: str, key: str) -> Optional[dict[str, Any]]:
-    """Záloha: nájde <tr> podľa bunky „Registrační číslo“ (2. <td>), ak chýba atribút id=line-…."""
+    """Nájde <tr> podľa bunky s registračným kódom (ľubovoľný <td>, nie len 2.)."""
     if not key:
         return None
+    line_pat = re.compile(
+        r'\bid\s*=\s*(?:"line-([^"]+)"|\'line-([^\']+)\'|line-([^\s>]+))',
+        re.I,
+    )
     for m in re.finditer(r"<tr\b([^>]*)>(.*?)</tr>", html, re.I | re.DOTALL):
         open_attrs, inner = m.group(1), m.group(2)
         tds = re.findall(r"<td[^>]*>(.*?)</td>", inner, re.I | re.DOTALL)
-        if len(tds) < 2:
+        matched = any(hopefix_norm_code(_strip_tags(td)) == key for td in tds)
+        if not matched:
             continue
-        reg = hopefix_norm_code(_strip_tags(tds[1]))
-        if reg != key:
+        im = line_pat.search(open_attrs)
+        line_key = ""
+        if im:
+            line_key = (im.group(1) or im.group(2) or im.group(3) or "").strip()
+        if not line_key:
+            line_key = key
+        return _hopefix_row_dict_from_line_inner(line_key, inner)
+    return None
+
+
+def _find_hopefix_row_tr_by_code_occurrence(html: str, key: str) -> Optional[dict[str, Any]]:
+    """Posledná záloha: výskyt kódu v bunke (pattern `>KÓD</td`) → obalový <tr>."""
+    if not key or len(key) < 4:
+        return None
+    line_pat = re.compile(
+        r'\bid\s*=\s*(?:"line-([^"]+)"|\'line-([^\']+)\'|line-([^\s>]+))',
+        re.I,
+    )
+    needle = re.compile(re.escape(f">{key}</td"), re.I)
+    for m in needle.finditer(html):
+        pos = m.start()
+        tr_start = html.rfind("<tr", 0, pos)
+        if tr_start < 0:
             continue
-        im = re.search(r'\bid\s*=\s*["\']line-([^"\']+)["\']', open_attrs, re.I)
-        line_key = (im.group(1).strip() if im else "") or key
+        tr_end = html.find("</tr>", pos)
+        if tr_end < 0:
+            continue
+        tr_end += 5
+        frag = html[tr_start:tr_end]
+        if frag.lower().count("<td") < 1:
+            continue
+        open_m = re.match(r"<tr\b([^>]*)>", frag, re.I)
+        if not open_m:
+            continue
+        open_attrs = open_m.group(1)
+        inner = frag[open_m.end() : tr_end - 5]
+        tds_raw = re.findall(r"<td[^>]*>(.*?)</td>", inner, re.I | re.DOTALL)
+        if not any(hopefix_norm_code(_strip_tags(td)) == key for td in tds_raw):
+            continue
+        im = line_pat.search(open_attrs)
+        line_key = key
+        if im:
+            line_key = (im.group(1) or im.group(2) or im.group(3) or "").strip() or key
         return _hopefix_row_dict_from_line_inner(line_key, inner)
     return None
 
 
 def find_hopefix_row_in_html(html: str, product_code: str) -> Optional[dict[str, Any]]:
-    """Štandardné parsovanie line-* + tolerancia variantov + záloha cez 2. stĺpec tabuľky."""
+    """Štandardné parsovanie line-* + tolerancia variantov + zálohy (stĺpce / výskyt v HTML)."""
     rows = parse_hopefix_rows(html)
     hit = find_hopefix_row(rows, product_code)
     if hit:
@@ -251,7 +294,10 @@ def find_hopefix_row_in_html(html: str, product_code: str) -> Optional[dict[str,
     key = hopefix_norm_code(product_code)
     if not key:
         return None
-    return _find_hopefix_row_tr_by_registration_td(html, key)
+    hit = _find_hopefix_row_tr_by_registration_td(html, key)
+    if hit:
+        return hit
+    return _find_hopefix_row_tr_by_code_occurrence(html, key)
 
 
 def build_hopefix_catalog_url(template: str, product_code: str) -> str:
@@ -273,31 +319,19 @@ class HopefixHttpClient:
         parsed = urlparse(self._base)
         origin = f"{parsed.scheme}://{parsed.netloc}" if parsed.netloc else self._base
         self._origin = origin
-        # Kratšie read ako 60 s — katalóg má byť do pár s; skorší fail pri výpadku.
-        # HTTP/2 šetrí ~50-150 ms pri viacerých paralelných GET-och z toho istého hosta.
-        try:
-            self._client = httpx.AsyncClient(
-                base_url=self._origin,
-                headers={
-                    "User-Agent": DEFAULT_UA,
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                    "Accept-Language": "cs,sk;q=0.9,en;q=0.8",
-                },
-                follow_redirects=True,
-                timeout=httpx.Timeout(28.0, connect=5.0),
-                http2=True,
-            )
-        except (ImportError, RuntimeError):
-            self._client = httpx.AsyncClient(
-                base_url=self._origin,
-                headers={
-                    "User-Agent": DEFAULT_UA,
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                    "Accept-Language": "cs,sk;q=0.9,en;q=0.8",
-                },
-                follow_redirects=True,
-                timeout=httpx.Timeout(28.0, connect=5.0),
-            )
+        # HTTP/1.1: HTTP/2 za niektorými CDN/proxy kombináciami vracal iné telo
+        # alebo rozbité paralelné odpovede voči hopefix.cz (B2B katalóg).
+        self._client = httpx.AsyncClient(
+            base_url=self._origin,
+            headers={
+                "User-Agent": DEFAULT_UA,
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "cs,sk;q=0.9,en;q=0.8",
+            },
+            follow_redirects=True,
+            timeout=httpx.Timeout(28.0, connect=5.0),
+            http2=False,
+        )
         self._login_ok = False
 
     @property
@@ -332,6 +366,12 @@ class HopefixHttpClient:
             },
         )
         r.raise_for_status()
+        # Doplnkový GET „úvod“ niekedy dokončí JSESSION / následné katalógové GET-y.
+        try:
+            home = await self._client.get("/")
+            home.raise_for_status()
+        except Exception:
+            pass
         self._login_ok = True
 
     async def fetch_cart_snapshot(self) -> dict[str, Any]:

@@ -2104,6 +2104,12 @@ async def _hopefix_get_supplier_data_via_http(
 
     row: Optional[dict[str, Any]] = None
     last_html_len = 0
+    best_html: list[str] = [""]
+
+    def _note_response_body(html: str) -> None:
+        h = html or ""
+        if len(h) > len(best_html[0]):
+            best_html[0] = h
 
     def _hopefix_factory() -> HopefixHttpClient:
         return HopefixHttpClient()
@@ -2128,6 +2134,7 @@ async def _hopefix_get_supplier_data_via_http(
         async def _fetch_row(u: str) -> tuple[str, int, Optional[dict[str, Any]]]:
             html = await client.get_text(u)
             ln = len(html or "")
+            _note_response_body(html)
             r = find_hopefix_row_in_html(html, code)
             return u, ln, r
 
@@ -2166,6 +2173,7 @@ async def _hopefix_get_supplier_data_via_http(
                 )
                 html = await client.get_text(anchored)
                 last_html_len = len(html or "")
+                _note_response_body(html)
                 row = find_hopefix_row_in_html(html, code)
         if not row:
             # Úzka podkategória v šablóne často obsahuje len časť riadkov; veľká /sortiment/<seg>
@@ -2190,6 +2198,7 @@ async def _hopefix_get_supplier_data_via_http(
                 async def _fetch_fallback(rel: str) -> tuple[str, Optional[dict[str, Any]], int, Optional[str]]:
                     try:
                         html_fb = await client.get_text(rel)
+                        _note_response_body(html_fb)
                         return rel, find_hopefix_row_in_html(html_fb, code), len(html_fb or ""), None
                     except Exception as exc:
                         return rel, None, 0, str(exc)
@@ -2213,10 +2222,24 @@ async def _hopefix_get_supplier_data_via_http(
                     if r and not row:
                         row = r
     if not row:
+        blob = best_html[0] or ""
+        presence = ""
+        if key and blob:
+            if key.upper() not in blob.upper():
+                presence = (
+                    " Kód sa v najväčšej odpovedi nevyskytuje — over heslo dodávateľa v admine, "
+                    "či Hopefix tento artikel vôbec zobrazuje prihlásenému B2B účtu (filter / sortiment)."
+                )
+            else:
+                presence = (
+                    " Kód v HTML je, ale riadok tabuľky sa nepodarilo extrahovať — po deployi skús znova; "
+                    "ak pretrváva, je potrebný export úseku stránky."
+                )
         raise RuntimeError(
             f"Hopefix: v tabuľke sa nenašiel riadok pre kód {code!r} (skúšané {len(try_urls)} URL, "
             f"posledná odpoveď ≈{last_html_len} B). Skontroluj hopefix_catalog_url_template "
             f"a search_via_url_template — musia viesť na stránku, kde je tento kód v tabuľke."
+            f"{presence}"
         )
     pkg_type = (config.hopefix_default_package_type or "box").strip() or "box"
     label = (row.get("label") or "").strip() or code
