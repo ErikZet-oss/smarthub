@@ -1,3 +1,5 @@
+from urllib.parse import quote
+
 import pytest
 
 from app.services.hopefix_http_client import (
@@ -12,6 +14,7 @@ from app.services.hopefix_http_client import (
     hopefix_row_pick_better,
     parse_hopefix_rows,
 )
+from app.services.scraper_service import _hopefix_narrow_catalog_paths
 
 KOSIK_SNIPPET = """
 <table class="table_cart">
@@ -284,3 +287,14 @@ def test_hopefix_pick_better_keeps_priced_row_even_if_login_gate_flag():
     }
     assert hopefix_row_pick_better(empty, priced_gate) == priced_gate
     assert hopefix_row_pick_better(priced_gate, empty) == priced_gate
+
+
+def test_hopefix_narrow_catalog_prefers_pevnost_88_for_hex_8_8():
+    """HAR D9338810016B1: B2B riadok je na /sortiment/srouby-…-pevnost-88."""
+    code = "D9338810016B1"
+    enc = quote(code, safe=".-_~")
+    paths = _hopefix_narrow_catalog_paths(code, enc)
+    assert paths[0].startswith(
+        "/sortiment/srouby-se-sestihrannou-hlavou-pevnost-88?_ref="
+    )
+    assert paths[1] == "/sortiment/srouby-se-sestihrannou-hlavou-pevnost-88"

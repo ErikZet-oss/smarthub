@@ -1257,6 +1257,8 @@ def _hopefix_narrow_catalog_paths(product_code: str, enc: str) -> list[str]:
     ) or k.startswith("D6912"):
         _extend(
             [
+                # 8.8 šesťhrany (DIN 933 / 931…) — B2B tabuľka je tu, nie všeobecné „metricke“
+                "srouby-se-sestihrannou-hlavou-pevnost-88",
                 "metricke-se-sestihranou-hlavou",
                 "srouby-se-sestihrannou-hlavou-nerez",
                 "metricke-s-valcovou-hlavou",
@@ -1303,6 +1305,7 @@ def _hopefix_fallback_category_segments(product_code: str) -> list[str]:
         k,
     ) or k.startswith("D6912"):
         first = [
+            "srouby-se-sestihrannou-hlavou-pevnost-88",
             "metricke-se-sestihranou-hlavou",
             "srouby-se-sestihrannou-hlavou-nerez",
             "metricke-s-valcovou-hlavou",
