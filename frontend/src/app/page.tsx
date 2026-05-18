@@ -1358,6 +1358,7 @@ type ProductSupplierExpandedTableRowProps = {
     hopefixProductId?: string | null,
     hopefixPackageType?: string | null,
     hopefixRefererPath?: string | null,
+    hopefixPackQuantity?: number | null,
     hasplVariantCode?: string | null,
     inoxmareProductId?: string | null,
     inoxmareRefererPath?: string | null,
@@ -3027,6 +3028,15 @@ function ProductSupplierExpandedTableRow({
                                                             ? (activePv.hopefix_referer_path ??
                                                               null)
                                                             : null,
+                                                          supplierNameIsHopefix(
+                                                            offer.supplier,
+                                                          ) && activePv
+                                                            ? (activePv.pack_quantity !=
+                                                                null &&
+                                                              activePv.pack_quantity >= 1
+                                                                ? activePv.pack_quantity
+                                                                : null)
+                                                            : null,
                                                           hasplHttpVariants &&
                                                             activePv
                                                             ? (activePv.haspl_variant_code ??
@@ -4613,6 +4623,7 @@ export default function Home() {
     hopefixProductId: string | null = null,
     hopefixPackageType: string | null = null,
     hopefixRefererPath: string | null = null,
+    hopefixPackQuantity: number | null = null,
     hasplVariantCode: string | null = null,
     inoxmareProductId: string | null = null,
     inoxmareRefererPath: string | null = null,
@@ -4659,6 +4670,12 @@ export default function Home() {
           hopefix_product_id: hopefixProductId?.trim() || null,
           hopefix_package_type: hopefixPackageType?.trim() || null,
           hopefix_referer_path: hopefixRefererPath?.trim() || null,
+          hopefix_pack_quantity:
+            hopefixPackQuantity != null &&
+            Number.isFinite(hopefixPackQuantity) &&
+            hopefixPackQuantity >= 1
+              ? Math.floor(hopefixPackQuantity)
+              : null,
           haspl_variant_code: hasplVariantCode?.trim() || null,
           inoxmare_product_id: inoxmareProductId?.trim() || null,
           inoxmare_referer_path: inoxmareRefererPath?.trim() || null,

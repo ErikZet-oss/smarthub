@@ -221,6 +221,8 @@ class AddToCartPayload(BaseModel):
     hopefix_package_type: str | None = None
     # Hopefix HTTP: relatívna cesta katalógu pre Referer pri POST /api/add_to_cart (nájdená pri scrape).
     hopefix_referer_path: str | None = None
+    # Hopefix HTTP: ks v jednom zvolenom balení (packaging_variants.pack_quantity) — UI posiela kusy, API počítá balenia.
+    hopefix_pack_quantity: int | None = None
     # Haspl HTTP: kód variantu (code) z Sylius product-variants — POST košíka.
     haspl_variant_code: str | None = None
     # Inoxmare HTTP: Magento product ID a relatívna cesta PDP (z packaging_variants).
@@ -1170,6 +1172,7 @@ async def cart_add(
             hopefix_product_id=payload.hopefix_product_id,
             hopefix_package_type=payload.hopefix_package_type,
             hopefix_referer_path=payload.hopefix_referer_path,
+            hopefix_pack_quantity=payload.hopefix_pack_quantity,
             haspl_variant_code=payload.haspl_variant_code,
             inoxmare_product_id=payload.inoxmare_product_id,
             inoxmare_referer_path=payload.inoxmare_referer_path,

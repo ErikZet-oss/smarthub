@@ -7405,6 +7405,7 @@ class ScraperService:
         hopefix_product_id: Optional[str] = None,
         hopefix_package_type: Optional[str] = None,
         hopefix_referer_path: Optional[str] = None,
+        hopefix_pack_quantity: Optional[int] = None,
         haspl_variant_code: Optional[str] = None,
         inoxmare_product_id: Optional[str] = None,
         inoxmare_referer_path: Optional[str] = None,
@@ -7511,11 +7512,27 @@ class ScraperService:
                     "Hopefix: chýba product_id (v HTML riadku alebo po rozbalení) — bez neho API košík nepridá."
                 )
             nr_api = hopefix_norm_code(code_hf)
+            qty_pieces = max(1, int(quantity))
+            pack_q: int | None = None
+            if row_hf is not None:
+                pq0 = row_hf.get("pack_quantity")
+                if isinstance(pq0, int) and pq0 >= 1:
+                    pack_q = pq0
+            if pack_q is None and hopefix_pack_quantity is not None:
+                hpq = int(hopefix_pack_quantity)
+                if hpq >= 1:
+                    pack_q = hpq
+            if pack_q is None or pack_q < 1:
+                pack_q = 1
+            import math as _math
+
+            qty_packages = max(1, _math.ceil(qty_pieces / pack_q))
             _log(
                 run_label,
                 supplier,
                 run_id,
-                f"add_to_cart Hopefix HTTP product_id={pid_hf!r} qty={quantity} "
+                f"add_to_cart Hopefix HTTP product_id={pid_hf!r} qty_pieces={qty_pieces} "
+                f"pack_q={pack_q} qty_packages={qty_packages} "
                 f"package_type={pkg_hf!r} referer={ref_path!r}",
             )
 
@@ -7525,7 +7542,7 @@ class ScraperService:
                     await client.add_to_cart(
                         product_nr=nr_api,
                         product_id=pid_hf,
-                        quantity=quantity,
+                        quantity=qty_packages,
                         package_type=pkg_hf,
                         referer_path=ref_path,
                     )
