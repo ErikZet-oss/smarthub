@@ -9087,7 +9087,27 @@ def _strip_json_trailing_commas(text: str) -> str:
     return re.sub(r",(\s*[}\]])", r"\1", text)
 
 
+def sanitize_cart_config_json_text(text: str) -> str:
+    """Pri vkladaní inoxmare cookies z DevTools často skončia zalomenia v reťazci — JSON padá."""
+    if not (text or "").strip():
+        return text or ""
+
+    def _collapse_cookie(m: re.Match[str]) -> str:
+        body = re.sub(r"[\r\n\t\x00-\x1f]+", " ", m.group(2)).strip()
+        body = re.sub(r" +", " ", body)
+        return f"{m.group(1)}{body}{m.group(3)}"
+
+    return re.sub(
+        r'("inoxmare_session_cookie_header"\s*:\s*")(.*?)(")',
+        _collapse_cookie,
+        text,
+        count=1,
+        flags=re.DOTALL,
+    )
+
+
 def _parse_cart_config_text(raw: str) -> ScraperConfig:
+    raw = sanitize_cart_config_json_text(raw)
     try:
         return ScraperConfig.model_validate_json(raw)
     except Exception as first_err:

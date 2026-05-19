@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 import threading
 import time
 from urllib.parse import quote
@@ -41,6 +42,7 @@ from app.services.scraper_service import (
     ScraperProductNotFoundError,
     ScraperService,
     load_scraper_config,
+    sanitize_cart_config_json_text,
 )
 from app.services.sections_unlock import issue_sections_unlock_token, verify_sections_unlock_token
 from app.services.haspl_http_client import supplier_shop_cart_url
@@ -172,7 +174,7 @@ def _strip_json_trailing_commas(text: str) -> str:
 
 
 def _normalize_supplier_cart_config_json(name: str, raw_cfg: str | None) -> str | None:
-    cfg_text = (raw_cfg or "").strip()
+    cfg_text = sanitize_cart_config_json_text((raw_cfg or "").strip())
     if not cfg_text:
         return None
     parsed: dict | None = None
@@ -188,6 +190,11 @@ def _normalize_supplier_cart_config_json(name: str, raw_cfg: str | None) -> str 
         # Ak sa hodnota niekde obnoví zo šablóny, pri uložení ju tu odstránime.
         if "fabory" in (name or "").strip().lower():
             parsed.pop("browser_channel", None)
+        ck = parsed.get("inoxmare_session_cookie_header")
+        if isinstance(ck, str):
+            parsed["inoxmare_session_cookie_header"] = re.sub(
+                r"[\r\n\t\x00-\x1f]+", " ", ck
+            ).strip()
         return json.dumps(parsed, ensure_ascii=False, indent=2)
     return cfg_text
 
