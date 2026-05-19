@@ -48,3 +48,26 @@ def test_zero_pieces_promotes_to_min_one() -> None:
 def test_zero_pack_quantity_treated_as_one() -> None:
     """Variant bez pack_quantity (None/0) má fallback na 1 ks/balenie."""
     assert _pieces_to_packs(50, 0) == 50
+
+
+def test_mekrs_unit_item_price_scaled_to_per_100() -> None:
+    """03000.16.00.100.200: jednotková položka má cenu za ks, nie za 100 ks."""
+    from app.services.mekrs_http_client import _mekrs_nominal_to_per_100ks_display
+
+    unit, _, scaled = _mekrs_nominal_to_per_100ks_display(
+        price_net=0.5126,
+        price_gross=None,
+        currency_code="eur",
+        pack_quantity=1,
+        packaged=False,
+    )
+    pack, _, _ = _mekrs_nominal_to_per_100ks_display(
+        price_net=0.5126,
+        price_gross=None,
+        currency_code="eur",
+        pack_quantity=25,
+        packaged=True,
+    )
+    assert scaled is True
+    assert unit == 51.26
+    assert pack == 51.26

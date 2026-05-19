@@ -220,6 +220,7 @@ def _mekrs_nominal_to_per_100ks_display(
     price_gross: Optional[float],
     currency_code: Optional[str],
     pack_quantity: int = 1,
+    packaged: Optional[bool] = None,
 ) -> tuple[Optional[float], bool, bool]:
     """
     Z API /variants vypočíta číslo pre „… / 100 ks“ v UI.
@@ -269,7 +270,14 @@ def _mekrs_nominal_to_per_100ks_display(
         else:
             out = round(x * (100.0 / float(pq)), 4)
         return out, includes_vat, False
-    # Jednotkové balenie: pod prahom berieme hodnotu ako cenu za 1 ks (resp. za 1 predajnú jednotku) → ×100 pre „/ 100 ks“.
+    # Jednotková položka (packaged=False): API posiela cenu za 1 ks → ×100 pre „/ 100 ks“.
+    if packaged is False:
+        if c == "czk" and x >= 0.75:
+            return round(x, 4), includes_vat, False
+        if x >= 5.0:
+            return round(x, 4), includes_vat, False
+        return round(x * 100.0, 4), includes_vat, True
+    # Jednotkové balenie: pod prahom berieme hodnotu ako cenu za 1 ks → ×100 pre „/ 100 ks“.
     # CZK: prah < 0,75 aby ~0,80 Kč/100 ks (identická pri viacerých baleniach) ostalo bez ×100.
     if c == "czk":
         threshold = 0.75

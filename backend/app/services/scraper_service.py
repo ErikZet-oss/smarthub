@@ -2037,6 +2037,7 @@ async def _mekrs_get_supplier_data_via_http(
             price_gross=_to_float(v.get("price_with_vat")),
             currency_code=ccode,
             pack_quantity=pack_q,
+            packaged=v.get("packaged") if isinstance(v.get("packaged"), bool) else None,
         )
         price_display_is_with_vat = price_display_is_with_vat or row_vat
         raw_price: Optional[str] = None
