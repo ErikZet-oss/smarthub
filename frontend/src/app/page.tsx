@@ -5863,44 +5863,89 @@ export default function Home() {
                       />
                     </div>
                   )}
-                  {isFieldMapped("y_money_name") && (
-                    <div className="col-span-2 min-w-0 space-y-1 lg:col-span-1">
-                      <label
-                        htmlFor="search-filter-y-money"
-                        className="text-xs text-slate-600"
-                      >
-                        Money názov
-                      </label>
-                      <SearchableSelect
-                        id="search-filter-y-money"
-                        value={searchFilters.y_money_name}
-                        onChange={(v) =>
-                          setSearchFilters((prev) => ({
-                            ...prev,
-                            y_money_name: v,
-                          }))
-                        }
-                        options={filterOptions.y_money_name}
-                      />
+                  {isFieldMapped("y_money_name") &&
+                  isFieldMapped("image_filename") ? (
+                    <div className="col-span-2 grid min-w-0 grid-cols-[minmax(0,1fr)_2.75rem] items-end gap-2 lg:col-span-2">
+                      <div className="min-w-0 space-y-1">
+                        <label
+                          htmlFor="search-filter-y-money"
+                          className="text-xs text-slate-600"
+                        >
+                          Money názov
+                        </label>
+                        <SearchableSelect
+                          id="search-filter-y-money"
+                          value={searchFilters.y_money_name}
+                          onChange={(v) =>
+                            setSearchFilters((prev) => ({
+                              ...prev,
+                              y_money_name: v,
+                            }))
+                          }
+                          options={filterOptions.y_money_name}
+                        />
+                      </div>
+                      <div className="min-w-0">
+                        <label className="mb-1 hidden text-xs text-slate-600 sm:block">
+                          Obrázok
+                        </label>
+                        <ProductImageFilter
+                          value={searchFilters.image_filename}
+                          onChange={(image_filename) =>
+                            setSearchFilters((prev) => ({
+                              ...prev,
+                              image_filename,
+                            }))
+                          }
+                          cascadeFilters={imageCascadeFilters}
+                          apiFetch={apiFetch}
+                          apiBase={API_BASE}
+                          imageUrl={productImagePublicUrl}
+                        />
+                      </div>
                     </div>
-                  )}
-                  {isFieldMapped("image_filename") && (
-                    <div className="min-w-0 space-y-1">
-                      <label className="text-xs text-slate-600">Obrázok</label>
-                      <ProductImageFilter
-                        value={searchFilters.image_filename}
-                        onChange={(image_filename) =>
-                          setSearchFilters((prev) => ({
-                            ...prev,
-                            image_filename,
-                          }))
-                        }
-                        cascadeFilters={imageCascadeFilters}
-                        apiFetch={apiFetch}
-                        apiBase={API_BASE}
-                        imageUrl={productImagePublicUrl}
-                      />
-                    </div>
+                  ) : (
+                    <>
+                      {isFieldMapped("y_money_name") && (
+                        <div className="col-span-2 min-w-0 space-y-1 lg:col-span-1">
+                          <label
+                            htmlFor="search-filter-y-money"
+                            className="text-xs text-slate-600"
+                          >
+                            Money názov
+                          </label>
+                          <SearchableSelect
+                            id="search-filter-y-money"
+                            value={searchFilters.y_money_name}
+                            onChange={(v) =>
+                              setSearchFilters((prev) => ({
+                                ...prev,
+                                y_money_name: v,
+                              }))
+                            }
+                            options={filterOptions.y_money_name}
+                          />
+                        </div>
+                      )}
+                      {isFieldMapped("image_filename") && (
+                        <div className="min-w-0 space-y-1">
+                          <label className="text-xs text-slate-600">Obrázok</label>
+                          <ProductImageFilter
+                            value={searchFilters.image_filename}
+                            onChange={(image_filename) =>
+                              setSearchFilters((prev) => ({
+                                ...prev,
+                                image_filename,
+                              }))
+                            }
+                            cascadeFilters={imageCascadeFilters}
+                            apiFetch={apiFetch}
+                            apiBase={API_BASE}
+                            imageUrl={productImagePublicUrl}
+                          />
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
                 <div className="mt-2 flex flex-wrap gap-1.5 sm:mt-3 sm:gap-2">
