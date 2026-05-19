@@ -64,7 +64,9 @@ export function ProductImageFilter({
     }
     const rect = anchor.getBoundingClientRect();
     const margin = 8;
-    const width = Math.min(480, window.innerWidth - margin * 2);
+    const isDesktop = window.innerWidth >= 1024;
+    const maxPanel = isDesktop ? 560 : 480;
+    const width = Math.min(maxPanel, window.innerWidth - margin * 2);
     let left = rect.left;
     if (left + width > window.innerWidth - margin) {
       left = window.innerWidth - width - margin;
@@ -241,7 +243,7 @@ export function ProductImageFilter({
               Žiadne obrázky pre aktuálne filtre.
             </p>
           ) : (
-            <div className="grid max-h-[min(52vh,20rem)] w-full min-w-0 grid-cols-3 gap-2 overflow-x-hidden overflow-y-auto sm:max-h-[min(62vh,28rem)] sm:grid-cols-4 sm:gap-2.5 lg:max-h-[min(72vh,40rem)]">
+            <div className="grid max-h-[min(52vh,20rem)] w-full min-w-0 grid-cols-3 gap-2 overflow-x-hidden overflow-y-auto sm:max-h-[min(62vh,28rem)] sm:grid-cols-4 sm:gap-2.5 lg:max-h-[min(72vh,40rem)] lg:grid-cols-3 lg:gap-3">
               {options.map((opt) => {
                 const url = imageUrl(opt.filename);
                 const selected = value === opt.filename;
