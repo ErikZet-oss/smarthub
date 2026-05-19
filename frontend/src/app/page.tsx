@@ -72,6 +72,7 @@ type View =
   | "dev";
 
 const ADMIN_ONLY_VIEWS: View[] = ["dodavatelia", "parovanie", "admin", "dev"];
+const CART_HISTORY_STORAGE_KEY = "smart_procurement_cart_history_v1";
 const CART_HISTORY_MAX = 500;
 
 /**
