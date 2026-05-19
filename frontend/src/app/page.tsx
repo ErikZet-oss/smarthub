@@ -51,6 +51,7 @@ import {
 import { CompanySettingsAdmin } from "@/components/offers/CompanySettingsAdmin";
 import { OffersPanel } from "@/components/offers/OffersPanel";
 import { SearchableSelect } from "@/components/SearchableSelect";
+import { ProductImageFilter } from "@/components/search/ProductImageFilter";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
@@ -452,6 +453,7 @@ type SearchFiltersState = {
   length: string;
   v_class: string;
   y_money_name: string;
+  image_filename: string;
 };
 
 const initialSearchFilters: SearchFiltersState = {
@@ -462,6 +464,7 @@ const initialSearchFilters: SearchFiltersState = {
   length: "",
   v_class: "",
   y_money_name: "",
+  image_filename: "",
 };
 
 /** Excel: stĺpec V = Class, stĺpec Y = Money názov (hlavičky v súbore). */
@@ -3759,6 +3762,27 @@ export default function Home() {
 
   const showSurfaceCol = isFieldMapped("surface");
 
+  const imageCascadeFilters = useMemo(
+    () => ({
+      code: debouncedCode.trim() || null,
+      norma: searchFilters.norma || null,
+      surface: searchFilters.surface || null,
+      diameter: searchFilters.diameter || null,
+      length: searchFilters.length || null,
+      v_class: searchFilters.v_class || null,
+      y_money_name: searchFilters.y_money_name || null,
+    }),
+    [
+      debouncedCode,
+      searchFilters.norma,
+      searchFilters.surface,
+      searchFilters.diameter,
+      searchFilters.length,
+      searchFilters.v_class,
+      searchFilters.y_money_name,
+    ],
+  );
+
   /** Class (V) + Money názov (Y) sú v tabuľke vždy (dáta z DB); mapovanie určuje Excel. */
   const searchTableColSpan =
     5 + (showSurfaceCol ? 1 : 0) + 3;
@@ -4410,6 +4434,7 @@ export default function Home() {
         length: searchFilters.length || null,
         v_class: searchFilters.v_class || null,
         y_money_name: searchFilters.y_money_name || null,
+        image_filename: searchFilters.image_filename || null,
         prefetch_live_prices: false,
       };
       const noFiltersActive =
@@ -4419,7 +4444,8 @@ export default function Home() {
         !apiBody.diameter &&
         !apiBody.length &&
         !apiBody.v_class &&
-        !apiBody.y_money_name;
+        !apiBody.y_money_name &&
+        !apiBody.image_filename;
 
       // Cold-start optimalizácia: pri prvom otvorení Vyhľadávania bez aktívnych filtrov
       // urobíme jediný request /api/bootstrap/search, ktorý vráti filter-options aj
@@ -4511,7 +4537,8 @@ export default function Home() {
           Boolean(searchFilters.diameter) ||
           Boolean(searchFilters.length) ||
           Boolean(searchFilters.v_class) ||
-          Boolean(searchFilters.y_money_name);
+          Boolean(searchFilters.y_money_name) ||
+          Boolean(searchFilters.image_filename);
         const opts = mergeConditionalFilterOptionsWithExcel(
           {
             norma: rawOpts.norma ?? [],
@@ -4604,6 +4631,7 @@ export default function Home() {
     searchFilters.length,
     searchFilters.v_class,
     searchFilters.y_money_name,
+    searchFilters.image_filename,
     searchTick,
     fieldToColumn,
     mappingProfile,
@@ -5856,6 +5884,24 @@ export default function Home() {
                       />
                     </div>
                   )}
+                  {isFieldMapped("image_filename") && (
+                    <div className="min-w-0 space-y-1">
+                      <label className="text-xs text-slate-600">Obrázok</label>
+                      <ProductImageFilter
+                        value={searchFilters.image_filename}
+                        onChange={(image_filename) =>
+                          setSearchFilters((prev) => ({
+                            ...prev,
+                            image_filename,
+                          }))
+                        }
+                        cascadeFilters={imageCascadeFilters}
+                        apiFetch={apiFetch}
+                        apiBase={API_BASE}
+                        imageUrl={productImagePublicUrl}
+                      />
+                    </div>
+                  )}
                 </div>
                 <div className="mt-2 flex flex-wrap gap-1.5 sm:mt-3 sm:gap-2">
                   {searchFilters.code.trim() && (
@@ -5874,6 +5920,22 @@ export default function Home() {
                   )}
                   {searchFilters.y_money_name && (
                     <Badge>Money názov: {searchFilters.y_money_name}</Badge>
+                  )}
+                  {searchFilters.image_filename && (
+                    <Badge className="inline-flex max-w-full items-center gap-1.5">
+                      Obrázok:
+                      {productImagePublicUrl(searchFilters.image_filename) ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={productImagePublicUrl(searchFilters.image_filename)!}
+                          alt=""
+                          className="h-4 w-4 shrink-0 object-contain"
+                        />
+                      ) : null}
+                      <span className="truncate">
+                        {excelBasename(searchFilters.image_filename)}
+                      </span>
+                    </Badge>
                   )}
                 </div>
                 {searchMessage && (

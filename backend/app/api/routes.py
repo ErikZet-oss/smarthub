@@ -10,6 +10,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
+from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app.api.deps import AuthUserContext, get_current_user, require_admin
@@ -94,6 +95,7 @@ def _filter_opts_cache_key(filters: "ProductSearchFilters") -> str:
             "length": filters.length or "",
             "v_class": filters.v_class or "",
             "y_money_name": filters.y_money_name or "",
+            "image_filename": filters.image_filename or "",
         },
         sort_keys=True,
     )
@@ -573,6 +575,8 @@ async def search_products(
         query = query.where(Product.v_class == filters.v_class)
     if filters.y_money_name:
         query = query.where(Product.y_money_name == filters.y_money_name)
+    if filters.image_filename:
+        query = query.where(Product.image_filename == filters.image_filename)
 
     limit = min(max(filters.limit or 50, 1), 500)
     query = query.limit(limit)
@@ -706,6 +710,7 @@ def _apply_search_filters(
     skip_length: bool = False,
     skip_v_class: bool = False,
     skip_y_money_name: bool = False,
+    skip_image_filename: bool = False,
 ):
     if not skip_code and filters.code:
         statement = statement.where(Product.internal_code.contains(filters.code))
@@ -721,7 +726,30 @@ def _apply_search_filters(
         statement = statement.where(Product.v_class == filters.v_class)
     if not skip_y_money_name and filters.y_money_name:
         statement = statement.where(Product.y_money_name == filters.y_money_name)
+    if not skip_image_filename and filters.image_filename:
+        statement = statement.where(Product.image_filename == filters.image_filename)
     return statement
+
+
+IMAGE_FILTER_OPTION_LIMIT = 200
+
+
+def _build_image_filter_options(
+    session: Session, filters: ProductSearchFilters
+) -> list[dict[str, object]]:
+    """Distinct obrázky pre lazy image filter — rešpektuje ostatné aktívne filtre."""
+    stmt = select(Product.image_filename, func.count(Product.id))  # type: ignore[arg-type]
+    stmt = stmt.where(Product.image_filename.isnot(None)).where(Product.image_filename != "")  # type: ignore[union-attr]
+    stmt = _apply_search_filters(stmt, filters, skip_image_filename=True)
+    stmt = stmt.group_by(Product.image_filename).order_by(func.count(Product.id).desc())  # type: ignore[arg-type]
+    rows = session.exec(stmt).all()
+    out: list[dict[str, object]] = []
+    for row in rows[:IMAGE_FILTER_OPTION_LIMIT]:
+        filename = str(row[0] or "").strip()
+        if not filename:
+            continue
+        out.append({"filename": filename, "count": int(row[1] or 0)})
+    return out
 
 
 def _distinct_conditional(
@@ -849,6 +877,16 @@ def product_filter_options_conditional(
     result = _build_conditional_filter_options(session, filters)
     _filter_opts_cache_set(cache_key, result)
     return result
+
+
+@router.post("/products/filter-options/images")
+def product_filter_options_images(
+    filters: ProductSearchFilters,
+    session: Session = Depends(get_session),
+    _: AuthUserContext = Depends(get_current_user),
+):
+    """Lazy zoznam obrázkov pre image filter — volá sa až po otvorení panelu."""
+    return _build_image_filter_options(session, filters)
 
 
 @router.get("/health")

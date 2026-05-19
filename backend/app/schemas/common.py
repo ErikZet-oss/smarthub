@@ -10,6 +10,7 @@ class ProductSearchFilters(BaseModel):
     length: Optional[str] = None
     v_class: Optional[str] = None
     y_money_name: Optional[str] = None
+    image_filename: Optional[str] = None
     code: Optional[str] = None
     limit: Optional[int] = 50
     # Ak True, search volá Playwright/HTTP pre každú ponuku (veľmi pomalé). Predvolene len DB + ceny po rozbalení riadku.
