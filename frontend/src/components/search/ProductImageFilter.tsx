@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Check, ImageIcon, Loader2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -45,11 +45,39 @@ export function ProductImageFilter({
   className,
 }: ProductImageFilterProps) {
   const rootRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const cacheRef = useRef<Map<string, ImageFilterOption[]>>(new Map());
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [options, setOptions] = useState<ImageFilterOption[]>([]);
+  const [panelPos, setPanelPos] = useState<{
+    top: number;
+    left: number;
+    width: number;
+  } | null>(null);
+
+  const updatePanelPos = useCallback(() => {
+    const anchor = rootRef.current;
+    if (!anchor) {
+      return;
+    }
+    const rect = anchor.getBoundingClientRect();
+    const margin = 8;
+    const width = Math.min(480, window.innerWidth - margin * 2);
+    let left = rect.left;
+    if (left + width > window.innerWidth - margin) {
+      left = window.innerWidth - width - margin;
+    }
+    if (left < margin) {
+      left = margin;
+    }
+    setPanelPos({
+      top: rect.bottom + 4,
+      left,
+      width,
+    });
+  }, []);
 
   const loadOptions = useCallback(async () => {
     const key = cascadeCacheKey(cascadeFilters);
@@ -86,6 +114,21 @@ export function ProductImageFilter({
     }
   }, [apiBase, apiFetch, cascadeFilters]);
 
+  useLayoutEffect(() => {
+    if (!open) {
+      setPanelPos(null);
+      return;
+    }
+    updatePanelPos();
+    const onLayout = () => updatePanelPos();
+    window.addEventListener("resize", onLayout);
+    window.addEventListener("scroll", onLayout, true);
+    return () => {
+      window.removeEventListener("resize", onLayout);
+      window.removeEventListener("scroll", onLayout, true);
+    };
+  }, [open, updatePanelPos]);
+
   useEffect(() => {
     if (!open) {
       return;
@@ -98,10 +141,19 @@ export function ProductImageFilter({
       return;
     }
     const onDoc = (event: MouseEvent) => {
-      const el = rootRef.current;
-      if (!el || !(event.target instanceof Node) || !el.contains(event.target)) {
-        setOpen(false);
+      const anchor = rootRef.current;
+      const panel = panelRef.current;
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        return;
       }
+      if (
+        (anchor && anchor.contains(target)) ||
+        (panel && panel.contains(target))
+      ) {
+        return;
+      }
+      setOpen(false);
     };
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
@@ -110,7 +162,7 @@ export function ProductImageFilter({
   const active = Boolean(value.trim());
 
   return (
-    <div ref={rootRef} className={cn("relative", className)}>
+    <div ref={rootRef} className={cn("relative min-w-0", className)}>
       <button
         type="button"
         aria-haspopup="dialog"
@@ -121,7 +173,14 @@ export function ProductImageFilter({
             : "Filter podľa obrázku produktu"
         }
         title={active ? `Obrázok: ${value}` : "Filter podľa obrázku"}
-        onClick={() => setOpen((prev) => !prev)}
+        onClick={() => {
+          if (open) {
+            setOpen(false);
+            return;
+          }
+          updatePanelPos();
+          setOpen(true);
+        }}
         className={cn(
           "flex h-10 w-full items-center justify-center rounded-lg border bg-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500",
           active
@@ -140,11 +199,18 @@ export function ProductImageFilter({
           <ImageIcon className="h-5 w-5" aria-hidden />
         )}
       </button>
-      {open ? (
+      {open && panelPos ? (
         <div
+          ref={panelRef}
           role="dialog"
           aria-label="Výber obrázka produktu"
-          className="absolute left-0 z-50 mt-1 w-[min(100vw-2rem,24rem)] rounded-lg border border-slate-200 bg-white p-2.5 shadow-lg sm:w-[28rem] lg:w-[36rem] lg:p-3"
+          style={{
+            position: "fixed",
+            top: panelPos.top,
+            left: panelPos.left,
+            width: panelPos.width,
+          }}
+          className="z-50 overflow-hidden rounded-lg border border-slate-200 bg-white p-2.5 shadow-lg sm:p-3"
         >
           <div className="mb-2 flex items-center justify-between gap-2">
             <span className="text-xs font-medium text-slate-700">Obrázok</span>
@@ -175,7 +241,7 @@ export function ProductImageFilter({
               Žiadne obrázky pre aktuálne filtre.
             </p>
           ) : (
-            <div className="grid max-h-[min(52vh,20rem)] grid-cols-3 gap-2.5 overflow-y-auto sm:max-h-[min(62vh,28rem)] sm:grid-cols-4 sm:gap-3 lg:max-h-[min(72vh,40rem)] lg:grid-cols-4 lg:gap-3.5 xl:grid-cols-5">
+            <div className="grid max-h-[min(52vh,20rem)] w-full min-w-0 grid-cols-3 gap-2 overflow-x-hidden overflow-y-auto sm:max-h-[min(62vh,28rem)] sm:grid-cols-4 sm:gap-2.5 lg:max-h-[min(72vh,40rem)]">
               {options.map((opt) => {
                 const url = imageUrl(opt.filename);
                 const selected = value === opt.filename;
@@ -190,7 +256,7 @@ export function ProductImageFilter({
                       setOpen(false);
                     }}
                     className={cn(
-                      "relative aspect-square min-h-[5rem] overflow-hidden rounded-md border bg-white transition-colors hover:border-sky-400 hover:ring-1 hover:ring-sky-200 sm:min-h-[6.5rem] lg:min-h-[7.5rem] xl:min-h-[8.5rem]",
+                      "relative aspect-square w-full min-w-0 overflow-hidden rounded-md border bg-white transition-colors hover:border-sky-400 hover:ring-1 hover:ring-sky-200",
                       selected
                         ? "border-sky-500 ring-2 ring-sky-400/60"
                         : "border-slate-200",
