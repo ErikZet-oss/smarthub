@@ -123,6 +123,8 @@ class CompanySettings(SQLModel, table=True):
     logo_path: Optional[str] = None
     pdf_accent_color: Optional[str] = "#0284c7"
     offer_footer_note: Optional[str] = None
+    # bcrypt hash — heslo na odomknutie sekcií Dodávatelia / Párovanie / Dev pre ne-admin účty.
+    sections_unlock_password_hash: Optional[str] = None
 
 
 class Offer(SQLModel, table=True):

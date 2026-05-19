@@ -2,6 +2,8 @@ from dataclasses import dataclass
 
 from fastapi import Depends, HTTPException, Request
 
+from app.services.sections_unlock import verify_sections_unlock_token
+
 
 @dataclass(frozen=True)
 class AuthUserContext:
@@ -26,3 +28,20 @@ def require_admin(
             detail="Túto akciu môže vykonať len administrátor.",
         )
     return user
+
+
+def require_sections_unlock(
+    request: Request,
+    user: AuthUserContext = Depends(get_current_user),
+) -> AuthUserContext:
+    """Admin alebo používateľ s platným tokenom odomknutia (hlavička X-Sections-Unlock)."""
+    if user.is_admin:
+        return user
+    raw = (request.headers.get("x-sections-unlock") or "").strip()
+    token = raw[7:].strip() if raw.lower().startswith("bearer ") else raw
+    if verify_sections_unlock_token(token, user.id):
+        return user
+    raise HTTPException(
+        status_code=403,
+        detail="Pre prístup k tejto sekcii zadaj heslo odomknutia.",
+    )

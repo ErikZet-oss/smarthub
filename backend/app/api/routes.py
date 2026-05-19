@@ -8,12 +8,12 @@ from uuid import uuid4
 from pydantic import BaseModel
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
 from sqlalchemy import func
 from sqlmodel import Session, select
 
-from app.api.deps import AuthUserContext, get_current_user, require_admin
+from app.api.deps import AuthUserContext, get_current_user, require_admin, require_sections_unlock
 from app.db import engine, get_session
 from app.models.entities import (
     CompanySettings,
@@ -42,6 +42,7 @@ from app.services.scraper_service import (
     ScraperService,
     load_scraper_config,
 )
+from app.services.sections_unlock import issue_sections_unlock_token, verify_sections_unlock_token
 from app.services.haspl_http_client import supplier_shop_cart_url
 from app.services.smarthub_bootstrap import (
     copy_supplier_credentials_for_new_user,
@@ -283,6 +284,14 @@ class AdminCreateUserPayload(BaseModel):
 
 class AdminPatchUserPasswordPayload(BaseModel):
     password: str
+
+
+class SectionsUnlockPasswordPayload(BaseModel):
+    password: str
+
+
+class AdminSetSectionsUnlockPasswordPayload(BaseModel):
+    password: str | None = None
 
 
 class PatchMySupplierCredentialsPayload(BaseModel):
@@ -531,11 +540,81 @@ def admin_delete_user(
     return {"ok": True}
 
 
+def _sections_unlock_hash(session: Session) -> str | None:
+    row = _ensure_company_settings(session)
+    h = (row.sections_unlock_password_hash or "").strip()
+    return h or None
+
+
+@router.get("/admin/sections-unlock")
+def admin_get_sections_unlock(
+    session: Session = Depends(get_session),
+    _: AuthUserContext = Depends(require_admin),
+):
+    return {"configured": _sections_unlock_hash(session) is not None}
+
+
+@router.patch("/admin/sections-unlock")
+def admin_set_sections_unlock_password(
+    payload: AdminSetSectionsUnlockPasswordPayload,
+    session: Session = Depends(get_session),
+    _: AuthUserContext = Depends(require_admin),
+):
+    row = _ensure_company_settings(session)
+    pwd = (payload.password or "").strip()
+    if not pwd:
+        row.sections_unlock_password_hash = None
+    else:
+        row.sections_unlock_password_hash = hash_password(pwd)
+    session.add(row)
+    session.commit()
+    return {"configured": row.sections_unlock_password_hash is not None}
+
+
+@router.get("/auth/sections-unlock/status")
+def sections_unlock_status(
+    request: Request,
+    session: Session = Depends(get_session),
+    user: AuthUserContext = Depends(get_current_user),
+):
+    configured = _sections_unlock_hash(session) is not None
+    unlocked = user.is_admin
+    if not unlocked:
+        raw = (request.headers.get("x-sections-unlock") or "").strip()
+        token = raw[7:].strip() if raw.lower().startswith("bearer ") else raw
+        unlocked = verify_sections_unlock_token(token, user.id)
+    return {"configured": configured, "unlocked": unlocked}
+
+
+@router.post("/auth/sections-unlock")
+def sections_unlock_verify(
+    payload: SectionsUnlockPasswordPayload,
+    session: Session = Depends(get_session),
+    user: AuthUserContext = Depends(get_current_user),
+):
+    if user.is_admin:
+        return {"unlock_token": None, "expires_at": None, "unlocked": True}
+    stored = _sections_unlock_hash(session)
+    if stored is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Administrátor ešte nenastavil heslo pre odomknutie sekcií.",
+        )
+    if not payload.password or not verify_password(payload.password, stored):
+        raise HTTPException(status_code=401, detail="Nesprávne heslo.")
+    token, exp = issue_sections_unlock_token(user.id)
+    return {
+        "unlock_token": token,
+        "expires_at": exp,
+        "unlocked": True,
+    }
+
+
 @router.patch("/users/me/supplier-credentials")
 def patch_my_supplier_credentials(
     payload: PatchMySupplierCredentialsPayload,
     session: Session = Depends(get_session),
-    user: AuthUserContext = Depends(require_admin),
+    user: AuthUserContext = Depends(require_sections_unlock),
 ):
     cred = session.exec(
         select(UserSupplierCredential).where(
@@ -573,20 +652,20 @@ def patch_my_supplier_credentials(
 @router.get("/dev/logs")
 def dev_logs_get(
     limit: int = 2000,
-    _: AuthUserContext = Depends(require_admin),
+    _: AuthUserContext = Depends(require_sections_unlock),
 ):
     """Záznamy z Playwright (scrape / košík) pre ladenie vo frontende."""
     return {"logs": get_dev_logs(min(max(limit, 1), 8000))}
 
 
 @router.delete("/dev/logs")
-def dev_logs_clear(_: AuthUserContext = Depends(require_admin)):
+def dev_logs_clear(_: AuthUserContext = Depends(require_sections_unlock)):
     clear_dev_logs()
     return {"ok": True}
 
 
 @router.get("/dev/step-screenshots")
-def dev_step_screenshots_get(_: AuthUserContext = Depends(require_admin)):
+def dev_step_screenshots_get(_: AuthUserContext = Depends(require_sections_unlock)):
     """Stav screenshotov krokov Playwright (predvolene vypnuté)."""
     return get_step_screenshots_status()
 
@@ -594,7 +673,7 @@ def dev_step_screenshots_get(_: AuthUserContext = Depends(require_admin)):
 @router.put("/dev/step-screenshots")
 def dev_step_screenshots_put(
     payload: StepScreenshotsPayload,
-    _: AuthUserContext = Depends(require_admin),
+    _: AuthUserContext = Depends(require_sections_unlock),
 ):
     set_step_screenshots_override(payload.override)
     return get_step_screenshots_status()
@@ -985,7 +1064,7 @@ async def bootstrap_search(
 @router.get("/mapping/fields")
 def get_field_mapping(
     session: Session = Depends(get_session),
-    _: AuthUserContext = Depends(require_admin),
+    _: AuthUserContext = Depends(require_sections_unlock),
 ):
     fm = session.get(FieldMapping, 1)
     if fm is None:
@@ -1015,7 +1094,7 @@ def get_field_mapping(
 def save_field_mapping(
     payload: FieldMappingPayload,
     session: Session = Depends(get_session),
-    _: AuthUserContext = Depends(require_admin),
+    _: AuthUserContext = Depends(require_sections_unlock),
 ):
     fm = session.get(FieldMapping, 1)
     if fm is None:
@@ -1669,7 +1748,7 @@ def _run_excel_import_task(task_id: str, file_path: str, sheet_name: str) -> Non
 @router.post("/import/excel/start")
 def import_excel_start(
     payload: ImportExcelPayload,
-    _: AuthUserContext = Depends(require_admin),
+    _: AuthUserContext = Depends(require_sections_unlock),
 ):
     sheet = (payload.sheet_name or "DIN").strip() or "DIN"
     task_id = uuid4().hex
@@ -1698,7 +1777,7 @@ def import_excel_start(
 @router.get("/import/excel/{task_id}")
 def import_excel_status(
     task_id: str,
-    _: AuthUserContext = Depends(require_admin),
+    _: AuthUserContext = Depends(require_sections_unlock),
 ):
     task = _import_task_snapshot(task_id)
     if task is None:
@@ -1724,7 +1803,7 @@ def import_excel_status(
 def import_excel(
     payload: ImportExcelPayload,
     session: Session = Depends(get_session),
-    _: AuthUserContext = Depends(require_admin),
+    _: AuthUserContext = Depends(require_sections_unlock),
 ):
     try:
         sheet = (payload.sheet_name or "DIN").strip() or "DIN"
@@ -1754,7 +1833,7 @@ def import_excel(
 @router.post("/mapping/profile")
 def mapping_profile(
     payload: ExcelProfilePayload,
-    _: AuthUserContext = Depends(require_admin),
+    _: AuthUserContext = Depends(require_sections_unlock),
 ):
     try:
         result = profile_excel_columns(payload.file_path, payload.sheet_name)

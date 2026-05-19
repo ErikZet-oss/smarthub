@@ -30,6 +30,7 @@ import {
   Link2,
   List,
   Loader2,
+  Lock,
   LogOut,
   Menu,
   Moon,
@@ -71,7 +72,9 @@ type View =
   | "admin"
   | "dev";
 
-const ADMIN_ONLY_VIEWS: View[] = ["dodavatelia", "parovanie", "admin", "dev"];
+const ADMIN_ONLY_VIEWS: View[] = ["admin"];
+const PASSWORD_PROTECTED_VIEWS: View[] = ["dodavatelia", "parovanie", "dev"];
+const SECTIONS_UNLOCK_TOKEN_KEY = "smarthub_sections_unlock_token";
 const CART_HISTORY_STORAGE_KEY = "smart_procurement_cart_history_v1";
 const CART_HISTORY_MAX = 500;
 
@@ -3337,6 +3340,25 @@ export default function Home() {
   const [passwordEditValue, setPasswordEditValue] = useState("");
   const [passwordEditConfirm, setPasswordEditConfirm] = useState("");
   const [adminUserActionId, setAdminUserActionId] = useState<number | null>(null);
+  const [sectionsUnlockToken, setSectionsUnlockToken] = useState<string | null>(null);
+  const [sectionsUnlocked, setSectionsUnlocked] = useState(false);
+  const [sectionsUnlockConfigured, setSectionsUnlockConfigured] = useState<boolean | null>(
+    null,
+  );
+  const [sectionUnlockOpen, setSectionUnlockOpen] = useState(false);
+  const [sectionUnlockPendingView, setSectionUnlockPendingView] = useState<View | null>(
+    null,
+  );
+  const [sectionUnlockPassword, setSectionUnlockPassword] = useState("");
+  const [sectionUnlockError, setSectionUnlockError] = useState<string | null>(null);
+  const [sectionUnlockSubmitting, setSectionUnlockSubmitting] = useState(false);
+  const [sectionsUnlockAdminPassword, setSectionsUnlockAdminPassword] = useState("");
+  const [sectionsUnlockAdminConfirm, setSectionsUnlockAdminConfirm] = useState("");
+  const [sectionsUnlockAdminConfigured, setSectionsUnlockAdminConfigured] = useState(false);
+  const [sectionsUnlockAdminSaving, setSectionsUnlockAdminSaving] = useState(false);
+  const [sectionsUnlockAdminError, setSectionsUnlockAdminError] = useState<string | null>(
+    null,
+  );
   const [companyConfigured, setCompanyConfigured] = useState<boolean | null>(null);
   const [addToOfferOpen, setAddToOfferOpen] = useState(false);
   const [addToOfferPayload, setAddToOfferPayload] = useState<AddToOfferPayload | null>(
@@ -3350,10 +3372,149 @@ export default function Home() {
       if (apiToken) {
         headers.set("Authorization", `Bearer ${apiToken}`);
       }
+      if (sectionsUnlockToken) {
+        headers.set("X-Sections-Unlock", `Bearer ${sectionsUnlockToken}`);
+      }
       return fetch(input, { ...init, headers });
     },
-    [apiToken],
+    [apiToken, sectionsUnlockToken],
   );
+
+  const canAccessView = useCallback(
+    (view: View) => {
+      if (ADMIN_ONLY_VIEWS.includes(view)) {
+        return isAppAdmin;
+      }
+      if (PASSWORD_PROTECTED_VIEWS.includes(view)) {
+        return isAppAdmin || sectionsUnlocked;
+      }
+      return true;
+    },
+    [isAppAdmin, sectionsUnlocked],
+  );
+
+  const navigateToView = useCallback(
+    (view: View) => {
+      if (!canAccessView(view)) {
+        setSectionUnlockPendingView(view);
+        setSectionUnlockOpen(true);
+        setSectionUnlockError(null);
+        setSectionUnlockPassword("");
+        return;
+      }
+      setActiveView(view);
+    },
+    [canAccessView],
+  );
+
+  const submitSectionUnlock = async () => {
+    const pwd = sectionUnlockPassword;
+    if (!pwd) {
+      setSectionUnlockError("Zadaj heslo.");
+      return;
+    }
+    setSectionUnlockSubmitting(true);
+    setSectionUnlockError(null);
+    try {
+      const r = await apiFetch(`${API_BASE}/api/auth/sections-unlock`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: pwd }),
+      });
+      const payload = (await r.json().catch(() => ({}))) as {
+        detail?: unknown;
+        unlock_token?: string;
+      };
+      if (!r.ok) {
+        throw new Error(formatApiDetail(payload.detail));
+      }
+      const token = payload.unlock_token;
+      if (typeof token === "string" && token) {
+        setSectionsUnlockToken(token);
+        try {
+          sessionStorage.setItem(SECTIONS_UNLOCK_TOKEN_KEY, token);
+        } catch {
+          // ignore
+        }
+      }
+      setSectionsUnlocked(true);
+      setSectionUnlockOpen(false);
+      setSectionUnlockPassword("");
+      if (sectionUnlockPendingView) {
+        setActiveView(sectionUnlockPendingView);
+        setSectionUnlockPendingView(null);
+      }
+    } catch (e) {
+      setSectionUnlockError(
+        e instanceof Error ? e.message : "Nepodarilo sa overiť heslo.",
+      );
+    } finally {
+      setSectionUnlockSubmitting(false);
+    }
+  };
+
+  const saveSectionsUnlockAdminPassword = async () => {
+    const p = sectionsUnlockAdminPassword;
+    const c = sectionsUnlockAdminConfirm;
+    if (!p) {
+      setSectionsUnlockAdminError("Zadaj nové heslo (alebo nechaj prázdne pre zrušenie).");
+      return;
+    }
+    if (p !== c) {
+      setSectionsUnlockAdminError("Heslá sa nezhodujú.");
+      return;
+    }
+    setSectionsUnlockAdminSaving(true);
+    setSectionsUnlockAdminError(null);
+    try {
+      const r = await apiFetch(`${API_BASE}/api/admin/sections-unlock`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: p }),
+      });
+      const payload = (await r.json().catch(() => ({}))) as {
+        detail?: unknown;
+        configured?: boolean;
+      };
+      if (!r.ok) {
+        throw new Error(formatApiDetail(payload.detail));
+      }
+      setSectionsUnlockAdminConfigured(Boolean(payload.configured));
+      setSectionsUnlockAdminPassword("");
+      setSectionsUnlockAdminConfirm("");
+    } catch (e) {
+      setSectionsUnlockAdminError(
+        e instanceof Error ? e.message : "Nepodarilo sa uložiť heslo.",
+      );
+    } finally {
+      setSectionsUnlockAdminSaving(false);
+    }
+  };
+
+  const clearSectionsUnlockAdminPassword = async () => {
+    setSectionsUnlockAdminSaving(true);
+    setSectionsUnlockAdminError(null);
+    try {
+      const r = await apiFetch(`${API_BASE}/api/admin/sections-unlock`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: null }),
+      });
+      const payload = (await r.json().catch(() => ({}))) as { detail?: unknown };
+      if (!r.ok) {
+        throw new Error(formatApiDetail(payload.detail));
+      }
+      setSectionsUnlockAdminConfigured(false);
+      setSectionsUnlockAdminPassword("");
+      setSectionsUnlockAdminConfirm("");
+    } catch (e) {
+      setSectionsUnlockAdminError(
+        e instanceof Error ? e.message : "Nepodarilo sa zrušiť heslo.",
+      );
+    } finally {
+      setSectionsUnlockAdminSaving(false);
+    }
+  };
 
   useEffect(() => {
     // Auth session a backend health pingujeme paralelne. /api/health prebudí Render dyno,
@@ -3381,6 +3542,59 @@ export default function Home() {
         setAuthSessionReady(true);
       });
   }, []);
+
+  useEffect(() => {
+    try {
+      const stored = sessionStorage.getItem(SECTIONS_UNLOCK_TOKEN_KEY);
+      if (stored) {
+        setSectionsUnlockToken(stored);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!apiToken) {
+      return;
+    }
+    if (isAppAdmin) {
+      setSectionsUnlocked(true);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${apiToken}`,
+      };
+      if (sectionsUnlockToken) {
+        headers["X-Sections-Unlock"] = `Bearer ${sectionsUnlockToken}`;
+      }
+      try {
+        const r = await fetch(`${API_BASE}/api/auth/sections-unlock/status`, { headers });
+        if (!r.ok || cancelled) {
+          return;
+        }
+        const d = (await r.json()) as { configured?: boolean; unlocked?: boolean };
+        setSectionsUnlockConfigured(Boolean(d.configured));
+        const ok = Boolean(d.unlocked);
+        setSectionsUnlocked(ok);
+        if (!ok && sectionsUnlockToken) {
+          setSectionsUnlockToken(null);
+          try {
+            sessionStorage.removeItem(SECTIONS_UNLOCK_TOKEN_KEY);
+          } catch {
+            // ignore
+          }
+        }
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [apiToken, isAppAdmin, sectionsUnlockToken]);
 
   /** Pobočka môže meniť len prihlasovacie údaje do e-shopov; šablónu dodávateľa len admin. */
   const supplierTemplateLocked = !isAppAdmin;
@@ -4216,10 +4430,17 @@ export default function Home() {
   }, [activeView, devLogPaused, apiFetch]);
 
   useEffect(() => {
-    if (!isAppAdmin && ADMIN_ONLY_VIEWS.includes(activeView)) {
+    if (isAppAdmin) {
+      return;
+    }
+    if (ADMIN_ONLY_VIEWS.includes(activeView)) {
+      setActiveView("vyhladavanie");
+      return;
+    }
+    if (PASSWORD_PROTECTED_VIEWS.includes(activeView) && !sectionsUnlocked) {
       setActiveView("vyhladavanie");
     }
-  }, [activeView, isAppAdmin]);
+  }, [activeView, isAppAdmin, sectionsUnlocked]);
 
   useEffect(() => {
     if (activeView !== "admin" || !isAppAdmin || !apiToken) {
@@ -4228,6 +4449,7 @@ export default function Home() {
     let cancelled = false;
     void (async () => {
       setAdminUsersError(null);
+      setSectionsUnlockAdminError(null);
       try {
         const r = await apiFetch(`${API_BASE}/api/admin/users`);
         const payload = (await r.json()) as
@@ -4250,6 +4472,11 @@ export default function Home() {
               is_admin: boolean;
             }>,
           );
+        }
+        const unlockRes = await apiFetch(`${API_BASE}/api/admin/sections-unlock`);
+        if (unlockRes.ok && !cancelled) {
+          const unlockData = (await unlockRes.json()) as { configured?: boolean };
+          setSectionsUnlockAdminConfigured(Boolean(unlockData.configured));
         }
       } catch (e) {
         if (!cancelled) {
@@ -4315,8 +4542,8 @@ export default function Home() {
   };
 
   const saveFieldMapping = async () => {
-    if (!isAppAdmin) {
-      setMappingStatus("Uložiť mapovanie polí môže len administrátor.");
+    if (!isAppAdmin && !sectionsUnlocked) {
+      setMappingStatus("Uložiť mapovanie polí môže len po odomknutí sekcie heslom.");
       return;
     }
     setMappingStatus("Ukladám mapovanie…");
@@ -4372,11 +4599,11 @@ export default function Home() {
   }, [apiFetch]);
 
   useEffect(() => {
-    if (!isAppAdmin) {
+    if (!isAppAdmin && !sectionsUnlocked) {
       return;
     }
     void loadFieldMapping();
-  }, [loadFieldMapping, isAppAdmin]);
+  }, [loadFieldMapping, isAppAdmin, sectionsUnlocked]);
 
   /** Profil stĺpcov z Excelu (unique_values) — inak sú filtre prázdne pri prázdnej DB alebo bez kliku „Načítať stĺpce“. */
   useEffect(() => {
@@ -5392,8 +5619,8 @@ export default function Home() {
   };
 
   const runExcelImport = async () => {
-    if (!isAppAdmin) {
-      setMappingStatus("Import do databázy môže spustiť len administrátor.");
+    if (!isAppAdmin && !sectionsUnlocked) {
+      setMappingStatus("Import do databázy môže spustiť len po odomknutí sekcie heslom.");
       setExcelImportProgressPct(null);
       return;
     }
@@ -5717,23 +5944,25 @@ export default function Home() {
             )}
           >
             {[
+              { id: "dodavatelia" as const, label: "Dodavatelia", icon: Truck },
+              { id: "parovanie" as const, label: "Parovanie", icon: Link2 },
               ...(isAppAdmin
-                ? [
-                    { id: "dodavatelia" as const, label: "Dodavatelia", icon: Truck },
-                    { id: "parovanie" as const, label: "Parovanie", icon: Link2 },
-                    { id: "admin" as const, label: "Admin", icon: KeyRound },
-                    { id: "dev" as const, label: "Dev / log", icon: Terminal },
-                  ]
+                ? [{ id: "admin" as const, label: "Admin", icon: KeyRound }]
                 : []),
+              { id: "dev" as const, label: "Dev / log", icon: Terminal },
             ].map((item) => {
               const Icon = item.icon;
               const active = activeView === item.id;
+              const navLocked =
+                !isAppAdmin &&
+                PASSWORD_PROTECTED_VIEWS.includes(item.id) &&
+                !sectionsUnlocked;
               return (
                 <button
                   key={item.id}
                   type="button"
                   title={navCollapsed ? item.label : undefined}
-                  onClick={() => setActiveView(item.id as View)}
+                  onClick={() => navigateToView(item.id)}
                   className={cn(
                     "flex shrink-0 items-center rounded-lg text-sm transition-colors md:w-full",
                     navCollapsed
@@ -5749,7 +5978,10 @@ export default function Home() {
                   )}
                 >
                   <Icon className="h-4 w-4 shrink-0" />
-                  <span className={cn(navCollapsed ? "md:hidden" : "")}>{item.label}</span>
+                  <span className={cn("flex items-center gap-1", navCollapsed ? "md:hidden" : "")}>
+                    {item.label}
+                    {navLocked ? <Lock className="h-3 w-3 opacity-70" aria-hidden /> : null}
+                  </span>
                 </button>
               );
             })}
@@ -7931,6 +8163,72 @@ export default function Home() {
               <Card className="overflow-hidden border-violet-200/80 p-0 shadow-sm ring-1 ring-violet-100/60">
                 <div className="border-b border-violet-200/60 bg-gradient-to-r from-violet-50 via-white to-slate-50 px-5 py-4">
                   <h2 className="text-base font-semibold text-slate-900">
+                    Heslo pre odomknutie sekcií
+                  </h2>
+                  <p className="mt-1 text-sm text-slate-600">
+                    Pobočkové účty vidia sekcie Dodávatelia, Párovanie a Dev / log, ale po kliknutí
+                    musia zadať toto heslo. Platí cca 8 hodín v tom istom prehliadači.
+                  </p>
+                </div>
+                <div className="space-y-4 p-5">
+                  {sectionsUnlockAdminError ? (
+                    <p
+                      className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900"
+                      role="alert"
+                    >
+                      {sectionsUnlockAdminError}
+                    </p>
+                  ) : null}
+                  <p className="text-xs text-slate-600">
+                    Stav:{" "}
+                    <span className="font-medium text-slate-800">
+                      {sectionsUnlockAdminConfigured ? "heslo je nastavené" : "heslo nie je nastavené"}
+                    </span>
+                  </p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-slate-700">Nové heslo</label>
+                      <Input
+                        type="password"
+                        value={sectionsUnlockAdminPassword}
+                        onChange={(e) => setSectionsUnlockAdminPassword(e.target.value)}
+                        autoComplete="new-password"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-slate-700">Potvrď heslo</label>
+                      <Input
+                        type="password"
+                        value={sectionsUnlockAdminConfirm}
+                        onChange={(e) => setSectionsUnlockAdminConfirm(e.target.value)}
+                        autoComplete="new-password"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      disabled={sectionsUnlockAdminSaving}
+                      onClick={() => void saveSectionsUnlockAdminPassword()}
+                    >
+                      {sectionsUnlockAdminSaving ? "Ukladám…" : "Uložiť heslo"}
+                    </Button>
+                    {sectionsUnlockAdminConfigured ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={sectionsUnlockAdminSaving}
+                        onClick={() => void clearSectionsUnlockAdminPassword()}
+                      >
+                        Zrušiť heslo
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+              </Card>
+              <Card className="overflow-hidden border-violet-200/80 p-0 shadow-sm ring-1 ring-violet-100/60">
+                <div className="border-b border-violet-200/60 bg-gradient-to-r from-violet-50 via-white to-slate-50 px-5 py-4">
+                  <h2 className="text-base font-semibold text-slate-900">
                     Správa účtov (pobočky)
                   </h2>
                   <p className="mt-1 text-sm text-slate-600">
@@ -8259,6 +8557,90 @@ export default function Home() {
               </Card>
             </section>
           )}
+          {sectionUnlockOpen ? (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Odomknutie sekcie"
+              onClick={() => {
+                setSectionUnlockOpen(false);
+                setSectionUnlockPendingView(null);
+              }}
+            >
+              <div
+                className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-4 shadow-2xl"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                  <Lock className="h-4 w-4 text-violet-600" aria-hidden />
+                  Odomknutie sekcie
+                </h3>
+                <p className="mt-1 text-xs text-slate-600">
+                  Pre prístup do sekcie{" "}
+                  <span className="font-medium text-slate-800">
+                    {sectionUnlockPendingView === "dodavatelia"
+                      ? "Dodávatelia"
+                      : sectionUnlockPendingView === "parovanie"
+                        ? "Párovanie"
+                        : sectionUnlockPendingView === "dev"
+                          ? "Dev / log"
+                          : "—"}
+                  </span>{" "}
+                  zadaj heslo nastavené administrátorom.
+                </p>
+                {sectionsUnlockConfigured === false ? (
+                  <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    Administrátor ešte nenastavil heslo pre odomknutie.
+                  </p>
+                ) : null}
+                {sectionUnlockError ? (
+                  <p
+                    className="mt-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-900"
+                    role="alert"
+                  >
+                    {sectionUnlockError}
+                  </p>
+                ) : null}
+                <Input
+                  type="password"
+                  className="mt-3"
+                  value={sectionUnlockPassword}
+                  onChange={(e) => setSectionUnlockPassword(e.target.value)}
+                  placeholder="Heslo odomknutia"
+                  autoComplete="current-password"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      void submitSectionUnlock();
+                    }
+                  }}
+                />
+                <div className="mt-4 flex justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setSectionUnlockOpen(false);
+                      setSectionUnlockPendingView(null);
+                    }}
+                  >
+                    Zrušiť
+                  </Button>
+                  <Button
+                    type="button"
+                    disabled={
+                      sectionUnlockSubmitting ||
+                      sectionsUnlockConfigured === false ||
+                      !sectionUnlockPassword
+                    }
+                    onClick={() => void submitSectionUnlock()}
+                  >
+                    {sectionUnlockSubmitting ? "Overujem…" : "Odomknúť"}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : null}
           {listPicker ? (
             <div
               className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4"
@@ -8421,23 +8803,25 @@ export default function Home() {
           >
             <div className="grid grid-cols-2 gap-2">
               {[
+                { id: "dodavatelia" as const, label: "Dodávatelia", icon: Truck },
+                { id: "parovanie" as const, label: "Párovanie", icon: Link2 },
                 ...(isAppAdmin
-                  ? [
-                      { id: "dodavatelia" as const, label: "Dodávatelia", icon: Truck },
-                      { id: "parovanie" as const, label: "Párovanie", icon: Link2 },
-                      { id: "admin" as const, label: "Admin", icon: KeyRound },
-                      { id: "dev" as const, label: "Dev / log", icon: Terminal },
-                    ]
+                  ? [{ id: "admin" as const, label: "Admin", icon: KeyRound }]
                   : []),
+                { id: "dev" as const, label: "Dev / log", icon: Terminal },
               ].map((item) => {
                 const Icon = item.icon;
                 const active = activeView === item.id;
+                const navLocked =
+                  !isAppAdmin &&
+                  PASSWORD_PROTECTED_VIEWS.includes(item.id) &&
+                  !sectionsUnlocked;
                 return (
                   <button
                     key={item.id}
                     type="button"
                     onClick={() => {
-                      setActiveView(item.id);
+                      navigateToView(item.id);
                       setMobileMenuOpen(false);
                     }}
                     className={cn(
@@ -8449,6 +8833,7 @@ export default function Home() {
                   >
                     <Icon className="h-4 w-4" />
                     {item.label}
+                    {navLocked ? <Lock className="ml-auto h-3.5 w-3.5 opacity-60" /> : null}
                   </button>
                 );
               })}

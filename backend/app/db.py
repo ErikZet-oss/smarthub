@@ -121,6 +121,12 @@ def migrate_schema() -> None:
     ):
         _add_column_if_missing("offerline", col, ddl)
 
+    _add_column_if_missing(
+        "companysettings",
+        "sections_unlock_password_hash",
+        "VARCHAR",
+    )
+
     _ensure_search_indexes()
 
 
