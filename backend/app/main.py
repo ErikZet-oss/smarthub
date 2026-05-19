@@ -12,9 +12,9 @@ import logging
 import traceback
 
 import jwt
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from sqlmodel import Session
 
@@ -27,7 +27,7 @@ from app.api.deps import AuthUserContext
 from app.api.routes import router
 from app.db import DATABASE_FILE, create_db_and_tables, engine, migrate_schema
 from app.services.dev_run_log import dev_run_log, dev_screens_dir
-from app.services.product_images import product_images_dir
+from app.services.product_images import load_product_image_response
 from app.services.smarthub_bootstrap import seed_initial_admin_if_empty
 from app.services.company_logos import company_logos_dir
 from app.services.supplier_logos import seed_supplier_logos_from_repo, supplier_logos_dir
@@ -69,16 +69,27 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(router, prefix="/api")
+
+
+@app.get("/product-images/{filename:path}")
+def serve_product_image(filename: str) -> Response:
+    """Produktové obrázky — TIFF sa konvertuje na JPEG (prehliadač .tif v img nezobrazí)."""
+    try:
+        body, media_type = load_product_image_response(filename)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Obrázok nenájdený.") from None
+    return Response(
+        content=body,
+        media_type=media_type,
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
 app.mount("/dev-assets", StaticFiles(directory=dev_screens_dir()), name="dev-assets")
 app.mount(
     "/supplier-logos",
     StaticFiles(directory=supplier_logos_dir()),
     name="supplier-logos",
-)
-app.mount(
-    "/product-images",
-    StaticFiles(directory=product_images_dir()),
-    name="product-images",
 )
 app.mount(
     "/company-logos",
