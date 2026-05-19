@@ -41,6 +41,7 @@ import {
   Terminal,
   Truck,
   Trash2,
+  Users,
   Sun,
   X,
 } from "lucide-react";
@@ -8153,210 +8154,140 @@ export default function Home() {
           )}
 
           {activeView === "admin" && (
-            <section className="space-y-4">
+            <section className="space-y-6">
+              <div className="overflow-hidden rounded-2xl border border-violet-200/60 bg-gradient-to-br from-violet-600 via-violet-700 to-slate-800 px-5 py-5 shadow-lg shadow-violet-900/15 sm:px-6">
+                <div className="flex items-start gap-4">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white/15 ring-1 ring-white/25 backdrop-blur-sm">
+                    <ShieldCheck className="h-6 w-6 text-white" aria-hidden />
+                  </div>
+                  <div className="min-w-0">
+                    <h1 className="text-lg font-semibold tracking-tight text-white sm:text-xl">
+                      Administrácia
+                    </h1>
+                    <p className="mt-1 max-w-2xl text-sm leading-relaxed text-violet-100/90">
+                      Firemné údaje na ponukách, správa pobočkových účtov a heslo pre odomknutie
+                      citlivých sekcií aplikácie.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
               <CompanySettingsAdmin
                 apiBase={API_BASE}
                 apiFetch={apiFetch}
                 apiToken={apiToken}
                 assetUrl={publicApiAssetUrl}
               />
-              <Card className="overflow-hidden border-violet-200/80 p-0 shadow-sm ring-1 ring-violet-100/60">
-                <div className="border-b border-violet-200/60 bg-gradient-to-r from-violet-50 via-white to-slate-50 px-5 py-4">
-                  <h2 className="text-base font-semibold text-slate-900">
-                    Heslo pre odomknutie sekcií
-                  </h2>
-                  <p className="mt-1 text-sm text-slate-600">
-                    Pobočkové účty vidia sekcie Dodávatelia, Párovanie a Dev / log, ale po kliknutí
-                    musia zadať toto heslo. Platí cca 8 hodín v tom istom prehliadači.
-                  </p>
-                </div>
-                <div className="space-y-4 p-5">
-                  {sectionsUnlockAdminError ? (
-                    <p
-                      className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900"
-                      role="alert"
-                    >
-                      {sectionsUnlockAdminError}
-                    </p>
-                  ) : null}
-                  <p className="text-xs text-slate-600">
-                    Stav:{" "}
-                    <span className="font-medium text-slate-800">
-                      {sectionsUnlockAdminConfigured ? "heslo je nastavené" : "heslo nie je nastavené"}
-                    </span>
-                  </p>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-slate-700">Nové heslo</label>
-                      <Input
-                        type="password"
-                        value={sectionsUnlockAdminPassword}
-                        onChange={(e) => setSectionsUnlockAdminPassword(e.target.value)}
-                        autoComplete="new-password"
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-slate-700">Potvrď heslo</label>
-                      <Input
-                        type="password"
-                        value={sectionsUnlockAdminConfirm}
-                        onChange={(e) => setSectionsUnlockAdminConfirm(e.target.value)}
-                        autoComplete="new-password"
-                      />
+
+              <div className="grid gap-6 xl:grid-cols-2">
+                <Card className="overflow-hidden border-violet-200/70 p-0 shadow-md shadow-violet-100/40 ring-1 ring-violet-100/50">
+                  <div className="border-b border-violet-200/50 bg-gradient-to-r from-violet-50/90 via-white to-fuchsia-50/40 px-5 py-4">
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-violet-100 text-violet-700 ring-1 ring-violet-200/60">
+                        <Lock className="h-4 w-4" aria-hidden />
+                      </div>
+                      <div>
+                        <h2 className="text-base font-semibold text-slate-900">
+                          Heslo pre odomknutie sekcií
+                        </h2>
+                        <p className="mt-1 text-sm leading-relaxed text-slate-600">
+                          Pobočky vidia Dodávatelia, Párovanie a Dev / log — po kliknutí zadajú toto
+                          heslo. Platí cca 8 hodín v prehliadači.
+                        </p>
+                      </div>
                     </div>
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      type="button"
-                      disabled={sectionsUnlockAdminSaving}
-                      onClick={() => void saveSectionsUnlockAdminPassword()}
-                    >
-                      {sectionsUnlockAdminSaving ? "Ukladám…" : "Uložiť heslo"}
-                    </Button>
-                    {sectionsUnlockAdminConfigured ? (
+                  <div className="space-y-4 bg-gradient-to-b from-white to-violet-50/20 p-5">
+                    {sectionsUnlockAdminError ? (
+                      <p
+                        className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900"
+                        role="alert"
+                      >
+                        {sectionsUnlockAdminError}
+                      </p>
+                    ) : null}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                        Stav
+                      </span>
+                      <Badge
+                        className={cn(
+                          "border px-2.5 py-0.5 text-[11px] font-medium",
+                          sectionsUnlockAdminConfigured
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                            : "border-amber-200 bg-amber-50 text-amber-900",
+                        )}
+                      >
+                        {sectionsUnlockAdminConfigured
+                          ? "Heslo je nastavené"
+                          : "Heslo nie je nastavené"}
+                      </Badge>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-medium text-slate-700">Nové heslo</label>
+                        <Input
+                          type="password"
+                          value={sectionsUnlockAdminPassword}
+                          onChange={(e) => setSectionsUnlockAdminPassword(e.target.value)}
+                          autoComplete="new-password"
+                          className="bg-white"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-medium text-slate-700">Potvrď heslo</label>
+                        <Input
+                          type="password"
+                          value={sectionsUnlockAdminConfirm}
+                          onChange={(e) => setSectionsUnlockAdminConfirm(e.target.value)}
+                          autoComplete="new-password"
+                          className="bg-white"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2 border-t border-violet-100/80 pt-4">
                       <Button
                         type="button"
-                        variant="outline"
+                        className="shadow-sm shadow-violet-600/20"
                         disabled={sectionsUnlockAdminSaving}
-                        onClick={() => void clearSectionsUnlockAdminPassword()}
+                        onClick={() => void saveSectionsUnlockAdminPassword()}
                       >
-                        Zrušiť heslo
+                        {sectionsUnlockAdminSaving ? "Ukladám…" : "Uložiť heslo"}
                       </Button>
-                    ) : null}
+                      {sectionsUnlockAdminConfigured ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="border-slate-200"
+                          disabled={sectionsUnlockAdminSaving}
+                          onClick={() => void clearSectionsUnlockAdminPassword()}
+                        >
+                          Zrušiť heslo
+                        </Button>
+                      ) : null}
+                    </div>
                   </div>
-                </div>
-              </Card>
-              <Card className="overflow-hidden border-violet-200/80 p-0 shadow-sm ring-1 ring-violet-100/60">
-                <div className="border-b border-violet-200/60 bg-gradient-to-r from-violet-50 via-white to-slate-50 px-5 py-4">
-                  <h2 className="text-base font-semibold text-slate-900">
-                    Správa účtov (pobočky)
-                  </h2>
-                  <p className="mt-1 text-sm text-slate-600">
-                    Centrálna šablóna dodávateľov (URL, JSON, mapovanie) je spoločná. Pri vytvorení
-                    účtu pobočky sa skopírujú prihlasovacie údaje do B2B e-shopov; heslo do SmartHubu
-                    nastavíš tu.
-                  </p>
-                </div>
-                <div className="space-y-5 p-5">
-                  {adminUsersError ? (
-                    <p
-                      className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900"
-                      role="alert"
-                    >
-                      {adminUsersError}
-                    </p>
-                  ) : null}
-                  <div className="rounded-lg border border-slate-200/90 bg-slate-50/80 px-4 py-3 text-sm text-slate-700">
-                    <p className="font-medium text-slate-900">Používatelia</p>
-                    {adminUsers.length === 0 ? (
-                      <p className="mt-1 text-xs text-slate-600">Načítavam…</p>
-                    ) : (
-                      <ul className="mt-2 space-y-1.5 text-xs">
-                        {adminUsers.map((u) => (
-                          <li
-                            key={u.id}
-                            className="rounded-md border border-slate-200/80 bg-white/90 px-3 py-2"
-                          >
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <span className="font-medium text-slate-900">{u.username}</span>
-                              <span className="text-slate-600">
-                                {u.display_label ?? "—"}
-                                {u.is_admin ? (
-                                  <Badge className="ml-2 border-violet-200 bg-violet-50 text-violet-900">
-                                    Admin
-                                  </Badge>
-                                ) : (
-                                  <Badge className="ml-2 border-slate-200 bg-slate-50 text-slate-800">
-                                    Pobočka
-                                  </Badge>
-                                )}
-                              </span>
-                            </div>
-                            {!u.is_admin ? (
-                              passwordEditUserId === u.id ? (
-                                <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                                  <Input
-                                    type="password"
-                                    value={passwordEditValue}
-                                    onChange={(e) => setPasswordEditValue(e.target.value)}
-                                    placeholder="Nové heslo"
-                                    autoComplete="new-password"
-                                  />
-                                  <Input
-                                    type="password"
-                                    value={passwordEditConfirm}
-                                    onChange={(e) => setPasswordEditConfirm(e.target.value)}
-                                    placeholder="Potvrď heslo"
-                                    autoComplete="new-password"
-                                  />
-                                  <div className="flex flex-wrap gap-1 sm:col-span-2">
-                                    <Button
-                                      type="button"
-                                      className="h-8 px-2.5 text-xs"
-                                      disabled={adminUserActionId === u.id}
-                                      onClick={() => void updateBranchPassword(u.id)}
-                                    >
-                                      {adminUserActionId === u.id ? "Ukladám…" : "Uložiť heslo"}
-                                    </Button>
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      className="h-8 px-2.5 text-xs"
-                                      disabled={adminUserActionId === u.id}
-                                      onClick={() => {
-                                        setPasswordEditUserId(null);
-                                        setPasswordEditValue("");
-                                        setPasswordEditConfirm("");
-                                      }}
-                                    >
-                                      Zrušiť
-                                    </Button>
-                                  </div>
-                                </div>
-                              ) : (
-                                <div className="mt-2 flex flex-wrap gap-1">
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    className="h-8 px-2.5 text-xs"
-                                    disabled={adminUserActionId === u.id}
-                                    onClick={() => {
-                                      setPasswordEditUserId(u.id);
-                                      setPasswordEditValue("");
-                                      setPasswordEditConfirm("");
-                                      setAdminUsersError(null);
-                                    }}
-                                  >
-                                    <KeyRound className="mr-1 h-3.5 w-3.5" />
-                                    Zmeniť heslo
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    className="h-8 border-red-200 px-2.5 text-xs text-red-700"
-                                    disabled={adminUserActionId === u.id}
-                                    onClick={() => void deleteBranchUser(u)}
-                                  >
-                                    <Trash2 className="mr-1 h-3.5 w-3.5" />
-                                    {adminUserActionId === u.id ? "Mažem…" : "Vymazať"}
-                                  </Button>
-                                </div>
-                              )
-                            ) : null}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
+                </Card>
+
+                <Card className="overflow-hidden border-slate-200/80 p-0 shadow-md shadow-slate-200/50 ring-1 ring-slate-100">
+                  <div className="border-b border-slate-200/70 bg-gradient-to-r from-slate-50 via-white to-sky-50/30 px-5 py-4">
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-sky-100 text-sky-700 ring-1 ring-sky-200/60">
+                        <Plus className="h-4 w-4" aria-hidden />
+                      </div>
+                      <div>
+                        <h2 className="text-base font-semibold text-slate-900">
+                          Nový účet pobočky
+                        </h2>
+                        <p className="mt-1 text-sm leading-relaxed text-slate-600">
+                          Zdedí dodávateľov a skopírované B2B prihlasovacie údaje z centrálnej
+                          šablóny.
+                        </p>
+                      </div>
+                    </div>
                   </div>
-                  <div className="rounded-xl border border-violet-200/70 bg-white px-4 py-4 shadow-sm ring-1 ring-violet-100/40">
-                    <p className="text-sm font-semibold text-slate-900">
-                      Nový účet pobočky
-                    </p>
-                    <p className="mt-1 text-xs text-slate-600">
-                      Zdedí všetkých dodávateľov a aktuálne skopírované prihlasovacie údaje z
-                      centrálnej šablóny. Pobočka si ich následne zmení sama.
-                    </p>
-                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-4 bg-gradient-to-b from-white to-slate-50/40 p-5">
+                    <div className="grid gap-3 sm:grid-cols-2">
                       <div className="space-y-1.5">
                         <label className="text-xs font-medium text-slate-700">
                           Prihlasovacie meno
@@ -8365,6 +8296,7 @@ export default function Home() {
                           value={newBranchUsername}
                           onChange={(e) => setNewBranchUsername(e.target.value)}
                           autoComplete="off"
+                          className="bg-white"
                         />
                       </div>
                       <div className="space-y-1.5">
@@ -8374,6 +8306,7 @@ export default function Home() {
                           value={newBranchPassword}
                           onChange={(e) => setNewBranchPassword(e.target.value)}
                           autoComplete="new-password"
+                          className="bg-white"
                         />
                       </div>
                       <div className="space-y-1.5 sm:col-span-2">
@@ -8384,18 +8317,192 @@ export default function Home() {
                           value={newBranchLabel}
                           onChange={(e) => setNewBranchLabel(e.target.value)}
                           placeholder="napr. Bratislava"
+                          className="bg-white"
                         />
                       </div>
                     </div>
                     <Button
                       type="button"
-                      className="mt-4 shadow-sm shadow-violet-600/20"
+                      className="w-full shadow-sm shadow-sky-600/20 sm:w-auto"
                       disabled={adminUserSubmitting}
                       onClick={() => void createBranchAccount()}
                     >
                       {adminUserSubmitting ? "Vytváram…" : "Vytvoriť účet"}
                     </Button>
                   </div>
+                </Card>
+              </div>
+
+              <Card className="overflow-hidden border-violet-200/70 p-0 shadow-md shadow-violet-100/40 ring-1 ring-violet-100/50">
+                <div className="border-b border-violet-200/50 bg-gradient-to-r from-violet-50/90 via-white to-indigo-50/30 px-5 py-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700 ring-1 ring-indigo-200/60">
+                        <Users className="h-4 w-4" aria-hidden />
+                      </div>
+                      <div>
+                        <h2 className="text-base font-semibold text-slate-900">
+                          Správa účtov (pobočky)
+                        </h2>
+                        <p className="mt-1 max-w-2xl text-sm leading-relaxed text-slate-600">
+                          Pri vytvorení účtu sa skopírujú prihlasovacie údaje do B2B e-shopov; heslo
+                          do SmartHubu nastavíš priamo tu.
+                        </p>
+                      </div>
+                    </div>
+                    {adminUsers.length > 0 ? (
+                      <Badge className="border-violet-200 bg-white/80 text-violet-900">
+                        {adminUsers.length}{" "}
+                        {adminUsers.length === 1 ? "používateľ" : "používatelia"}
+                      </Badge>
+                    ) : null}
+                  </div>
+                </div>
+                <div className="space-y-4 bg-gradient-to-b from-white to-violet-50/15 p-5">
+                  {adminUsersError ? (
+                    <p
+                      className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900"
+                      role="alert"
+                    >
+                      {adminUsersError}
+                    </p>
+                  ) : null}
+                  {adminUsers.length === 0 ? (
+                    <div className="flex items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/60 px-4 py-10 text-center">
+                      <p className="text-sm text-slate-500">Načítavam používateľov…</p>
+                    </div>
+                  ) : (
+                    <ul className="grid gap-3 sm:grid-cols-2">
+                      {adminUsers.map((u) => (
+                        <li
+                          key={u.id}
+                          className={cn(
+                            "rounded-xl border bg-white p-4 shadow-sm transition-shadow hover:shadow-md",
+                            u.is_admin
+                              ? "border-violet-200/80 ring-1 ring-violet-100/60"
+                              : "border-slate-200/90",
+                          )}
+                        >
+                          <div className="flex items-start gap-3">
+                            <div
+                              className={cn(
+                                "flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-semibold",
+                                u.is_admin
+                                  ? "bg-violet-100 text-violet-800"
+                                  : "bg-slate-100 text-slate-700",
+                              )}
+                              aria-hidden
+                            >
+                              {u.username.charAt(0).toUpperCase()}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="font-semibold text-slate-900">{u.username}</span>
+                                {u.is_admin ? (
+                                  <Badge className="border-violet-200 bg-violet-50 text-violet-900">
+                                    Admin
+                                  </Badge>
+                                ) : (
+                                  <Badge className="border-slate-200 bg-slate-50 text-slate-700">
+                                    Pobočka
+                                  </Badge>
+                                )}
+                              </div>
+                              <p className="mt-0.5 truncate text-xs text-slate-500">
+                                {u.display_label ? (
+                                  <>
+                                    <span className="text-slate-400">Pobočka: </span>
+                                    {u.display_label}
+                                  </>
+                                ) : (
+                                  "Bez označenia pobočky"
+                                )}
+                              </p>
+                            </div>
+                          </div>
+                          {!u.is_admin ? (
+                            passwordEditUserId === u.id ? (
+                              <div className="mt-4 space-y-3 border-t border-slate-100 pt-4">
+                                <div className="grid gap-2 sm:grid-cols-2">
+                                  <Input
+                                    type="password"
+                                    value={passwordEditValue}
+                                    onChange={(e) => setPasswordEditValue(e.target.value)}
+                                    placeholder="Nové heslo"
+                                    autoComplete="new-password"
+                                    className="h-9 text-xs"
+                                  />
+                                  <Input
+                                    type="password"
+                                    value={passwordEditConfirm}
+                                    onChange={(e) => setPasswordEditConfirm(e.target.value)}
+                                    placeholder="Potvrď heslo"
+                                    autoComplete="new-password"
+                                    className="h-9 text-xs"
+                                  />
+                                </div>
+                                <div className="flex flex-wrap gap-2">
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    className="h-8 text-xs"
+                                    disabled={adminUserActionId === u.id}
+                                    onClick={() => void updateBranchPassword(u.id)}
+                                  >
+                                    {adminUserActionId === u.id ? "Ukladám…" : "Uložiť heslo"}
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-8 text-xs"
+                                    disabled={adminUserActionId === u.id}
+                                    onClick={() => {
+                                      setPasswordEditUserId(null);
+                                      setPasswordEditValue("");
+                                      setPasswordEditConfirm("");
+                                    }}
+                                  >
+                                    Zrušiť
+                                  </Button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-100 pt-4">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-8 border-slate-200 text-xs"
+                                  disabled={adminUserActionId === u.id}
+                                  onClick={() => {
+                                    setPasswordEditUserId(u.id);
+                                    setPasswordEditValue("");
+                                    setPasswordEditConfirm("");
+                                    setAdminUsersError(null);
+                                  }}
+                                >
+                                  <KeyRound className="mr-1 h-3.5 w-3.5" />
+                                  Zmeniť heslo
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-8 border-red-200 text-xs text-red-700 hover:bg-red-50"
+                                  disabled={adminUserActionId === u.id}
+                                  onClick={() => void deleteBranchUser(u)}
+                                >
+                                  <Trash2 className="mr-1 h-3.5 w-3.5" />
+                                  {adminUserActionId === u.id ? "Mažem…" : "Vymazať"}
+                                </Button>
+                              </div>
+                            )
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               </Card>
             </section>

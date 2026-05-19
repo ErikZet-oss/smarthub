@@ -1,6 +1,6 @@
 "use client";
 
-import { ImageIcon, Loader2, Trash2 } from "lucide-react";
+import { Building2, ImageIcon, Loader2, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { CompanySettings } from "@/components/offers/types";
@@ -143,7 +143,7 @@ export function CompanySettingsAdmin({
   const logoSrc = assetUrl(form.logo_url);
 
   return (
-    <Card className="overflow-hidden border-sky-200/80 p-0 shadow-sm ring-1 ring-sky-100/60">
+    <Card className="overflow-hidden border-sky-200/70 p-0 shadow-md shadow-sky-100/40 ring-1 ring-sky-100/50">
       <SettingsHeader />
       <SettingsBody
         loading={loading}
@@ -165,12 +165,19 @@ export function CompanySettingsAdmin({
 
 function SettingsHeader() {
   return (
-    <div className="border-b border-sky-200/60 bg-gradient-to-r from-sky-50 via-white to-slate-50 px-5 py-4">
-      <h2 className="text-base font-semibold text-slate-900">Firemné údaje na ponukách</h2>
-      <p className="mt-1 text-sm text-slate-600">
-        Tieto údaje a logo sa zobrazia v hlavičke PDF ponuky. Každý používateľ môže vytvárať
-        vlastné ponuky pre klientov.
-      </p>
+    <div className="border-b border-sky-200/50 bg-gradient-to-r from-sky-50/90 via-white to-cyan-50/30 px-5 py-4">
+      <div className="flex items-start gap-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-sky-100 text-sky-700 ring-1 ring-sky-200/60">
+          <Building2 className="h-4 w-4" aria-hidden />
+        </div>
+        <div>
+          <h2 className="text-base font-semibold text-slate-900">Firemné údaje na ponukách</h2>
+          <p className="mt-1 text-sm leading-relaxed text-slate-600">
+            Tieto údaje a logo sa zobrazia v hlavičke PDF ponuky. Každý používateľ môže vytvárať
+            vlastné ponuky pre klientov.
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -205,10 +212,10 @@ function SettingsBody(props: {
   } = props;
 
   return (
-    <div className="space-y-5 p-5">
+    <div className="space-y-6 bg-gradient-to-b from-white to-sky-50/20 p-5">
       {loading ? (
-        <p className="flex items-center gap-2 text-sm text-slate-600">
-          <Loader2 className="h-4 w-4 animate-spin" /> Načítavam…
+        <p className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-slate-200 bg-slate-50/60 py-10 text-sm text-slate-600">
+          <Loader2 className="h-4 w-4 animate-spin" /> Načítavam firemné údaje…
         </p>
       ) : (
         <>
@@ -226,114 +233,185 @@ function SettingsBody(props: {
             </p>
           ) : null}
 
-          <div className="flex flex-col gap-4 rounded-xl border border-slate-200/90 bg-slate-50/60 p-4 sm:flex-row sm:items-center">
-            <div
-              className={cn(
-                "flex h-24 w-40 shrink-0 items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white",
-                logoSrc ? "border-solid" : "",
-              )}
-            >
-              {logoSrc ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={logoSrc}
-                  alt="Logo firmy"
-                  className="max-h-20 max-w-[9rem] object-contain p-2"
-                />
-              ) : (
-                <ImageIcon className="h-8 w-8 text-slate-300" aria-hidden />
-              )}
+          <div className="rounded-xl border border-sky-100/80 bg-white p-4 shadow-sm">
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-sky-800/80">
+              Logo firmy
+            </p>
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+              <div
+                className={cn(
+                  "flex h-24 w-40 shrink-0 items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50/50",
+                  logoSrc ? "border-solid border-sky-200 bg-white" : "",
+                )}
+              >
+                {logoSrc ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={logoSrc}
+                    alt="Logo firmy"
+                    className="max-h-20 max-w-[9rem] object-contain p-2"
+                  />
+                ) : (
+                  <ImageIcon className="h-8 w-8 text-slate-300" aria-hidden />
+                )}
+              </div>
+              <LogoActions
+                logoUploading={logoUploading}
+                fileRef={fileRef}
+                logoSrc={logoSrc}
+                onUpload={onUpload}
+                onRemoveLogo={onRemoveLogo}
+              />
             </div>
-            <LogoActions
-              logoUploading={logoUploading}
-              fileRef={fileRef}
-              logoSrc={logoSrc}
-              onUpload={onUpload}
-              onRemoveLogo={onRemoveLogo}
-            />
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Názov firmy" className="sm:col-span-2">
-              <Input
-                value={form.company_name}
-                onChange={(e) => onSet("company_name", e.target.value)}
-              />
-            </Field>
-            <Field label="Ulica">
-              <Input value={form.street ?? ""} onChange={(e) => onSet("street", e.target.value)} />
-            </Field>
-            <Field label="PSČ">
-              <Input
-                value={form.zip_code ?? ""}
-                onChange={(e) => onSet("zip_code", e.target.value)}
-              />
-            </Field>
-            <Field label="Mesto">
-              <Input value={form.city ?? ""} onChange={(e) => onSet("city", e.target.value)} />
-            </Field>
-            <Field label="Krajina">
-              <Input
-                value={form.country ?? ""}
-                onChange={(e) => onSet("country", e.target.value)}
-              />
-            </Field>
-            <Field label="IČO">
-              <Input value={form.ico ?? ""} onChange={(e) => onSet("ico", e.target.value)} />
-            </Field>
-            <Field label="DIČ">
-              <Input value={form.dic ?? ""} onChange={(e) => onSet("dic", e.target.value)} />
-            </Field>
-            <Field label="IČ DPH">
-              <Input
-                value={form.ic_dph ?? ""}
-                onChange={(e) => onSet("ic_dph", e.target.value)}
-              />
-            </Field>
-            <Field label="E-mail">
-              <Input value={form.email ?? ""} onChange={(e) => onSet("email", e.target.value)} />
-            </Field>
-            <Field label="Telefón">
-              <Input value={form.phone ?? ""} onChange={(e) => onSet("phone", e.target.value)} />
-            </Field>
-            <Field label="Web" className="sm:col-span-2">
-              <Input value={form.web ?? ""} onChange={(e) => onSet("web", e.target.value)} />
-            </Field>
-            <Field label="IBAN">
-              <Input value={form.iban ?? ""} onChange={(e) => onSet("iban", e.target.value)} />
-            </Field>
-            <Field label="Banka">
-              <Input
-                value={form.bank_name ?? ""}
-                onChange={(e) => onSet("bank_name", e.target.value)}
-              />
-            </Field>
-            <Field label="Farba PDF šablóny">
-              <Input
-                type="color"
-                value={form.pdf_accent_color || "#0284c7"}
-                onChange={(e) => onSet("pdf_accent_color", e.target.value)}
-                className="h-10 w-20 cursor-pointer p-1"
-              />
-            </Field>
-            <Field label="Poznámka v pätičke PDF" className="sm:col-span-2">
-              <textarea
-                className="min-h-[72px] w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
-                value={form.offer_footer_note ?? ""}
-                onChange={(e) => onSet("offer_footer_note", e.target.value)}
-                placeholder="napr. platobné podmienky, dodacia lehota…"
-              />
-            </Field>
-          </div>
+          <FormSection title="Identifikácia firmy">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Názov firmy" className="sm:col-span-2">
+                <Input
+                  value={form.company_name}
+                  onChange={(e) => onSet("company_name", e.target.value)}
+                  className="bg-white"
+                />
+              </Field>
+              <Field label="IČO">
+                <Input
+                  value={form.ico ?? ""}
+                  onChange={(e) => onSet("ico", e.target.value)}
+                  className="bg-white"
+                />
+              </Field>
+              <Field label="DIČ">
+                <Input
+                  value={form.dic ?? ""}
+                  onChange={(e) => onSet("dic", e.target.value)}
+                  className="bg-white"
+                />
+              </Field>
+              <Field label="IČ DPH" className="sm:col-span-2">
+                <Input
+                  value={form.ic_dph ?? ""}
+                  onChange={(e) => onSet("ic_dph", e.target.value)}
+                  className="bg-white"
+                />
+              </Field>
+            </div>
+          </FormSection>
 
-          <Button
-            type="button"
-            className="shadow-sm shadow-sky-600/20"
-            disabled={saving}
-            onClick={onSave}
-          >
-            {saving ? "Ukladám…" : "Uložiť firemné údaje"}
-          </Button>
+          <FormSection title="Adresa">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Ulica" className="sm:col-span-2">
+                <Input
+                  value={form.street ?? ""}
+                  onChange={(e) => onSet("street", e.target.value)}
+                  className="bg-white"
+                />
+              </Field>
+              <Field label="PSČ">
+                <Input
+                  value={form.zip_code ?? ""}
+                  onChange={(e) => onSet("zip_code", e.target.value)}
+                  className="bg-white"
+                />
+              </Field>
+              <Field label="Mesto">
+                <Input
+                  value={form.city ?? ""}
+                  onChange={(e) => onSet("city", e.target.value)}
+                  className="bg-white"
+                />
+              </Field>
+              <Field label="Krajina" className="sm:col-span-2">
+                <Input
+                  value={form.country ?? ""}
+                  onChange={(e) => onSet("country", e.target.value)}
+                  className="bg-white"
+                />
+              </Field>
+            </div>
+          </FormSection>
+
+          <FormSection title="Kontakt">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="E-mail">
+                <Input
+                  value={form.email ?? ""}
+                  onChange={(e) => onSet("email", e.target.value)}
+                  className="bg-white"
+                />
+              </Field>
+              <Field label="Telefón">
+                <Input
+                  value={form.phone ?? ""}
+                  onChange={(e) => onSet("phone", e.target.value)}
+                  className="bg-white"
+                />
+              </Field>
+              <Field label="Web" className="sm:col-span-2">
+                <Input
+                  value={form.web ?? ""}
+                  onChange={(e) => onSet("web", e.target.value)}
+                  className="bg-white"
+                />
+              </Field>
+            </div>
+          </FormSection>
+
+          <FormSection title="Platobné údaje">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="IBAN">
+                <Input
+                  value={form.iban ?? ""}
+                  onChange={(e) => onSet("iban", e.target.value)}
+                  className="bg-white"
+                />
+              </Field>
+              <Field label="Banka">
+                <Input
+                  value={form.bank_name ?? ""}
+                  onChange={(e) => onSet("bank_name", e.target.value)}
+                  className="bg-white"
+                />
+              </Field>
+            </div>
+          </FormSection>
+
+          <FormSection title="Vzhľad PDF ponuky">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Farba PDF šablóny">
+                <div className="flex items-center gap-3">
+                  <Input
+                    type="color"
+                    value={form.pdf_accent_color || "#0284c7"}
+                    onChange={(e) => onSet("pdf_accent_color", e.target.value)}
+                    className="h-10 w-14 cursor-pointer rounded-lg p-1"
+                  />
+                  <span className="font-mono text-xs text-slate-500">
+                    {form.pdf_accent_color || "#0284c7"}
+                  </span>
+                </div>
+              </Field>
+              <Field label="Poznámka v pätičke PDF" className="sm:col-span-2">
+                <textarea
+                  className="min-h-[72px] w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+                  value={form.offer_footer_note ?? ""}
+                  onChange={(e) => onSet("offer_footer_note", e.target.value)}
+                  placeholder="napr. platobné podmienky, dodacia lehota…"
+                />
+              </Field>
+            </div>
+          </FormSection>
+
+          <div className="border-t border-sky-100/80 pt-2">
+            <Button
+              type="button"
+              className="shadow-sm shadow-sky-600/20"
+              disabled={saving}
+              onClick={onSave}
+            >
+              {saving ? "Ukladám…" : "Uložiť firemné údaje"}
+            </Button>
+          </div>
         </>
       )}
     </div>
@@ -402,6 +480,23 @@ function LogoActionsInner(props: {
         </Button>
       ) : null}
       <p className="w-full text-xs text-slate-500">PNG, JPEG, WebP alebo GIF, max. 2 MB</p>
+    </div>
+  );
+}
+
+function FormSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-xl border border-slate-200/80 bg-white/80 p-4 shadow-sm">
+      <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+        {title}
+      </p>
+      {children}
     </div>
   );
 }
