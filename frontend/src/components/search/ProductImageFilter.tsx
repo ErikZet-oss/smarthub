@@ -190,7 +190,7 @@ export function ProductImageFilter({
                       setOpen(false);
                     }}
                     className={cn(
-                      "relative flex aspect-square min-h-[4.75rem] items-center justify-center rounded-md border bg-slate-50 p-2 transition-colors hover:border-sky-400 hover:bg-sky-50/50 sm:min-h-[5.75rem] sm:p-2.5",
+                      "relative aspect-square min-h-[4.75rem] overflow-hidden rounded-md border bg-white transition-colors hover:border-sky-400 hover:ring-1 hover:ring-sky-200 sm:min-h-[5.75rem]",
                       selected
                         ? "border-sky-500 ring-2 ring-sky-400/60"
                         : "border-slate-200",
@@ -203,13 +203,15 @@ export function ProductImageFilter({
                         alt={opt.filename}
                         loading="lazy"
                         decoding="async"
-                        className="max-h-full max-w-full object-contain"
+                        className="h-full w-full object-contain"
                       />
                     ) : (
-                      <ImageIcon
-                        className="h-7 w-7 text-slate-400 sm:h-8 sm:w-8"
-                        aria-hidden
-                      />
+                      <span className="flex h-full w-full items-center justify-center bg-slate-50">
+                        <ImageIcon
+                          className="h-7 w-7 text-slate-400 sm:h-8 sm:w-8"
+                          aria-hidden
+                        />
+                      </span>
                     )}
                     {selected ? (
                       <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-sky-600 text-white">
