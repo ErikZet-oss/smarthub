@@ -322,3 +322,14 @@ def test_hopefix_narrow_catalog_prefers_pevnost_88_for_hex_8_8():
         "/sortiment/srouby-se-sestihrannou-hlavou-pevnost-88?_ref="
     )
     assert paths[1] == "/sortiment/srouby-se-sestihrannou-hlavou-pevnost-88"
+
+
+def test_hopefix_narrow_catalog_prefers_imbus_page_for_d912():
+    """D9128810035B1 je imbus na /sortiment/srouby-s-valcovou-hlavou-a-vnitrnim-sestihranem."""
+    code = "D9128810035B1"
+    enc = quote(code, safe=".-_~")
+    paths = _hopefix_narrow_catalog_paths(code, enc)
+    assert paths[0].startswith(
+        "/sortiment/srouby-s-valcovou-hlavou-a-vnitrnim-sestihranem?_ref="
+    )
+    assert "/sortiment/srouby-se-sestihrannou-hlavou-pevnost-88" not in paths[0]

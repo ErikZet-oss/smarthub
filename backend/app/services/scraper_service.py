@@ -1256,10 +1256,18 @@ def _hopefix_narrow_catalog_paths(product_code: str, enc: str) -> list[str]:
     # DIN 934 = šesťhranná matica — kód začína D934 (nie D9+34 skrutka).
     if re.match(r"^D934", k):
         _extend(["matice-sestihranne", "matice"])
+    # DIN 912 / ISO 4762 = imbus s valcovou hlavou — vlastná podstránka (nie hex 8.8).
+    elif re.match(r"^D912", k) or k.startswith("D6912"):
+        _extend(
+            [
+                "srouby-s-valcovou-hlavou-a-vnitrnim-sestihranem",
+                "metricke-s-valcovou-hlavou",
+            ]
+        )
     elif re.match(
-        r"^D9(12|13|14|16|2[0-5]|31|33|35|60|61|62|63|64|91)",
+        r"^D9(13|14|16|2[0-5]|31|33|35|60|61|62|63|64|91)",
         k,
-    ) or k.startswith("D6912"):
+    ):
         _extend(
             [
                 # 8.8 šesťhrany (DIN 933 / 931…) — B2B tabuľka je tu, nie všeobecné „metricke“
@@ -1316,11 +1324,24 @@ def _hopefix_fallback_category_segments(product_code: str) -> list[str]:
         ]
         rest = [s for s in all_seg if s not in first]
         return first + rest
-    # Skrutky / závit (DIN 933, 931, 912, …) — na /sortiment je len rozcestník, tabuľka je v /srouby
+    # DIN 912 imbus — tabuľka je v /sortiment/srouby-s-valcovou-hlavou-a-vnitrnim-sestihranem.
+    if re.match(r"^D912", k) or k.startswith("D6912"):
+        first = [
+            "srouby-s-valcovou-hlavou-a-vnitrnim-sestihranem",
+            "metricke-s-valcovou-hlavou",
+            "srouby",
+            "vruty",
+            "matice",
+            "podlozky",
+            "zavitove-tyce",
+        ]
+        rest = [s for s in all_seg if s not in first]
+        return first + rest
+    # Skrutky / závit (DIN 933, 931, …) — tabuľka hex 8.8 je v /srouby-se-sestihrannou-hlavou-pevnost-88
     if re.match(
-        r"^D9(12|13|14|16|2[0-5]|31|33|35|60|61|62|63|64|91)",
+        r"^D9(13|14|16|2[0-5]|31|33|35|60|61|62|63|64|91)",
         k,
-    ) or k.startswith("D6912"):
+    ):
         first = [
             "srouby-se-sestihrannou-hlavou-pevnost-88",
             "metricke-se-sestihranou-hlavou",
