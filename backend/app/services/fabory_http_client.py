@@ -124,6 +124,28 @@ def _fabory_ga_labels(page_html: str) -> dict[str, str]:
     return out
 
 
+def _fabory_product_title_from_pdp_html(html: str) -> Optional[str]:
+    """Názov z PDP (h1 / itemprop / data-ga-product-name) — price API nemusí poslať productName."""
+    h = html or ""
+    for pat in (
+        r'itemprop=["\']name["\'][^>]*content=["\']([^"\']+)["\']',
+        r'itemprop=["\']name["\'][^>]*>([^<]+)',
+        r'data-ga-product-name=["\']([^"\']+)["\']',
+    ):
+        m = re.search(pat, h, re.I)
+        if m:
+            t = html_module.unescape(re.sub(r"\s+", " ", (m.group(1) or "").strip()))
+            if len(t) >= 3 and not re.fullmatch(r"[\d.\-\s]+", t):
+                return t[:500]
+    m = re.search(r"<h1[^>]*>(.*?)</h1>", h, re.I | re.S)
+    if m:
+        t = re.sub(r"<[^>]+>", " ", m.group(1))
+        t = html_module.unescape(re.sub(r"\s+", " ", t).strip())
+        if len(t) >= 3 and not re.fullmatch(r"[\d.\-\s]+", t):
+            return t[:500]
+    return None
+
+
 def fabory_parse_cart_html(
     simulation_html: str,
     *,
@@ -327,6 +349,15 @@ class FaboryHttpClient:
             "simulation_html": sim_html,
         }
 
+    async def _fetch_pdp_html(self, pdp_url: str) -> str:
+        p = urlparse(pdp_url)
+        path = p.path or "/"
+        if p.query:
+            path = f"{path}?{p.query}"
+        r = await self._client.get(path)
+        r.raise_for_status()
+        return r.text or ""
+
     async def _resolve_pdp_url(self, code: str) -> Optional[str]:
         """`/search/?text=<code>` 301-uje na PDP. Stačí spraviť HEAD a vrátiť finálnu URL.
         Používa sa len ako Referer pre POST /product/price (server tým validuje kontext)."""
@@ -504,7 +535,14 @@ class FaboryHttpClient:
             stock_final = None
         raw_stock = (s.get("stockLevelMessage") or "").strip() or None
 
-        label = (p.get("productName") or "").strip() or None
+        title = (p.get("productName") or "").strip() or None
+        if not title and self._last_pdp_url:
+            try:
+                pdp_html = await self._fetch_pdp_html(self._last_pdp_url)
+                title = _fabory_product_title_from_pdp_html(pdp_html)
+            except Exception:
+                pass
+        label = title
 
         packaging_variants = [
             {
@@ -527,6 +565,7 @@ class FaboryHttpClient:
             "logged_in": True,
             "fabory_via_http": True,
             "pdp_url": self._last_pdp_url,
+            "product_title": title,
             "label": label,
             "currency": (p.get("currencyIso") or "EUR"),
         }

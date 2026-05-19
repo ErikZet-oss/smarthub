@@ -1850,9 +1850,17 @@ function ProductSupplierExpandedTableRow({
                                               ""
                                             ).trim()
                                           : "";
+                                      const faboryCodeNorm = (scode || "")
+                                        .replace(/\s/g, "")
+                                        .toLowerCase();
+                                      const faboryRawLooksLikeCode =
+                                        Boolean(faboryCodeNorm) &&
+                                        faboryLineLabelRaw
+                                          .replace(/\s/g, "")
+                                          .toLowerCase() === faboryCodeNorm;
                                       const faboryLineLabel = faboryTitleFromPdp
                                         ? faboryTitleFromPdp
-                                        : faboryLineLabelRaw
+                                        : faboryLineLabelRaw && !faboryRawLooksLikeCode
                                           ? faboryUiProductTitleOnly(faboryLineLabelRaw)
                                           : "";
                                       const supplierProductTitle =

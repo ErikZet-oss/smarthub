@@ -7,7 +7,10 @@ from typing import Any
 import httpx
 import pytest
 
-from app.services.fabory_http_client import FaboryHttpClient
+from app.services.fabory_http_client import (
+    FaboryHttpClient,
+    _fabory_product_title_from_pdp_html,
+)
 
 
 # Snapshot z HAR-u zákazníka (zhodný formát ako vracia produkčný server).
@@ -49,7 +52,12 @@ def _build_mock_client(price_payload: Any, stock_payload: Any) -> FaboryHttpClie
                 headers={"Location": "/sk/skrutka/p/01210120060"},
             )
         if "/p/" in path:
-            return httpx.Response(200, text="<html><body>PDP stub</body></html>")
+            return httpx.Response(
+                200,
+                text=(
+                    '<html><body><h1>Válcová hlava IMB 12.9 M10×240</h1></body></html>'
+                ),
+            )
         return httpx.Response(404, text="not found")
 
     client = FaboryHttpClient("https://www.fabory.com/sk")
@@ -78,7 +86,14 @@ async def test_fetch_product_price_and_stock_happy_path() -> None:
     assert data["raw_stock"] == "Na sklade"
     assert data["fabory_via_http"] is True
     assert data["currency"] == "EUR"
+    assert data["product_title"] == "Válcová hlava IMB 12.9 M10×240"
     assert isinstance(data["packaging_variants"], list) and data["packaging_variants"]
+
+
+def test_fabory_product_title_from_pdp_html() -> None:
+    html = '<h1 itemprop="name">Skrutka DIN 933 M8</h1>'
+    assert _fabory_product_title_from_pdp_html(html) == "Skrutka DIN 933 M8"
+    assert _fabory_product_title_from_pdp_html("07000.100.240") is None
 
 
 @pytest.mark.asyncio
