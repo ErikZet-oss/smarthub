@@ -134,7 +134,7 @@ export function ProductImageFilter({
           <img
             src={imageUrl(value)!}
             alt=""
-            className="h-7 w-7 object-contain"
+            className="h-8 w-8 object-contain"
           />
         ) : (
           <ImageIcon className="h-5 w-5" aria-hidden />
@@ -144,7 +144,7 @@ export function ProductImageFilter({
         <div
           role="dialog"
           aria-label="Výber obrázka produktu"
-          className="absolute left-0 z-50 mt-1 w-[min(100vw-2rem,18rem)] rounded-lg border border-slate-200 bg-white p-2 shadow-lg sm:w-72"
+          className="absolute left-0 z-50 mt-1 w-[min(100vw-2rem,22rem)] rounded-lg border border-slate-200 bg-white p-2.5 shadow-lg sm:w-[26rem]"
         >
           <div className="mb-2 flex items-center justify-between gap-2">
             <span className="text-xs font-medium text-slate-700">Obrázok</span>
@@ -175,7 +175,7 @@ export function ProductImageFilter({
               Žiadne obrázky pre aktuálne filtre.
             </p>
           ) : (
-            <div className="grid max-h-64 grid-cols-4 gap-2 overflow-y-auto sm:grid-cols-5">
+            <div className="grid max-h-80 grid-cols-3 gap-2.5 overflow-y-auto sm:max-h-96 sm:grid-cols-4 sm:gap-3">
               {options.map((opt) => {
                 const url = imageUrl(opt.filename);
                 const selected = value === opt.filename;
@@ -190,7 +190,7 @@ export function ProductImageFilter({
                       setOpen(false);
                     }}
                     className={cn(
-                      "relative flex aspect-square items-center justify-center rounded-md border bg-slate-50 p-1 transition-colors hover:border-sky-400 hover:bg-sky-50/50",
+                      "relative flex aspect-square min-h-[4.75rem] items-center justify-center rounded-md border bg-slate-50 p-2 transition-colors hover:border-sky-400 hover:bg-sky-50/50 sm:min-h-[5.75rem] sm:p-2.5",
                       selected
                         ? "border-sky-500 ring-2 ring-sky-400/60"
                         : "border-slate-200",
@@ -207,7 +207,7 @@ export function ProductImageFilter({
                       />
                     ) : (
                       <ImageIcon
-                        className="h-5 w-5 text-slate-400"
+                        className="h-7 w-7 text-slate-400 sm:h-8 sm:w-8"
                         aria-hidden
                       />
                     )}
