@@ -45,6 +45,7 @@ from app.services.scraper_service import (
 from app.services.haspl_http_client import supplier_shop_cart_url
 from app.services.smarthub_bootstrap import (
     copy_supplier_credentials_for_new_user,
+    delete_smarthub_user_cascade,
     ensure_credentials_for_supplier,
     hash_password,
     verify_password,
@@ -280,6 +281,10 @@ class AdminCreateUserPayload(BaseModel):
     display_label: str | None = None
 
 
+class AdminPatchUserPasswordPayload(BaseModel):
+    password: str
+
+
 class PatchMySupplierCredentialsPayload(BaseModel):
     supplier_id: int
     username: str
@@ -485,11 +490,52 @@ def admin_create_user(
     }
 
 
+@router.patch("/admin/users/{user_id}")
+def admin_patch_user_password(
+    user_id: int,
+    payload: AdminPatchUserPasswordPayload,
+    session: Session = Depends(get_session),
+    _: AuthUserContext = Depends(require_admin),
+):
+    if not payload.password:
+        raise HTTPException(status_code=400, detail="Vyplň heslo.")
+    user = session.get(SmarthubUser, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="Používateľ sa nenašiel.")
+    if user.is_admin:
+        raise HTTPException(
+            status_code=400,
+            detail="Heslo admin účtu tu nemožno meniť.",
+        )
+    user.password_hash = hash_password(payload.password)
+    session.add(user)
+    session.commit()
+    return {"ok": True}
+
+
+@router.delete("/admin/users/{user_id}")
+def admin_delete_user(
+    user_id: int,
+    session: Session = Depends(get_session),
+    admin: AuthUserContext = Depends(require_admin),
+):
+    if user_id == admin.id:
+        raise HTTPException(status_code=400, detail="Nemôžeš vymazať vlastný účet.")
+    user = session.get(SmarthubUser, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="Používateľ sa nenašiel.")
+    if user.is_admin:
+        raise HTTPException(status_code=400, detail="Admin účet nemožno vymazať.")
+    delete_smarthub_user_cascade(session, user_id)
+    session.commit()
+    return {"ok": True}
+
+
 @router.patch("/users/me/supplier-credentials")
 def patch_my_supplier_credentials(
     payload: PatchMySupplierCredentialsPayload,
     session: Session = Depends(get_session),
-    user: AuthUserContext = Depends(get_current_user),
+    user: AuthUserContext = Depends(require_admin),
 ):
     cred = session.exec(
         select(UserSupplierCredential).where(
@@ -527,20 +573,20 @@ def patch_my_supplier_credentials(
 @router.get("/dev/logs")
 def dev_logs_get(
     limit: int = 2000,
-    _: AuthUserContext = Depends(get_current_user),
+    _: AuthUserContext = Depends(require_admin),
 ):
     """Záznamy z Playwright (scrape / košík) pre ladenie vo frontende."""
     return {"logs": get_dev_logs(min(max(limit, 1), 8000))}
 
 
 @router.delete("/dev/logs")
-def dev_logs_clear(_: AuthUserContext = Depends(get_current_user)):
+def dev_logs_clear(_: AuthUserContext = Depends(require_admin)):
     clear_dev_logs()
     return {"ok": True}
 
 
 @router.get("/dev/step-screenshots")
-def dev_step_screenshots_get(_: AuthUserContext = Depends(get_current_user)):
+def dev_step_screenshots_get(_: AuthUserContext = Depends(require_admin)):
     """Stav screenshotov krokov Playwright (predvolene vypnuté)."""
     return get_step_screenshots_status()
 
@@ -548,7 +594,7 @@ def dev_step_screenshots_get(_: AuthUserContext = Depends(get_current_user)):
 @router.put("/dev/step-screenshots")
 def dev_step_screenshots_put(
     payload: StepScreenshotsPayload,
-    _: AuthUserContext = Depends(get_current_user),
+    _: AuthUserContext = Depends(require_admin),
 ):
     set_step_screenshots_override(payload.override)
     return get_step_screenshots_status()
@@ -939,7 +985,7 @@ async def bootstrap_search(
 @router.get("/mapping/fields")
 def get_field_mapping(
     session: Session = Depends(get_session),
-    _: AuthUserContext = Depends(get_current_user),
+    _: AuthUserContext = Depends(require_admin),
 ):
     fm = session.get(FieldMapping, 1)
     if fm is None:
@@ -1708,7 +1754,7 @@ def import_excel(
 @router.post("/mapping/profile")
 def mapping_profile(
     payload: ExcelProfilePayload,
-    _: AuthUserContext = Depends(get_current_user),
+    _: AuthUserContext = Depends(require_admin),
 ):
     try:
         result = profile_excel_columns(payload.file_path, payload.sheet_name)

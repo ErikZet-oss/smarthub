@@ -7,7 +7,15 @@ import os
 import bcrypt
 from sqlmodel import Session, select
 
-from app.models.entities import SmarthubUser, Supplier, UserSupplierCredential
+from app.models.entities import (
+    Offer,
+    OfferLine,
+    ProductList,
+    ProductListItem,
+    SmarthubUser,
+    Supplier,
+    UserSupplierCredential,
+)
 
 
 def hash_password(plain: str) -> str:
@@ -85,3 +93,29 @@ def copy_supplier_credentials_for_new_user(session: Session, user_id: int) -> No
                 password=sup.password or "",
             )
         )
+
+
+def delete_smarthub_user_cascade(session: Session, user_id: int) -> None:
+    """Vymaže používateľa a všetky jeho dáta (poverenia, zoznamy, ponuky)."""
+    for cred in session.exec(
+        select(UserSupplierCredential).where(UserSupplierCredential.user_id == user_id)
+    ).all():
+        session.delete(cred)
+
+    for offer in session.exec(select(Offer).where(Offer.user_id == user_id)).all():
+        for line in session.exec(
+            select(OfferLine).where(OfferLine.offer_id == offer.id)
+        ).all():
+            session.delete(line)
+        session.delete(offer)
+
+    for pl in session.exec(select(ProductList).where(ProductList.user_id == user_id)).all():
+        for item in session.exec(
+            select(ProductListItem).where(ProductListItem.list_id == pl.id)
+        ).all():
+            session.delete(item)
+        session.delete(pl)
+
+    user = session.get(SmarthubUser, user_id)
+    if user is not None:
+        session.delete(user)

@@ -71,7 +71,7 @@ type View =
   | "admin"
   | "dev";
 
-const CART_HISTORY_STORAGE_KEY = "smart_procurement_cart_history_v1";
+const ADMIN_ONLY_VIEWS: View[] = ["dodavatelia", "parovanie", "admin", "dev"];
 const CART_HISTORY_MAX = 500;
 
 /**
@@ -3332,6 +3332,10 @@ export default function Home() {
   const [newBranchPassword, setNewBranchPassword] = useState("");
   const [newBranchLabel, setNewBranchLabel] = useState("");
   const [adminUserSubmitting, setAdminUserSubmitting] = useState(false);
+  const [passwordEditUserId, setPasswordEditUserId] = useState<number | null>(null);
+  const [passwordEditValue, setPasswordEditValue] = useState("");
+  const [passwordEditConfirm, setPasswordEditConfirm] = useState("");
+  const [adminUserActionId, setAdminUserActionId] = useState<number | null>(null);
   const [companyConfigured, setCompanyConfigured] = useState<boolean | null>(null);
   const [addToOfferOpen, setAddToOfferOpen] = useState(false);
   const [addToOfferPayload, setAddToOfferPayload] = useState<AddToOfferPayload | null>(
@@ -4211,7 +4215,7 @@ export default function Home() {
   }, [activeView, devLogPaused, apiFetch]);
 
   useEffect(() => {
-    if (activeView === "admin" && !isAppAdmin) {
+    if (!isAppAdmin && ADMIN_ONLY_VIEWS.includes(activeView)) {
       setActiveView("vyhladavanie");
     }
   }, [activeView, isAppAdmin]);
@@ -4367,8 +4371,11 @@ export default function Home() {
   }, [apiFetch]);
 
   useEffect(() => {
+    if (!isAppAdmin) {
+      return;
+    }
     void loadFieldMapping();
-  }, [loadFieldMapping]);
+  }, [loadFieldMapping, isAppAdmin]);
 
   /** Profil stĺpcov z Excelu (unique_values) — inak sú filtre prázdne pri prázdnej DB alebo bez kliku „Načítať stĺpce“. */
   useEffect(() => {
@@ -5067,6 +5074,95 @@ export default function Home() {
     }
   };
 
+  const refreshAdminUsers = async () => {
+    const listRes = await apiFetch(`${API_BASE}/api/admin/users`);
+    if (listRes.ok) {
+      setAdminUsers(
+        (await listRes.json()) as Array<{
+          id: number;
+          username: string;
+          display_label: string | null;
+          is_admin: boolean;
+        }>,
+      );
+    }
+  };
+
+  const updateBranchPassword = async (userId: number) => {
+    const p = passwordEditValue;
+    const c = passwordEditConfirm;
+    if (!p) {
+      setAdminUsersError("Vyplň nové heslo.");
+      return;
+    }
+    if (p !== c) {
+      setAdminUsersError("Heslá sa nezhodujú.");
+      return;
+    }
+    setAdminUserActionId(userId);
+    setAdminUsersError(null);
+    try {
+      const r = await apiFetch(`${API_BASE}/api/admin/users/${userId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: p }),
+      });
+      const payload = (await r.json().catch(() => ({}))) as { detail?: unknown };
+      if (!r.ok) {
+        throw new Error(formatApiDetail(payload.detail));
+      }
+      setPasswordEditUserId(null);
+      setPasswordEditValue("");
+      setPasswordEditConfirm("");
+    } catch (e) {
+      setAdminUsersError(
+        e instanceof Error ? e.message : "Nepodarilo sa zmeniť heslo.",
+      );
+    } finally {
+      setAdminUserActionId(null);
+    }
+  };
+
+  const deleteBranchUser = async (u: {
+    id: number;
+    username: string;
+    is_admin: boolean;
+  }) => {
+    if (u.is_admin) {
+      return;
+    }
+    if (
+      !window.confirm(
+        `Naozaj vymazať účet „${u.username}"? Vymazú sa aj jeho zoznamy a cenové ponuky.`,
+      )
+    ) {
+      return;
+    }
+    setAdminUserActionId(u.id);
+    setAdminUsersError(null);
+    try {
+      const r = await apiFetch(`${API_BASE}/api/admin/users/${u.id}`, {
+        method: "DELETE",
+      });
+      const payload = (await r.json().catch(() => ({}))) as { detail?: unknown };
+      if (!r.ok) {
+        throw new Error(formatApiDetail(payload.detail));
+      }
+      if (passwordEditUserId === u.id) {
+        setPasswordEditUserId(null);
+        setPasswordEditValue("");
+        setPasswordEditConfirm("");
+      }
+      await refreshAdminUsers();
+    } catch (e) {
+      setAdminUsersError(
+        e instanceof Error ? e.message : "Nepodarilo sa vymazať účet.",
+      );
+    } finally {
+      setAdminUserActionId(null);
+    }
+  };
+
   const deleteSupplier = async (index: number) => {
     const row = supplierForms[index];
     if (!row.id) {
@@ -5620,12 +5716,14 @@ export default function Home() {
             )}
           >
             {[
-              { id: "dodavatelia", label: "Dodavatelia", icon: Truck },
-              { id: "parovanie", label: "Parovanie", icon: Link2 },
               ...(isAppAdmin
-                ? [{ id: "admin" as const, label: "Admin", icon: KeyRound }]
+                ? [
+                    { id: "dodavatelia" as const, label: "Dodavatelia", icon: Truck },
+                    { id: "parovanie" as const, label: "Parovanie", icon: Link2 },
+                    { id: "admin" as const, label: "Admin", icon: KeyRound },
+                    { id: "dev" as const, label: "Dev / log", icon: Terminal },
+                  ]
                 : []),
-              { id: "dev", label: "Dev / log", icon: Terminal },
             ].map((item) => {
               const Icon = item.icon;
               const active = activeView === item.id;
@@ -7835,10 +7933,9 @@ export default function Home() {
                     Správa účtov (pobočky)
                   </h2>
                   <p className="mt-1 text-sm text-slate-600">
-                    Centrálna šablóna dodávateľov (URL, JSON, mapovanie) je spoločná. Každý účet
-                    dostane kópie prihlasovacích údajov z tejto šablóny a v sekcii{" "}
-                    <strong className="font-medium text-slate-800">Dodávatelia</strong> si môže
-                    zadať vlastné meno a heslo do B2B e-shopov.
+                    Centrálna šablóna dodávateľov (URL, JSON, mapovanie) je spoločná. Pri vytvorení
+                    účtu pobočky sa skopírujú prihlasovacie údaje do B2B e-shopov; heslo do SmartHubu
+                    nastavíš tu.
                   </p>
                 </div>
                 <div className="space-y-5 p-5">
@@ -7859,21 +7956,94 @@ export default function Home() {
                         {adminUsers.map((u) => (
                           <li
                             key={u.id}
-                            className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-slate-200/80 bg-white/90 px-3 py-2"
+                            className="rounded-md border border-slate-200/80 bg-white/90 px-3 py-2"
                           >
-                            <span className="font-medium text-slate-900">{u.username}</span>
-                            <span className="text-slate-600">
-                              {u.display_label ?? "—"}
-                              {u.is_admin ? (
-                                <Badge className="ml-2 border-violet-200 bg-violet-50 text-violet-900">
-                                  Admin
-                                </Badge>
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <span className="font-medium text-slate-900">{u.username}</span>
+                              <span className="text-slate-600">
+                                {u.display_label ?? "—"}
+                                {u.is_admin ? (
+                                  <Badge className="ml-2 border-violet-200 bg-violet-50 text-violet-900">
+                                    Admin
+                                  </Badge>
+                                ) : (
+                                  <Badge className="ml-2 border-slate-200 bg-slate-50 text-slate-800">
+                                    Pobočka
+                                  </Badge>
+                                )}
+                              </span>
+                            </div>
+                            {!u.is_admin ? (
+                              passwordEditUserId === u.id ? (
+                                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                                  <Input
+                                    type="password"
+                                    value={passwordEditValue}
+                                    onChange={(e) => setPasswordEditValue(e.target.value)}
+                                    placeholder="Nové heslo"
+                                    autoComplete="new-password"
+                                  />
+                                  <Input
+                                    type="password"
+                                    value={passwordEditConfirm}
+                                    onChange={(e) => setPasswordEditConfirm(e.target.value)}
+                                    placeholder="Potvrď heslo"
+                                    autoComplete="new-password"
+                                  />
+                                  <div className="flex flex-wrap gap-1 sm:col-span-2">
+                                    <Button
+                                      type="button"
+                                      className="h-8 px-2.5 text-xs"
+                                      disabled={adminUserActionId === u.id}
+                                      onClick={() => void updateBranchPassword(u.id)}
+                                    >
+                                      {adminUserActionId === u.id ? "Ukladám…" : "Uložiť heslo"}
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      className="h-8 px-2.5 text-xs"
+                                      disabled={adminUserActionId === u.id}
+                                      onClick={() => {
+                                        setPasswordEditUserId(null);
+                                        setPasswordEditValue("");
+                                        setPasswordEditConfirm("");
+                                      }}
+                                    >
+                                      Zrušiť
+                                    </Button>
+                                  </div>
+                                </div>
                               ) : (
-                                <Badge className="ml-2 border-slate-200 bg-slate-50 text-slate-800">
-                                  Pobočka
-                                </Badge>
-                              )}
-                            </span>
+                                <div className="mt-2 flex flex-wrap gap-1">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="h-8 px-2.5 text-xs"
+                                    disabled={adminUserActionId === u.id}
+                                    onClick={() => {
+                                      setPasswordEditUserId(u.id);
+                                      setPasswordEditValue("");
+                                      setPasswordEditConfirm("");
+                                      setAdminUsersError(null);
+                                    }}
+                                  >
+                                    <KeyRound className="mr-1 h-3.5 w-3.5" />
+                                    Zmeniť heslo
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="h-8 border-red-200 px-2.5 text-xs text-red-700"
+                                    disabled={adminUserActionId === u.id}
+                                    onClick={() => void deleteBranchUser(u)}
+                                  >
+                                    <Trash2 className="mr-1 h-3.5 w-3.5" />
+                                    {adminUserActionId === u.id ? "Mažem…" : "Vymazať"}
+                                  </Button>
+                                </div>
+                              )
+                            ) : null}
                           </li>
                         ))}
                       </ul>
@@ -8250,12 +8420,14 @@ export default function Home() {
           >
             <div className="grid grid-cols-2 gap-2">
               {[
-                { id: "dodavatelia" as const, label: "Dodávatelia", icon: Truck },
-                { id: "parovanie" as const, label: "Párovanie", icon: Link2 },
                 ...(isAppAdmin
-                  ? [{ id: "admin" as const, label: "Admin", icon: KeyRound }]
+                  ? [
+                      { id: "dodavatelia" as const, label: "Dodávatelia", icon: Truck },
+                      { id: "parovanie" as const, label: "Párovanie", icon: Link2 },
+                      { id: "admin" as const, label: "Admin", icon: KeyRound },
+                      { id: "dev" as const, label: "Dev / log", icon: Terminal },
+                    ]
                   : []),
-                { id: "dev" as const, label: "Dev / log", icon: Terminal },
               ].map((item) => {
                 const Icon = item.icon;
                 const active = activeView === item.id;
