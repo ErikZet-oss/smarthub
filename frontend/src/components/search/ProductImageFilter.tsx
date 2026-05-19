@@ -144,7 +144,7 @@ export function ProductImageFilter({
         <div
           role="dialog"
           aria-label="Výber obrázka produktu"
-          className="absolute left-0 z-50 mt-1 w-[min(100vw-2rem,22rem)] rounded-lg border border-slate-200 bg-white p-2.5 shadow-lg sm:w-[26rem]"
+          className="absolute left-0 z-50 mt-1 w-[min(100vw-2rem,24rem)] rounded-lg border border-slate-200 bg-white p-2.5 shadow-lg sm:w-[28rem] lg:w-[36rem] lg:p-3"
         >
           <div className="mb-2 flex items-center justify-between gap-2">
             <span className="text-xs font-medium text-slate-700">Obrázok</span>
@@ -175,7 +175,7 @@ export function ProductImageFilter({
               Žiadne obrázky pre aktuálne filtre.
             </p>
           ) : (
-            <div className="grid max-h-80 grid-cols-3 gap-2.5 overflow-y-auto sm:max-h-96 sm:grid-cols-4 sm:gap-3">
+            <div className="grid max-h-[min(52vh,20rem)] grid-cols-3 gap-2.5 overflow-y-auto sm:max-h-[min(62vh,28rem)] sm:grid-cols-4 sm:gap-3 lg:max-h-[min(72vh,40rem)] lg:grid-cols-4 lg:gap-3.5 xl:grid-cols-5">
               {options.map((opt) => {
                 const url = imageUrl(opt.filename);
                 const selected = value === opt.filename;
@@ -190,7 +190,7 @@ export function ProductImageFilter({
                       setOpen(false);
                     }}
                     className={cn(
-                      "relative aspect-square min-h-[4.75rem] overflow-hidden rounded-md border bg-white transition-colors hover:border-sky-400 hover:ring-1 hover:ring-sky-200 sm:min-h-[5.75rem]",
+                      "relative aspect-square min-h-[5rem] overflow-hidden rounded-md border bg-white transition-colors hover:border-sky-400 hover:ring-1 hover:ring-sky-200 sm:min-h-[6.5rem] lg:min-h-[7.5rem] xl:min-h-[8.5rem]",
                       selected
                         ? "border-sky-500 ring-2 ring-sky-400/60"
                         : "border-slate-200",
