@@ -1329,19 +1329,35 @@ function MekrsVariantLabelCell({
   packQuantity?: number | null;
 }) {
   const { name, packText } = mekrsVariantNameAndPackLine(label, packQuantity);
+  return <VariantPackLabelRow name={name} packText={packText} />;
+}
+
+/** Názov + ks v balení — množstvo vpravo v pevnom stĺpci (zarovnané medzi riadkami). */
+function VariantPackLabelRow({
+  name,
+  packText,
+}: {
+  name: string;
+  packText?: string | null;
+}) {
+  const pack = (packText ?? "").trim();
   return (
-    <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_5rem] items-baseline gap-x-1.5 sm:gap-x-2">
       <span
-        className="min-w-0 max-w-[min(100%,11rem)] truncate text-[11px] font-medium leading-tight text-slate-600 sm:max-w-[15rem]"
+        className="min-w-0 truncate text-[11px] font-medium leading-tight text-slate-600 sm:text-[13px]"
         title={name}
       >
         {name}
       </span>
-      {packText ? (
-        <span className="shrink-0 whitespace-nowrap text-xs font-semibold tabular-nums text-slate-900">
-          {packText}
-        </span>
-      ) : null}
+      <span
+        className={cn(
+          "whitespace-nowrap text-right text-[11px] font-semibold tabular-nums sm:text-xs",
+          pack ? "text-slate-900" : "invisible",
+        )}
+        aria-hidden={!pack}
+      >
+        {pack || "—"}
+      </span>
     </div>
   );
 }
@@ -1423,21 +1439,7 @@ function HasplVariantLabelCell({
       }
     }
   }
-  return (
-    <div className="flex min-w-0 flex-nowrap items-baseline gap-x-1.5">
-      <span
-        className="min-w-0 max-w-[min(100%,11rem)] truncate text-[11px] font-medium leading-tight text-slate-600 sm:max-w-[15rem]"
-        title={name}
-      >
-        {name}
-      </span>
-      {packText ? (
-        <span className="shrink-0 whitespace-nowrap text-xs font-semibold tabular-nums text-slate-900">
-          {packText}
-        </span>
-      ) : null}
-    </div>
-  );
+  return <VariantPackLabelRow name={name} packText={packText || null} />;
 }
 
 /** Inoxmare: druhý riadok ceny — Master Carton (informatívne). */
