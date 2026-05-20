@@ -26,6 +26,7 @@ from app.services.hopefix_http_client import (
     build_hopefix_catalog_url,
     find_hopefix_row_in_html,
     hopefix_cart_url,
+    hopefix_catalog_row_key,
     hopefix_fetch_html_anonymous,
     hopefix_norm_code,
     hopefix_parse_cart_html,
@@ -983,11 +984,12 @@ def _hopefix_url_with_row_anchor(raw_url: str, key: str) -> str:
     u = (raw_url or "").strip()
     if not k or not u:
         return u
+    anchor = hopefix_catalog_row_key(key) or k
     p = urlparse(u)
     q = [(a, b) for a, b in parse_qsl(p.query, keep_blank_values=True) if a != "_ref"]
-    q.append(("_ref", k))
+    q.append(("_ref", anchor))
     new_query = urlencode(q)
-    return urlunparse((p.scheme, p.netloc, p.path, p.params, new_query, k))
+    return urlunparse((p.scheme, p.netloc, p.path, p.params, new_query, anchor))
 
 
 async def _hopefix_apply_product_hash_if_needed(
@@ -1005,14 +1007,15 @@ async def _hopefix_apply_product_hash_if_needed(
     key = hopefix_norm_code(product_code)
     if not key:
         return
+    anchor = hopefix_catalog_row_key(product_code) or key
     cur = (page.url or "").strip()
     if not cur:
         return
     p = urlparse(cur)
     qmap = dict(parse_qsl(p.query, keep_blank_values=True))
-    ref_ok = hopefix_norm_code(str(qmap.get("_ref") or "")) == key
+    ref_ok = hopefix_norm_code(str(qmap.get("_ref") or "")) == anchor
     frag = (p.fragment or "").split("?")[0].strip()
-    frag_ok = hopefix_norm_code(frag) == key
+    frag_ok = hopefix_norm_code(frag) == anchor
     if ref_ok and frag_ok:
         return
     target = _hopefix_url_with_row_anchor(cur, key)
@@ -1238,14 +1241,16 @@ def _hopefix_narrow_catalog_paths(product_code: str, enc: str) -> list[str]:
     skúšať skôr. Rovnaký pár pridáme s ``?_ref=`` (Hopefix scrolluje na riadok).
     """
     k = hopefix_norm_code(product_code)
-    if not k or not enc:
+    ref_key = hopefix_catalog_row_key(product_code) or k
+    ref_enc = quote(ref_key, safe=".-_~") if ref_key else enc
+    if not k or not ref_enc:
         return []
 
     def _pair(seg: str) -> list[str]:
         s = seg.strip().strip("/")
         if not s:
             return []
-        return [f"/sortiment/{s}?_ref={enc}", f"/sortiment/{s}"]
+        return [f"/sortiment/{s}?_ref={ref_enc}", f"/sortiment/{s}"]
 
     out: list[str] = []
 
@@ -1264,13 +1269,27 @@ def _hopefix_narrow_catalog_paths(product_code: str, enc: str) -> list[str]:
                 "metricke-s-valcovou-hlavou",
             ]
         )
+    elif re.match(r"^D931", k):
+        _extend(
+            [
+                "srouby-se-sestihrannou-hlavou-s-castecnym-zavitem",
+                "srouby-se-sestihrannou-hlavou-pevnost-88",
+                "metricke-se-sestihranou-hlavou",
+                "srouby-se-sestihrannou-hlavou-nerez",
+                "metricke-s-valcovou-hlavou",
+                "metricke-s-pulkulatou-hlavou",
+                "metricke-se-zaoblenou-hlavou",
+                "metricke-se-zapustnou-hlavou",
+                "kotevni-okenni-srouby",
+            ]
+        )
     elif re.match(
-        r"^D9(13|14|16|2[0-5]|31|33|35|60|61|62|63|64|91)",
+        r"^D9(13|14|16|2[0-5]|33|35|60|61|62|63|64|91)",
         k,
     ):
         _extend(
             [
-                # 8.8 šesťhrany (DIN 933 / 931…) — B2B tabuľka je tu, nie všeobecné „metricke“
+                # 8.8 šesťhrany (DIN 933…) — B2B tabuľka je tu, nie všeobecné „metricke“
                 "srouby-se-sestihrannou-hlavou-pevnost-88",
                 "metricke-se-sestihranou-hlavou",
                 "srouby-se-sestihrannou-hlavou-nerez",
@@ -1337,9 +1356,29 @@ def _hopefix_fallback_category_segments(product_code: str) -> list[str]:
         ]
         rest = [s for s in all_seg if s not in first]
         return first + rest
-    # Skrutky / závit (DIN 933, 931, …) — tabuľka hex 8.8 je v /srouby-se-sestihrannou-hlavou-pevnost-88
+    # DIN 931 = čiastočný závit — tabuľka je v /sortiment/srouby-…-castecnym-zavitem
+    if re.match(r"^D931", k):
+        first = [
+            "srouby-se-sestihrannou-hlavou-s-castecnym-zavitem",
+            "srouby-se-sestihrannou-hlavou-pevnost-88",
+            "metricke-se-sestihranou-hlavou",
+            "srouby-se-sestihrannou-hlavou-nerez",
+            "metricke-s-valcovou-hlavou",
+            "metricke-s-pulkulatou-hlavou",
+            "metricke-se-zaoblenou-hlavou",
+            "metricke-se-zapustnou-hlavou",
+            "kotevni-okenni-srouby",
+            "srouby",
+            "vruty",
+            "matice",
+            "podlozky",
+            "zavitove-tyce",
+        ]
+        rest = [s for s in all_seg if s not in first]
+        return first + rest
+    # Skrutky / závit (DIN 933, …) — tabuľka hex 8.8 je v /srouby-se-sestihrannou-hlavou-pevnost-88
     if re.match(
-        r"^D9(13|14|16|2[0-5]|31|33|35|60|61|62|63|64|91)",
+        r"^D9(13|14|16|2[0-5]|33|35|60|61|62|63|64|91)",
         k,
     ):
         first = [

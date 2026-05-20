@@ -5,6 +5,7 @@ import pytest
 from app.services.hopefix_http_client import (
     find_hopefix_row,
     find_hopefix_row_in_html,
+    hopefix_catalog_row_key,
     hopefix_norm_code,
     hopefix_parse_cart_html,
     hopefix_referer_path_from_catalog_url,
@@ -333,3 +334,37 @@ def test_hopefix_narrow_catalog_prefers_imbus_page_for_d912():
         "/sortiment/srouby-s-valcovou-hlavou-a-vnitrnim-sestihranem?_ref="
     )
     assert "/sortiment/srouby-se-sestihrannou-hlavou-pevnost-88" not in paths[0]
+
+
+D931_PARTIAL_THREAD_SNIPPET = """
+<tr id="line-D931880609000"><td>931</td><td>D931880609000</td><td>M06x90</td><td>4014</td><td>8.8</td>
+<td>100</td><td>1,50&nbsp;€</td></tr>
+<tr class="expander-row"><td colspan="14">
+<form><input type="hidden" name="product_nr" value="D931880609000">
+<input type="hidden" name="product_id" value="28861"></form></td></tr>
+"""
+
+
+def test_hopefix_catalog_row_key_strips_excel_variant_suffix():
+    assert hopefix_catalog_row_key("D931880609000v") == "D931880609000"
+    assert hopefix_catalog_row_key("D9338810016B1") == "D9338810016B1"
+
+
+def test_find_hopefix_row_with_excel_v_suffix():
+    row = find_hopefix_row_in_html(D931_PARTIAL_THREAD_SNIPPET, "D931880609000v")
+    assert row is not None
+    assert row["product_nr"] == "D931880609000"
+    assert row.get("hopefix_product_id") == "28861"
+
+
+def test_hopefix_narrow_catalog_prefers_castecnym_for_d931():
+    """DIN 931 (čiastočný závit) je na /sortiment/srouby-…-castecnym-zavitem, nie pevnost-88."""
+    code = "D931880609000v"
+    enc = quote(code, safe=".-_~")
+    paths = _hopefix_narrow_catalog_paths(code, enc)
+    assert paths[0].startswith(
+        "/sortiment/srouby-se-sestihrannou-hlavou-s-castecnym-zavitem?_ref="
+    )
+    assert "_ref=D931880609000" in paths[0]
+    assert paths[1] == "/sortiment/srouby-se-sestihrannou-hlavou-s-castecnym-zavitem"
+    assert not paths[0].startswith("/sortiment/srouby-se-sestihrannou-hlavou-pevnost-88")

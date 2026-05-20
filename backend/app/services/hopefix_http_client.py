@@ -31,6 +31,26 @@ def hopefix_norm_code(text: str) -> str:
     return t
 
 
+def hopefix_catalog_row_key(product_code: str) -> str:
+    """Kód pre Hopefix _ref / #kotvu — bez interného variant suffixu (napr. …000v → …000)."""
+    key = hopefix_norm_code(product_code)
+    if len(key) >= 2 and key[-1].isalpha() and key[:-1].isalnum():
+        return key[:-1]
+    return key
+
+
+def hopefix_lookup_code_variants(product_code: str) -> list[str]:
+    """Možné registračné kódy v B2B HTML (Excel môže mať koncové písmeno navyše)."""
+    key = hopefix_norm_code(product_code)
+    if not key:
+        return []
+    variants = [key]
+    base = hopefix_catalog_row_key(product_code)
+    if base != key and base not in variants:
+        variants.append(base)
+    return variants
+
+
 _HOPEFIX_OOS_MARKERS = (
     "není skladem",
     "neni skladem",
@@ -398,6 +418,15 @@ def _hopefix_product_id_from_expander_html(html: str, norm_nr: str) -> Optional[
     if not norm_nr:
         return None
     esc = re.escape(norm_nr)
+    m_line = re.search(
+        rf'id\s*=\s*["\']line-{esc}["\'][^>]*>.*?</tr>\s*'
+        r'<tr[^>]*class="[^"]*expander-row[^"]*"[^>]*>.*?'
+        r'name\s*=\s*["\']product_id["\'][^>]+value\s*=\s*["\'](\d+)["\']',
+        html,
+        re.I | re.DOTALL,
+    )
+    if m_line:
+        return m_line.group(1)
     m = re.search(
         r"<input[^>]+name\s*=\s*[\"']product_nr[\"'][^>]+value\s*=\s*[\"']"
         + esc
@@ -596,8 +625,9 @@ def parse_hopefix_rows(html: str) -> list[dict[str, Any]]:
     return out
 
 
-def find_hopefix_row(rows: list[dict[str, Any]], product_code: str) -> Optional[dict[str, Any]]:
-    key = hopefix_norm_code(product_code)
+def _find_hopefix_row_by_key(
+    rows: list[dict[str, Any]], key: str
+) -> Optional[dict[str, Any]]:
     if not key:
         return None
     for r in rows:
@@ -609,6 +639,20 @@ def find_hopefix_row(rows: list[dict[str, Any]], product_code: str) -> Optional[
             suf = pn[len(key) :]
             if re.match(r"^[A-Z0-9]{1,6}$", suf):
                 return r
+    for r in rows:
+        pn = (r.get("product_nr") or "")
+        if key.startswith(pn) and len(key) > len(pn):
+            suf = key[len(pn) :]
+            if re.match(r"^[A-Z]{1,2}$", suf):
+                return r
+    return None
+
+
+def find_hopefix_row(rows: list[dict[str, Any]], product_code: str) -> Optional[dict[str, Any]]:
+    for key in hopefix_lookup_code_variants(product_code):
+        hit = _find_hopefix_row_by_key(rows, key)
+        if hit:
+            return hit
     return None
 
 
@@ -684,17 +728,16 @@ def find_hopefix_row_in_html(html: str, product_code: str) -> Optional[dict[str,
     if hit:
         hopefix_merge_expander_product_id(html, hit)
         return hit
-    key = hopefix_norm_code(product_code)
-    if not key:
-        return None
-    hit = _find_hopefix_row_tr_by_registration_td(html, key)
-    if hit:
-        hopefix_merge_expander_product_id(html, hit)
-        return hit
-    hit = _find_hopefix_row_tr_by_code_occurrence(html, key)
-    if hit:
-        hopefix_merge_expander_product_id(html, hit)
-    return hit
+    for key in hopefix_lookup_code_variants(product_code):
+        hit = _find_hopefix_row_tr_by_registration_td(html, key)
+        if hit:
+            hopefix_merge_expander_product_id(html, hit)
+            return hit
+        hit = _find_hopefix_row_tr_by_code_occurrence(html, key)
+        if hit:
+            hopefix_merge_expander_product_id(html, hit)
+            return hit
+    return None
 
 
 async def hopefix_fetch_html_anonymous(url_or_path: str) -> str:
