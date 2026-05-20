@@ -1080,20 +1080,19 @@ function faboryStockDisplayClass(displayText: string): string | undefined {
   return undefined;
 }
 
-/** Text bunky Sklad pre variant riadok (Fabory = status text; Mekrs = balení / ks). */
+/** Text bunky Sklad pre variant riadok (Fabory = status text; Mekrs = celkové ks). */
 function variantRowStockDisplayText(
   supplier: string | null | undefined,
   pv: PackagingVariantRow,
   mekrsCtx?: {
-    allRows: PackagingVariantRow[];
     totalStock: number | null | undefined;
+    rawStock?: string | null;
   },
 ): string {
   if (supplierNameIsMekrs(supplier)) {
-    return mekrsVariantStockDisplayText(
-      pv,
-      mekrsCtx?.allRows,
+    return mekrsTotalStockDisplayText(
       mekrsCtx?.totalStock,
+      mekrsCtx?.rawStock,
     );
   }
   if (supplierNameIsFabory(supplier)) {
@@ -1262,23 +1261,19 @@ function mekrsVariantNameAndPackLine(
   return { name: name || cleaned, packText };
 }
 
-function mekrsVariantStockDisplayText(
-  pv: PackagingVariantRow,
-  allRows: PackagingVariantRow[] | null | undefined,
+function mekrsTotalStockDisplayText(
   totalStock: number | null | undefined,
+  rawStock?: string | null,
 ): string {
-  const pkg =
-    mekrsEffectivePackageStockText(pv, allRows, totalStock) ??
-    (pv.mekrs_package_stock_text || "").trim();
-  if (pkg) {
-    return pkg;
-  }
-  const pq = pv.pack_quantity;
-  if (typeof pq === "number" && pq === 1 && totalStock != null && Number.isFinite(totalStock)) {
+  if (totalStock != null && Number.isFinite(totalStock)) {
     if (totalStock <= 0) {
       return "Nie je skladom";
     }
     return formatKsQuantity(totalStock);
+  }
+  const raw = (rawStock || "").trim();
+  if (raw) {
+    return formatDigitsInTextCsThousands(raw);
   }
   return "—";
 }
@@ -1887,10 +1882,9 @@ function ProductSupplierExpandedTableRow({
                                         showPackSelector && pvars
                                           ? pvars[selVi]
                                           : null;
-                                      /** Mekrs: súhrnný sklad len mimo variant tabuľky. */
+                                      /** Mekrs: súhrnný sklad v hlavičke (API neposiela ks po variantoch). */
                                       const mekrsStockSummaryOnly =
-                                        supplierNameIsMekrs(offer.supplier) &&
-                                        !(showPackSelector && activePv);
+                                        supplierNameIsMekrs(offer.supplier);
                                       const hasplStockTextPerRow =
                                         supplierNameIsHaspl(offer.supplier);
                                       const rowPrice =
@@ -1920,24 +1914,18 @@ function ProductSupplierExpandedTableRow({
                                           : hasplStockTextPerRow && activePv
                                             ? activePv.raw_stock?.trim() || "—"
                                             : usesHttpCartVariants && activePv
-                                              ? supplierNameIsMekrs(offer.supplier)
-                                                ? mekrsVariantStockDisplayText(
-                                                    activePv,
-                                                    pvars,
-                                                    scrape?.stock,
-                                                  )
-                                                : supplierNameIsFabory(offer.supplier)
-                                                  ? faboryStockDisplayText({
-                                                      raw_stock: activePv.raw_stock,
-                                                      stock: activePv.stock,
-                                                    })
-                                                  : activePv.stock != null
-                                                    ? formatKsQuantity(activePv.stock)
-                                                    : activePv.raw_stock?.trim()
-                                                      ? formatDigitsInTextCsThousands(
-                                                          activePv.raw_stock.trim(),
-                                                        )
-                                                      : "—"
+                                              ? supplierNameIsFabory(offer.supplier)
+                                                ? faboryStockDisplayText({
+                                                    raw_stock: activePv.raw_stock,
+                                                    stock: activePv.stock,
+                                                  })
+                                                : activePv.stock != null
+                                                  ? formatKsQuantity(activePv.stock)
+                                                  : activePv.raw_stock?.trim()
+                                                    ? formatDigitsInTextCsThousands(
+                                                        activePv.raw_stock.trim(),
+                                                      )
+                                                    : "—"
                                               : stockDisplayText;
                                       /** Hopefix/Mekrs HTTP: pri OOS môže mať súhrn 0 € / 0 ks len na scrape, nie v riadku variantu. */
                                       const rowPriceLive =
@@ -1980,23 +1968,14 @@ function ProductSupplierExpandedTableRow({
                                           : hasplStockTextPerRow && activePv
                                             ? Boolean(activePv.raw_stock?.trim())
                                             : usesHttpCartVariants && activePv
-                                              ? supplierNameIsMekrs(offer.supplier)
-                                                ? mekrsVariantStockDisplayText(
-                                                    activePv,
-                                                    pvars,
-                                                    scrape?.stock,
-                                                  ) !== "—"
-                                                : activePv.stock != null ||
-                                                  Boolean(
-                                                    activePv.raw_stock?.trim(),
-                                                  ) ||
-                                                  Boolean(
-                                                    activePv.mekrs_package_stock_text?.trim(),
-                                                  ) ||
-                                                  (supplierNameIsHopefix(
-                                                    offer.supplier,
-                                                  ) &&
-                                                    hasLiveStockSignalSummary)
+                                              ? activePv.stock != null ||
+                                                Boolean(
+                                                  activePv.raw_stock?.trim(),
+                                                ) ||
+                                                (supplierNameIsHopefix(
+                                                  offer.supplier,
+                                                ) &&
+                                                  hasLiveStockSignalSummary)
                                               : stockLive;
                                       const scraperApplicable =
                                         offer.supplier_id != null &&
@@ -2394,9 +2373,10 @@ function ProductSupplierExpandedTableRow({
                                                             offer.supplier,
                                                             pv,
                                                             {
-                                                              allRows: pvars,
                                                               totalStock:
                                                                 scrape?.stock,
+                                                              rawStock:
+                                                                scrape?.raw_stock,
                                                             },
                                                           );
                                                         return (
