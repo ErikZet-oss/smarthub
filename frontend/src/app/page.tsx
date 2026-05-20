@@ -1061,6 +1061,38 @@ function supplierNameIsArgip(name: string | null | undefined): boolean {
   return supplierNameCompactLower(name).includes("argip");
 }
 
+/** Argip: ks v obchodnom balení (nie MOQ objednávky). */
+function argipVariantPackQuantityText(pv: PackagingVariantRow): string {
+  const shop =
+    pv.shop_pack_quantity != null &&
+    Number.isFinite(pv.shop_pack_quantity) &&
+    pv.shop_pack_quantity >= 1
+      ? Math.floor(pv.shop_pack_quantity)
+      : null;
+  if (shop != null) {
+    return formatKsQuantity(shop);
+  }
+  const raw = (pv.raw_pack_quantity || "").trim();
+  const m = raw.replace(/\s/g, "").match(/(\d[\d\s]*)\s*ks/i);
+  if (m) {
+    const n = parseInt(m[1].replace(/\s/g, ""), 10);
+    if (Number.isFinite(n) && n >= 1) {
+      return formatKsQuantity(n);
+    }
+  }
+  return "";
+}
+
+function ArgipVariantLabelCell({ pv }: { pv: PackagingVariantRow }) {
+  const name = (pv.label || "").trim() || "—";
+  return (
+    <VariantPackLabelRow
+      name={name}
+      packText={argipVariantPackQuantityText(pv)}
+    />
+  );
+}
+
 /** Pod logo: len krátky názov produktu — bez balenia, zátvoriek „(… ks)“ a „… ks“ na konci riadku. */
 function faboryUiProductTitleOnly(raw: string): string {
   const first = (raw || "").replace(/\r/g, "").split("\n")[0]?.trim() ?? "";
@@ -2481,13 +2513,7 @@ function ProductSupplierExpandedTableRow({
                                                               ) : supplierNameIsArgip(
                                                                   offer.supplier,
                                                                 ) ? (
-                                                                <div className="text-[8px] font-normal leading-snug text-slate-600 sm:text-[9px]">
-                                                                  {(pv.raw_pack_quantity || "").trim() ||
-                                                                    (pv.pack_quantity != null &&
-                                                                    pv.pack_quantity >= 1
-                                                                      ? `od ${pv.pack_quantity} ks`
-                                                                      : `Variant ${vi + 1}`)}
-                                                                </div>
+                                                                <ArgipVariantLabelCell pv={pv} />
                                                               ) : (
                                                                 pv.label?.trim() ||
                                                                 `Variant ${vi + 1}`
@@ -2686,57 +2712,7 @@ function ProductSupplierExpandedTableRow({
                                                             ) : supplierNameIsArgip(
                                                                 offer.supplier,
                                                               ) ? (
-                                                              <div className="space-y-0.5">
-                                                                <div className="text-[8px] font-normal leading-snug text-slate-600 sm:text-[9px]">
-                                                                  {(pv.raw_pack_quantity || "").trim() ||
-                                                                    (pv.pack_quantity != null &&
-                                                                    pv.pack_quantity >= 1
-                                                                      ? `od ${pv.pack_quantity} ks`
-                                                                      : `Variant ${vi + 1}`)}
-                                                                </div>
-                                                                <div className="text-[10px] font-medium tabular-nums text-slate-800 sm:text-[11px]">
-                                                                  {pv.price_eur != null &&
-                                                                  Number.isFinite(
-                                                                    pv.price_eur,
-                                                                  ) ? (
-                                                                    <>
-                                                                      {formatScrapePriceAmount(
-                                                                        pv.price_eur,
-                                                                      )}{" "}
-                                                                      {pv.currency_symbol?.trim() ||
-                                                                        "€"}
-                                                                      <span className="font-normal text-slate-500">
-                                                                        {scrapePriceUnitSuffix(
-                                                                          offer.supplier,
-                                                                          pv.price_unit ??
-                                                                            scrape?.price_unit,
-                                                                          false,
-                                                                        )}
-                                                                      </span>
-                                                                      {supplierNameIsInoxmare(
-                                                                        offer.supplier,
-                                                                      ) ? (
-                                                                        <InoxmareMasterCartonLine
-                                                                          masterPackPriceEur={
-                                                                            pv.master_pack_price_eur
-                                                                          }
-                                                                          masterPackQuantity={
-                                                                            pv.master_pack_quantity
-                                                                          }
-                                                                          currencySymbol={
-                                                                            pv.currency_symbol ??
-                                                                            scrape?.currency_symbol
-                                                                          }
-                                                                        />
-                                                                      ) : null}
-                                                                    </>
-                                                                  ) : (
-                                                                    <span className="text-slate-500">
-                                                                      Cena —
-                                                                    </span>
-                                                                  )}
-                                                                </div>
-                                                              </div>
+                                                              <ArgipVariantLabelCell pv={pv} />
                                                             ) : (
                                                               pv.label?.trim() ||
                                                               `Variant ${vi + 1}`
