@@ -1279,10 +1279,13 @@ function HasplVariantLabelCell({
   label,
   packQuantity,
   rawPackQuantity,
+  hideName = false,
 }: {
   label?: string | null;
   packQuantity?: number | null;
   rawPackQuantity?: string | null;
+  /** Schaef: názov je nad tabuľkou — v Balení len ks. */
+  hideName?: boolean;
 }) {
   const name = (label ?? "").replace(/\s+/g, " ").trim() || "—";
   let packText = "";
@@ -1308,12 +1311,14 @@ function HasplVariantLabelCell({
   }
   return (
     <div className="flex min-w-0 flex-nowrap items-baseline gap-x-1.5">
-      <span
-        className="min-w-0 max-w-[min(100%,11rem)] truncate text-[11px] font-medium leading-tight text-slate-600 sm:max-w-[15rem]"
-        title={name}
-      >
-        {name}
-      </span>
+      {!hideName ? (
+        <span
+          className="min-w-0 max-w-[min(100%,11rem)] truncate text-[11px] font-medium leading-tight text-slate-600 sm:max-w-[15rem]"
+          title={name}
+        >
+          {name}
+        </span>
+      ) : null}
       {packText ? (
         <span className="shrink-0 whitespace-nowrap text-xs font-semibold tabular-nums text-slate-900">
           {packText}
@@ -2338,9 +2343,6 @@ function ProductSupplierExpandedTableRow({
                                                                   label={
                                                                     supplierNameIsInoxmare(
                                                                       offer.supplier,
-                                                                    ) ||
-                                                                    supplierNameIsSchaef(
-                                                                      offer.supplier,
                                                                     )
                                                                       ? supplierVariantProductLabel(
                                                                           scrape,
@@ -2348,6 +2350,9 @@ function ProductSupplierExpandedTableRow({
                                                                         )
                                                                       : pv.label
                                                                   }
+                                                                  hideName={supplierNameIsSchaef(
+                                                                    offer.supplier,
+                                                                  )}
                                                                   packQuantity={
                                                                     pv.pack_quantity
                                                                   }
@@ -2561,9 +2566,6 @@ function ProductSupplierExpandedTableRow({
                                                                 label={
                                                                   supplierNameIsInoxmare(
                                                                     offer.supplier,
-                                                                  ) ||
-                                                                  supplierNameIsSchaef(
-                                                                    offer.supplier,
                                                                   )
                                                                     ? supplierVariantProductLabel(
                                                                         scrape,
@@ -2571,6 +2573,9 @@ function ProductSupplierExpandedTableRow({
                                                                       )
                                                                     : pv.label
                                                                 }
+                                                                hideName={supplierNameIsSchaef(
+                                                                  offer.supplier,
+                                                                )}
                                                                 packQuantity={
                                                                   pv.pack_quantity
                                                                 }
