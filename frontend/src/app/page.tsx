@@ -1081,6 +1081,9 @@ function scrapePriceUnitSuffix(
   if (supplierNameIsArgip(supplierName)) {
     return compact ? SCRAPE_PRICE_DISPLAY_SUFFIX : " / 100 ks";
   }
+  if (supplierNameIsFabory(supplierName)) {
+    return "";
+  }
   return SCRAPE_PRICE_DISPLAY_SUFFIX;
 }
 
@@ -1718,6 +1721,16 @@ function ProductSupplierExpandedTableRow({
                                               ),
                                             ),
                                         );
+                                      const faboryVariantTable =
+                                        Boolean(
+                                          scrape &&
+                                            !scrape.loading &&
+                                            supplierNameIsFabory(
+                                              offer.supplier,
+                                            ) &&
+                                            Array.isArray(pvars) &&
+                                            pvars.length >= 1,
+                                        );
                                       const argipHttpVariants =
                                         Boolean(
                                           scrape &&
@@ -1739,6 +1752,7 @@ function ProductSupplierExpandedTableRow({
                                         hasplHttpVariants ||
                                         inoxmareHttpVariants ||
                                         schaefHttpVariants ||
+                                        faboryVariantTable ||
                                         argipHttpVariants;
                                       /** Hopefix: HTTP môže vrátiť variant bez product_id — stále treba riadok pre živú cenu/sklad. */
                                       const hopefixHasPackagingFromScrape =
@@ -1756,7 +1770,7 @@ function ProductSupplierExpandedTableRow({
                                         multiPack ||
                                         usesHttpCartVariants ||
                                         hopefixHasPackagingFromScrape;
-                                      /** Inox/Schaef: názov produktu len v stĺpci Balenie, nie duplicitne nad tabuľkou. */
+                                      /** Inox/Schaef/Fabory: názov produktu len v stĺpci Balenie, nie duplicitne nad tabuľkou. */
                                       const showSupplierProductTitleAboveTable =
                                         Boolean(
                                           scrape &&
@@ -1766,7 +1780,8 @@ function ProductSupplierExpandedTableRow({
                                         !(
                                           showPackSelector &&
                                           (supplierNameIsInoxmare(offer.supplier) ||
-                                            supplierNameIsSchaef(offer.supplier))
+                                            supplierNameIsSchaef(offer.supplier) ||
+                                            supplierNameIsFabory(offer.supplier))
                                         );
                                       const selViRaw =
                                         cartKey && showPackSelector && pvars
@@ -2173,8 +2188,7 @@ function ProductSupplierExpandedTableRow({
                                           <div className="flex flex-col gap-1 lg:flex-row lg:items-start lg:gap-3">
                                             <div className="flex min-w-0 flex-1 flex-col gap-0.5 sm:gap-1">
                                               {supplierHeader}
-                                              {showSupplierProductTitleAboveTable &&
-                                              !(supplierNameIsFabory(offer.supplier) && !showPackSelector) ? (
+                                              {showSupplierProductTitleAboveTable ? (
                                                 <p
                                                   className="min-w-0 break-words text-[9px] font-normal leading-snug text-slate-600 sm:text-[11px]"
                                                   title={
@@ -2350,6 +2364,9 @@ function ProductSupplierExpandedTableRow({
                                                                       offer.supplier,
                                                                     ) ||
                                                                     supplierNameIsSchaef(
+                                                                      offer.supplier,
+                                                                    ) ||
+                                                                    supplierNameIsFabory(
                                                                       offer.supplier,
                                                                     )
                                                                       ? supplierVariantProductLabel(
@@ -2573,6 +2590,9 @@ function ProductSupplierExpandedTableRow({
                                                                     offer.supplier,
                                                                   ) ||
                                                                   supplierNameIsSchaef(
+                                                                    offer.supplier,
+                                                                  ) ||
+                                                                  supplierNameIsFabory(
                                                                     offer.supplier,
                                                                   )
                                                                     ? supplierVariantProductLabel(
@@ -4423,6 +4443,7 @@ export default function Home() {
           const pvarsNeedVariantPick =
             Array.isArray(pvars) &&
             (pvars.length > 1 ||
+              (supplierNameIsFabory(offer.supplier) && pvars.length >= 1) ||
               pvars.some(
                 (row) =>
                   Boolean((row.mekrs_variant_id || "").trim()) ||

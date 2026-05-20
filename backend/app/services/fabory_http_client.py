@@ -552,6 +552,7 @@ class FaboryHttpClient:
                 "raw_price": raw_price,
                 "stock": stock_final,
                 "raw_stock": raw_stock,
+                "currency_symbol": "€",
             }
         ]
         return {
@@ -568,4 +569,5 @@ class FaboryHttpClient:
             "product_title": title,
             "label": label,
             "currency": (p.get("currencyIso") or "EUR"),
+            "currency_symbol": "€",
         }

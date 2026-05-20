@@ -39,3 +39,5 @@ def test_parse_cart_empty():
     parsed = fabory_parse_cart_html("<html></html>")
     assert parsed["line_count"] == 0
     assert parsed["lines"] == []
+    assert parsed["total_eur"] == 0.0
+    assert parsed.get("empty_cart") is True
