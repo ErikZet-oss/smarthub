@@ -107,6 +107,149 @@ def inoxmare_parse_cookie_header(header: str) -> dict[str, str]:
     return out
 
 
+def inoxmare_cookie_header_from_client(client: httpx.AsyncClient) -> str:
+    """Zo session cookie jar zostaví hodnotu hlavičky Cookie."""
+    parts: list[str] = []
+    for name, value in client.cookies.items():
+        if name:
+            parts.append(f"{name}={value}")
+    return "; ".join(parts)
+
+
+def inoxmare_login_requires_captcha(html: str) -> bool:
+    if re.search(r'<input[^>]+name=["\']captcha', html or "", re.I):
+        return True
+    if re.search(
+        r"captcha\s*[\"']?\s*:\s*\{\s*\"required\"\s*:\s*true",
+        html or "",
+        re.I,
+    ):
+        return True
+    return False
+
+
+async def inoxmare_fetch_login_captcha_image(
+    client: httpx.AsyncClient,
+    origin: str,
+    store: str,
+    form_key: str,
+) -> tuple[str, str]:
+    """Magento captcha/refresh → (mime, base64 bez prefixu data:…)."""
+    post_url = f"{store}/captcha/refresh/"
+    r = await client.post(
+        post_url,
+        data={"form_key": form_key, "formId": "user_login"},
+        headers={
+            **_inoxmare_xhr_headers(referer=f"{origin}{store}/customer/account/login/"),
+            "Content-Type": "application/x-www-form-urlencoded",
+            "X-Requested-With": "XMLHttpRequest",
+        },
+    )
+    r.raise_for_status()
+    img_src = ""
+    try:
+        payload = r.json()
+        if isinstance(payload, dict):
+            img_src = str(payload.get("imgSrc") or "").strip()
+    except json.JSONDecodeError:
+        pass
+    if not img_src:
+        raise RuntimeError("Inoxmare: nepodarilo sa načítať obrázok CAPTCHA.")
+    if img_src.startswith("data:"):
+        m = re.match(r"data:([^;]+);base64,(.+)", img_src, re.I | re.S)
+        if m:
+            return m.group(1).strip(), m.group(2).strip()
+    if img_src.startswith("/"):
+        r_img = await client.get(
+            img_src,
+            headers=_inoxmare_navigation_headers(
+                referer=f"{origin}{store}/customer/account/login/"
+            ),
+        )
+        r_img.raise_for_status()
+        ctype = (r_img.headers.get("content-type") or "image/png").split(";")[0]
+        import base64
+
+        return ctype, base64.b64encode(r_img.content).decode("ascii")
+    raise RuntimeError("Inoxmare: neznámy formát CAPTCHA obrázka.")
+
+
+async def inoxmare_login_post(
+    client: httpx.AsyncClient,
+    origin: str,
+    store: str,
+    username: str,
+    password: str,
+    login_html: str,
+    *,
+    captcha_text: str | None = None,
+) -> None:
+    """POST loginPost; pri úspechu zostane relácia v client cookies."""
+    fk = parse_inoxmare_form_key(login_html)
+    if not fk:
+        raise RuntimeError("Inoxmare: chýba form_key.")
+    data = _inoxmare_login_form_hidden_fields(login_html)
+    data["form_key"] = fk
+    data["login[username]"] = (username or "").strip()
+    data["login[password]"] = (password or "").strip()
+    if captcha_text:
+        data["captcha[user_login]"] = captcha_text.strip()
+    data["send"] = ""
+    login_path = f"{store}/customer/account/login/"
+    post_path = f"{store}/customer/account/loginPost/"
+    r2 = await client.post(
+        post_path,
+        data=data,
+        headers={
+            "Accept": (
+                "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                "image/avif,image/webp,image/apng,*/*;q=0.8,"
+                "application/signed-exchange;v=b3;q=0.7"
+            ),
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Origin": origin,
+            "Referer": f"{origin}{login_path}",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "same-origin",
+            "Sec-Fetch-User": "?1",
+        },
+    )
+    r2.raise_for_status()
+    low = (r2.text or "").lower()
+    if "incorrect captcha" in low or "incorrectcaptcha" in low.replace(" ", ""):
+        raise RuntimeError("Nesprávny kód CAPTCHA — skús znova.")
+    err_markers = (
+        "sign-in was incorrect",
+        "account sign-in was incorrect",
+        "the account sign-in was incorrect",
+        "incorrect username",
+        "incorrect password",
+    )
+    if any(x in low for x in err_markers):
+        raise RuntimeError("Nesprávne prihlasovacie údaje.")
+    lock_markers = (
+        "account is disabled temporarily",
+        "please wait and try again later",
+        "too many failed login attempts",
+    )
+    if any(x in low for x in lock_markers):
+        raise RuntimeError(
+            "Účet je dočasne zablokovaný — počkaj a skús neskôr."
+        )
+    path_after = (urlparse(str(r2.url)).path or "").lower()
+    if path_after.rstrip("/").endswith("/customer/account/login"):
+        raise RuntimeError(
+            "Prihlásenie zlyhalo — skontroluj údaje a CAPTCHA."
+        )
+    r_chk = await client.get(
+        f"{store}/customer/account/",
+        headers=_inoxmare_navigation_headers(referer=f"{origin}{login_path}"),
+    )
+    if "customer/account/login" in str(r_chk.url).lower():
+        raise RuntimeError("Relácia nie je prihlásená — skontroluj údaje.")
+
+
 def inoxmare_httpx_cookie_host(shop_url: str) -> str:
     return (urlparse(inoxmare_origin(shop_url)).hostname or "www.inoxmare.com").lower()
 

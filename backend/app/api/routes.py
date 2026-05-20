@@ -38,11 +38,14 @@ from app.services.dev_run_log import (
     get_step_screenshots_status,
     set_step_screenshots_override,
 )
-from app.services.scraper_service import (
-    ScraperProductNotFoundError,
-    ScraperService,
-    load_scraper_config,
-    sanitize_cart_config_json_text,
+from app.services.inoxmare_login_session import (
+    capture_inoxmare_cookies_via_playwright,
+    complete_inoxmare_login_session,
+    inoxmare_login_url_for_supplier,
+    merge_inoxmare_cookie_into_cart_config,
+    refresh_inoxmare_login_captcha,
+    start_inoxmare_login_session,
+    verify_inoxmare_cookie_header,
 )
 from app.services.sections_unlock import issue_sections_unlock_token, verify_sections_unlock_token
 from app.services.haspl_http_client import supplier_shop_cart_url
@@ -64,6 +67,14 @@ from app.services.offer_export import (
     offer_lines_subtotal,
 )
 from app.services.offer_pricing import selling_unit_price
+from app.services.scraper_service import (
+    ScraperProductNotFoundError,
+    ScraperService,
+    _playwright_fallback_disabled,
+    _supplier_is_inoxmare,
+    load_scraper_config,
+    sanitize_cart_config_json_text,
+)
 from app.services.supplier_logos import (
     remove_supplier_logo_files,
     save_supplier_logo_upload,
@@ -1563,6 +1574,201 @@ def list_suppliers(
         )
         for supplier in suppliers
     ]
+
+
+class InoxmareSessionCompletePayload(BaseModel):
+    session_token: str
+    captcha: str | None = None
+
+
+class InoxmareSessionImportPayload(BaseModel):
+    cookie_header: str
+
+
+def _require_inoxmare_supplier(session: Session, supplier_id: int) -> Supplier:
+    supplier = session.get(Supplier, supplier_id)
+    if supplier is None:
+        raise HTTPException(status_code=404, detail="Dodávateľ neexistuje.")
+    if not _supplier_is_inoxmare(supplier):
+        raise HTTPException(status_code=400, detail="Táto akcia je len pre Inox (inoxmare.com).")
+    return supplier
+
+
+def _save_inoxmare_cookie_header(
+    session: Session, supplier: Supplier, cookie_header: str
+) -> str:
+    ck = (cookie_header or "").strip()
+    if not ck:
+        raise HTTPException(status_code=400, detail="Prázdna hlavička Cookie.")
+    merged = merge_inoxmare_cookie_into_cart_config(supplier.cart_config_json, ck)
+    normalized = _normalize_supplier_cart_config_json(supplier.name, merged)
+    supplier.cart_config_json = normalized
+    session.commit()
+    session.refresh(supplier)
+    from app.services.scraper_service import (
+        invalidate_supplier_http_session_sync,
+        invalidate_supplier_price_cache_sync,
+    )
+
+    invalidate_supplier_http_session_sync(int(supplier.id))
+    invalidate_supplier_price_cache_sync(int(supplier.id))
+    return normalized or merged
+
+
+@router.post("/suppliers/{supplier_id}/inoxmare/session/start")
+async def inoxmare_session_start(
+    supplier_id: int,
+    session: Session = Depends(get_session),
+    admin: AuthUserContext = Depends(require_admin),
+):
+    """Začne obnovu relácie — vráti CAPTCHA alebo hneď cookies (ak CAPTCHA nie je potrebná)."""
+    supplier = _require_inoxmare_supplier(session, supplier_id)
+    eff = effective_supplier_for_user(session, supplier, admin.id)
+    if not (eff.username or "").strip() or not (eff.password or "").strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Vyplň prihlasovacie údaje u Inox dodávateľa.",
+        )
+    try:
+        cfg = load_scraper_config(supplier)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Neplatný cart_config_json: {exc}") from exc
+    try:
+        result = await start_inoxmare_login_session(
+            supplier.shop_url or "",
+            cfg.inoxmare_store_path,
+            eff.username,
+            eff.password,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if result.get("auto_completed") and result.get("cookie_header"):
+        _save_inoxmare_cookie_header(session, supplier, str(result["cookie_header"]))
+        result["saved"] = True
+    else:
+        result["saved"] = False
+    result["login_url"] = inoxmare_login_url_for_supplier(eff)
+    return result
+
+
+@router.post("/suppliers/{supplier_id}/inoxmare/session/complete")
+async def inoxmare_session_complete(
+    supplier_id: int,
+    payload: InoxmareSessionCompletePayload,
+    session: Session = Depends(get_session),
+    admin: AuthUserContext = Depends(require_admin),
+):
+    supplier = _require_inoxmare_supplier(session, supplier_id)
+    try:
+        cookie_header = await complete_inoxmare_login_session(
+            payload.session_token.strip(),
+            captcha_text=payload.captcha,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    normalized = _save_inoxmare_cookie_header(session, supplier, cookie_header)
+    return {"ok": True, "cart_config_json": normalized}
+
+
+@router.post("/suppliers/{supplier_id}/inoxmare/session/refresh-captcha")
+async def inoxmare_session_refresh_captcha(
+    supplier_id: int,
+    payload: InoxmareSessionCompletePayload,
+    session: Session = Depends(get_session),
+    admin: AuthUserContext = Depends(require_admin),
+):
+    _require_inoxmare_supplier(session, supplier_id)
+    try:
+        mime, b64 = await refresh_inoxmare_login_captcha(payload.session_token.strip())
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"captcha_mime": mime, "captcha_image_base64": b64}
+
+
+@router.post("/suppliers/{supplier_id}/inoxmare/session/import")
+async def inoxmare_session_import(
+    supplier_id: int,
+    payload: InoxmareSessionImportPayload,
+    session: Session = Depends(get_session),
+    admin: AuthUserContext = Depends(require_admin),
+):
+    """Po ručnom prihlásení v Chrome — vlož celú hlavičku Cookie."""
+    supplier = _require_inoxmare_supplier(session, supplier_id)
+    try:
+        cfg = load_scraper_config(supplier)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Neplatný cart_config_json: {exc}") from exc
+    ck = sanitize_cart_config_json_text(payload.cookie_header)
+    ok = await verify_inoxmare_cookie_header(
+        supplier.shop_url or "",
+        cfg.inoxmare_store_path,
+        ck,
+    )
+    if not ok:
+        raise HTTPException(
+            status_code=400,
+            detail="Cookies nie sú platné — prihlás sa na inoxmare.com a skopíruj celú hlavičku Cookie.",
+        )
+    normalized = _save_inoxmare_cookie_header(session, supplier, ck)
+    return {"ok": True, "cart_config_json": normalized}
+
+
+@router.get("/suppliers/{supplier_id}/inoxmare/session/status")
+async def inoxmare_session_status(
+    supplier_id: int,
+    session: Session = Depends(get_session),
+    admin: AuthUserContext = Depends(require_admin),
+):
+    supplier = _require_inoxmare_supplier(session, supplier_id)
+    try:
+        cfg = load_scraper_config(supplier)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Neplatný cart_config_json: {exc}") from exc
+    ck = (cfg.inoxmare_session_cookie_header or "").strip()
+    if not ck:
+        return {"valid": False, "reason": "missing"}
+    valid = await verify_inoxmare_cookie_header(
+        supplier.shop_url or "",
+        cfg.inoxmare_store_path,
+        ck,
+    )
+    return {
+        "valid": valid,
+        "reason": None if valid else "expired",
+        "login_url": inoxmare_login_url_for_supplier(supplier),
+    }
+
+
+@router.post("/suppliers/{supplier_id}/inoxmare/session/browser")
+async def inoxmare_session_browser(
+    supplier_id: int,
+    session: Session = Depends(get_session),
+    admin: AuthUserContext = Depends(require_admin),
+):
+    """
+    Otvorí Chrome s predvyplneným loginom (len lokálny backend s Playwright).
+    Na Renderi nie je k dispozícii — použite session/start s CAPTCHA v aplikácii.
+    """
+    if _playwright_fallback_disabled():
+        raise HTTPException(
+            status_code=501,
+            detail=(
+                "Prihlásenie cez prehliadač na serveri nie je na Renderi dostupné. "
+                "Použi „Obnoviť reláciu“ s CAPTCHA v aplikácii."
+            ),
+        )
+    supplier = _require_inoxmare_supplier(session, supplier_id)
+    eff = effective_supplier_for_user(session, supplier, admin.id)
+    try:
+        cfg = load_scraper_config(supplier)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Neplatný cart_config_json: {exc}") from exc
+    try:
+        cookie_header = await capture_inoxmare_cookies_via_playwright(eff, cfg)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    normalized = _save_inoxmare_cookie_header(session, supplier, cookie_header)
+    return {"ok": True, "cart_config_json": normalized}
 
 
 @router.post("/suppliers/reorder")

@@ -3170,6 +3170,22 @@ export default function Home() {
   const [suppliersExcelPanelOpen, setSuppliersExcelPanelOpen] = useState(true);
   const [suppliersShippingHintOpen, setSuppliersShippingHintOpen] = useState(false);
   const [supplierReorderBusy, setSupplierReorderBusy] = useState(false);
+  const [inoxRefresh, setInoxRefresh] = useState<{
+    supplierIndex: number;
+    supplierId: number;
+    sessionToken: string | null;
+    loginUrl: string;
+    username: string;
+    captchaRequired: boolean;
+    captchaImageBase64: string | null;
+    captchaMime: string;
+    captchaInput: string;
+    cookieImport: string;
+    tab: "auto" | "browser" | "import";
+    busy: boolean;
+    error: string | null;
+    message: string | null;
+  } | null>(null);
   useEffect(() => {
     const stored =
       typeof window !== "undefined" ?
@@ -5112,6 +5128,262 @@ export default function Home() {
       else next.add(key);
       return next;
     });
+  };
+
+  const startInoxSessionRefresh = async (index: number) => {
+    const row = supplierForms[index];
+    if (!row.id) {
+      setSaveState((prev) => ({
+        ...prev,
+        [index]: "Najprv ulož dodávateľa.",
+      }));
+      return;
+    }
+    setInoxRefresh({
+      supplierIndex: index,
+      supplierId: row.id,
+      sessionToken: null,
+      loginUrl: "",
+      username: row.username ?? "",
+      captchaRequired: false,
+      captchaImageBase64: null,
+      captchaMime: "image/png",
+      captchaInput: "",
+      cookieImport: "",
+      tab: "auto",
+      busy: true,
+      error: null,
+      message: "Prihlasujem na Inox…",
+    });
+    try {
+      const response = await apiFetch(
+        `${API_BASE}/api/suppliers/${row.id}/inoxmare/session/start`,
+        { method: "POST" },
+      );
+      const payload = (await response.json()) as {
+        detail?: unknown;
+        session_token?: string;
+        login_url?: string;
+        username?: string;
+        captcha_required?: boolean;
+        captcha_image_base64?: string | null;
+        captcha_mime?: string;
+        auto_completed?: boolean;
+        saved?: boolean;
+      };
+      if (!response.ok) {
+        throw new Error(formatApiDetail(payload.detail));
+      }
+      if (payload.auto_completed && payload.saved) {
+        setInoxRefresh(null);
+        setSaveState((prev) => ({
+          ...prev,
+          [row.id!]: "Inox relácia obnovená a cookies uložené.",
+        }));
+        void refetchSuppliersList();
+        return;
+      }
+      setInoxRefresh({
+        supplierIndex: index,
+        supplierId: row.id,
+        sessionToken: payload.session_token ?? null,
+        loginUrl: payload.login_url ?? "",
+        username: payload.username ?? row.username ?? "",
+        captchaRequired: Boolean(payload.captcha_required),
+        captchaImageBase64: payload.captcha_image_base64 ?? null,
+        captchaMime: payload.captcha_mime ?? "image/png",
+        captchaInput: "",
+        cookieImport: "",
+        tab: payload.captcha_required ? "auto" : "browser",
+        busy: false,
+        error: null,
+        message: payload.captcha_required
+          ? "Zadaj kód z obrázka — údaje sú už vyplnené na serveri."
+          : null,
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "Obnova relácie zlyhala.";
+      setInoxRefresh((prev) =>
+        prev
+          ? { ...prev, busy: false, error: msg, message: null }
+          : {
+              supplierIndex: index,
+              supplierId: row.id!,
+              sessionToken: null,
+              loginUrl: "",
+              username: row.username ?? "",
+              captchaRequired: false,
+              captchaImageBase64: null,
+              captchaMime: "image/png",
+              captchaInput: "",
+              cookieImport: "",
+              tab: "auto",
+              busy: false,
+              error: msg,
+              message: null,
+            },
+      );
+    }
+  };
+
+  const completeInoxSessionRefresh = async () => {
+    if (!inoxRefresh?.sessionToken || !inoxRefresh.supplierId) return;
+    setInoxRefresh((prev) =>
+      prev ? { ...prev, busy: true, error: null, message: "Ukladám cookies…" } : prev,
+    );
+    try {
+      const response = await apiFetch(
+        `${API_BASE}/api/suppliers/${inoxRefresh.supplierId}/inoxmare/session/complete`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            session_token: inoxRefresh.sessionToken,
+            captcha: inoxRefresh.captchaInput.trim() || null,
+          }),
+        },
+      );
+      const payload = (await response.json()) as {
+        detail?: unknown;
+        cart_config_json?: string;
+      };
+      if (!response.ok) {
+        throw new Error(formatApiDetail(payload.detail));
+      }
+      const idx = inoxRefresh.supplierIndex;
+      setSupplierForms((prev) =>
+        prev.map((s, i) =>
+          i === idx
+            ? { ...s, cartConfigJson: payload.cart_config_json ?? s.cartConfigJson }
+            : s,
+        ),
+      );
+      setInoxRefresh(null);
+      setSaveState((prev) => ({
+        ...prev,
+        [inoxRefresh.supplierId]: "Inox relácia obnovená.",
+      }));
+    } catch (error) {
+      setInoxRefresh((prev) =>
+        prev
+          ? {
+              ...prev,
+              busy: false,
+              error: error instanceof Error ? error.message : "Prihlásenie zlyhalo.",
+              message: null,
+            }
+          : prev,
+      );
+    }
+  };
+
+  const refreshInoxCaptchaImage = async () => {
+    if (!inoxRefresh?.sessionToken || !inoxRefresh.supplierId) return;
+    setInoxRefresh((prev) =>
+      prev ? { ...prev, busy: true, error: null } : prev,
+    );
+    try {
+      const response = await apiFetch(
+        `${API_BASE}/api/suppliers/${inoxRefresh.supplierId}/inoxmare/session/refresh-captcha`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_token: inoxRefresh.sessionToken }),
+        },
+      );
+      const payload = (await response.json()) as {
+        detail?: unknown;
+        captcha_image_base64?: string;
+        captcha_mime?: string;
+      };
+      if (!response.ok) {
+        throw new Error(formatApiDetail(payload.detail));
+      }
+      setInoxRefresh((prev) =>
+        prev
+          ? {
+              ...prev,
+              busy: false,
+              captchaImageBase64: payload.captcha_image_base64 ?? null,
+              captchaMime: payload.captcha_mime ?? "image/png",
+              captchaInput: "",
+            }
+          : prev,
+      );
+    } catch (error) {
+      setInoxRefresh((prev) =>
+        prev
+          ? {
+              ...prev,
+              busy: false,
+              error: error instanceof Error ? error.message : "CAPTCHA sa nepodarilo obnoviť.",
+            }
+          : prev,
+      );
+    }
+  };
+
+  const openInoxLoginInBrowser = () => {
+    if (!inoxRefresh?.loginUrl) return;
+    window.open(inoxRefresh.loginUrl, "_blank", "noopener,noreferrer");
+    setInoxRefresh((prev) =>
+      prev ? { ...prev, tab: "import", message: "Po prihlásení vlož cookies nižšie." } : prev,
+    );
+  };
+
+  const importInoxSessionCookies = async () => {
+    if (!inoxRefresh?.supplierId) return;
+    const ck = inoxRefresh.cookieImport.trim();
+    if (!ck) {
+      setInoxRefresh((prev) =>
+        prev ? { ...prev, error: "Vlož hlavičku Cookie z DevTools." } : prev,
+      );
+      return;
+    }
+    setInoxRefresh((prev) =>
+      prev ? { ...prev, busy: true, error: null, message: "Overujem cookies…" } : prev,
+    );
+    try {
+      const response = await apiFetch(
+        `${API_BASE}/api/suppliers/${inoxRefresh.supplierId}/inoxmare/session/import`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cookie_header: ck }),
+        },
+      );
+      const payload = (await response.json()) as {
+        detail?: unknown;
+        cart_config_json?: string;
+      };
+      if (!response.ok) {
+        throw new Error(formatApiDetail(payload.detail));
+      }
+      const idx = inoxRefresh.supplierIndex;
+      setSupplierForms((prev) =>
+        prev.map((s, i) =>
+          i === idx
+            ? { ...s, cartConfigJson: payload.cart_config_json ?? s.cartConfigJson }
+            : s,
+        ),
+      );
+      setInoxRefresh(null);
+      setSaveState((prev) => ({
+        ...prev,
+        [inoxRefresh.supplierId]: "Inox cookies uložené.",
+      }));
+    } catch (error) {
+      setInoxRefresh((prev) =>
+        prev
+          ? {
+              ...prev,
+              busy: false,
+              error: error instanceof Error ? error.message : "Import cookies zlyhal.",
+              message: null,
+            }
+          : prev,
+      );
+    }
   };
 
   const saveSupplier = async (index: number) => {
@@ -7683,6 +7955,18 @@ export default function Home() {
                             Odstrániť
                           </Button>
                         ) : null}
+                        {isAppAdmin && supplierNameIsInoxmare(supplier.name) && supplier.id ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-8 border-amber-200 text-xs text-amber-950 hover:bg-amber-50"
+                            onClick={() => void startInoxSessionRefresh(index)}
+                          >
+                            <KeyRound className="mr-1 h-3.5 w-3.5" aria-hidden />
+                            Obnoviť Inox reláciu
+                          </Button>
+                        ) : null}
                         {saveState[supplier.id ?? index] ? (
                           <span className="text-[11px] text-slate-600">
                             {saveState[supplier.id ?? index]}
@@ -8970,6 +9254,177 @@ export default function Home() {
               <LogOut className="h-4 w-4" />
               Odhlásiť
             </button>
+          </div>
+        </div>
+      ) : null}
+      {inoxRefresh ? (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="inox-refresh-title"
+        >
+          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border border-slate-200 bg-white p-4 shadow-xl">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <h2 id="inox-refresh-title" className="text-base font-semibold text-slate-900">
+                  Obnoviť Inox reláciu
+                </h2>
+                <p className="mt-1 text-xs text-slate-600">
+                  Po vypršaní cookies sa prihlásime znova a uložíme novú reláciu do konfigurácie.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="rounded p-1 text-slate-500 hover:bg-slate-100"
+                onClick={() => setInoxRefresh(null)}
+                disabled={inoxRefresh.busy}
+                aria-label="Zavrieť"
+              >
+                ×
+              </button>
+            </div>
+
+            {inoxRefresh.message ? (
+              <p className="mt-3 rounded-md border border-sky-100 bg-sky-50 px-3 py-2 text-xs text-sky-900">
+                {inoxRefresh.message}
+              </p>
+            ) : null}
+            {inoxRefresh.error ? (
+              <p className="mt-3 rounded-md border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-800">
+                {inoxRefresh.error}
+              </p>
+            ) : null}
+
+            <div className="mt-3 flex flex-wrap gap-1 border-b border-slate-100 pb-2">
+              {(["auto", "browser", "import"] as const).map((tab) => (
+                <button
+                  key={tab}
+                  type="button"
+                  className={cn(
+                    "rounded-md px-2.5 py-1 text-xs font-medium",
+                    inoxRefresh.tab === tab
+                      ? "bg-slate-900 text-white"
+                      : "bg-slate-100 text-slate-700 hover:bg-slate-200",
+                  )}
+                  onClick={() =>
+                    setInoxRefresh((prev) => (prev ? { ...prev, tab, error: null } : prev))
+                  }
+                >
+                  {tab === "auto"
+                    ? "CAPTCHA tu"
+                    : tab === "browser"
+                      ? "Na webe Inox"
+                      : "Import cookies"}
+                </button>
+              ))}
+            </div>
+
+            {inoxRefresh.tab === "auto" ? (
+              <div className="mt-3 space-y-3">
+                <p className="text-xs text-slate-600">
+                  Používateľ <strong className="font-medium">{inoxRefresh.username}</strong> — heslo
+                  sa použije z uložených údajov dodávateľa.
+                </p>
+                {inoxRefresh.captchaImageBase64 ? (
+                  <div className="flex flex-col items-start gap-2">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={`data:${inoxRefresh.captchaMime};base64,${inoxRefresh.captchaImageBase64}`}
+                      alt="CAPTCHA"
+                      className="rounded border border-slate-200 bg-white"
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs"
+                      disabled={inoxRefresh.busy}
+                      onClick={() => void refreshInoxCaptchaImage()}
+                    >
+                      Nový obrázok
+                    </Button>
+                  </div>
+                ) : null}
+                <Input
+                  className="h-9 text-sm"
+                  placeholder="Kód z obrázka CAPTCHA"
+                  value={inoxRefresh.captchaInput}
+                  onChange={(e) =>
+                    setInoxRefresh((prev) =>
+                      prev ? { ...prev, captchaInput: e.target.value, error: null } : prev,
+                    )
+                  }
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  className="w-full"
+                  disabled={inoxRefresh.busy || !inoxRefresh.sessionToken}
+                  onClick={() => void completeInoxSessionRefresh()}
+                >
+                  {inoxRefresh.busy ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+                      Prihlasujem…
+                    </>
+                  ) : (
+                    "Prihlásiť a uložiť cookies"
+                  )}
+                </Button>
+              </div>
+            ) : null}
+
+            {inoxRefresh.tab === "browser" ? (
+              <div className="mt-3 space-y-3 text-xs text-slate-600">
+                <p>
+                  Otvorí sa prihlasovacia stránka Inox. Údaje{" "}
+                  <strong className="font-medium">{inoxRefresh.username}</strong> / heslo z dodávateľa
+                  môžeš skopírovať alebo nechať doplniť správcom hesiel v prehliadači.
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="w-full"
+                  onClick={openInoxLoginInBrowser}
+                  disabled={!inoxRefresh.loginUrl}
+                >
+                  <ExternalLink className="mr-2 h-4 w-4" aria-hidden />
+                  Otvoriť prihlásenie na inoxmare.com
+                </Button>
+                <p>
+                  Po prihlásení prejdi na záložku <strong>Import cookies</strong> a vlož hlavičku
+                  Cookie z DevTools (Network → request → Request Headers).
+                </p>
+              </div>
+            ) : null}
+
+            {inoxRefresh.tab === "import" ? (
+              <div className="mt-3 space-y-3">
+                <textarea
+                  rows={5}
+                  className="w-full resize-y rounded-md border border-slate-300 px-2 py-1.5 font-mono text-[11px]"
+                  placeholder="store=en; PHPSESSID=…; form_key=…"
+                  value={inoxRefresh.cookieImport}
+                  onChange={(e) =>
+                    setInoxRefresh((prev) =>
+                      prev ? { ...prev, cookieImport: e.target.value, error: null } : prev,
+                    )
+                  }
+                  spellCheck={false}
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  className="w-full"
+                  disabled={inoxRefresh.busy}
+                  onClick={() => void importInoxSessionCookies()}
+                >
+                  {inoxRefresh.busy ? "Overujem…" : "Uložiť cookies"}
+                </Button>
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}
