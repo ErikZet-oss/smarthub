@@ -1471,6 +1471,8 @@ type ProductSupplierExpandedTableRowProps = {
     hasplVariantCode?: string | null,
     inoxmareProductId?: string | null,
     inoxmareRefererPath?: string | null,
+    schaefItemId?: string | null,
+    schaefRefererPath?: string | null,
   ) => Promise<void>;
 };
 
