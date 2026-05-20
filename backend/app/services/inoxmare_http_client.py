@@ -643,6 +643,37 @@ def parse_inoxmare_row_fields(row_html: str) -> dict[str, Any]:
     return out
 
 
+def parse_inoxmare_product_title(html: str) -> Optional[str]:
+    """Názov produktu z <h1 class=\"page-title\"> na PDP."""
+    for pat in (
+        r'<h1[^>]*class\s*=\s*["\'][^"\']*page-title[^"\']*["\'][^>]*>\s*'
+        r'(?:<span[^>]*>\s*)?([^<]+)',
+        r'data-ui-id\s*=\s*["\']page-title-wrapper["\'][^>]*>\s*([^<]+)',
+        r'<h1[^>]*>\s*([^<]{3,240})',
+    ):
+        m = re.search(pat, html or "", re.I | re.DOTALL)
+        if not m:
+            continue
+        title = _inoxmare_strip_tags(m.group(1)).strip()
+        if title and title.lower() not in ("inoxmare", "product"):
+            return title
+    return None
+
+
+def _inoxmare_descr_label_from_row(row_html: str) -> Optional[str]:
+    dm = re.search(
+        r'<td[^>]*class\s*=\s*["\']descr["\'][^>]*>([\s\S]*?)</td>',
+        row_html,
+        re.I,
+    )
+    if not dm:
+        return None
+    descr = dm.group(1)
+    head = descr.split("<p")[0] if "<p" in descr else descr
+    label = _inoxmare_strip_tags(head).strip()
+    return label or None
+
+
 def parse_inoxmare_price_eur(html: str) -> tuple[Optional[float], Optional[str]]:
     for m in re.finditer(r'["\']price["\']\s*:\s*["\']([\d.]+)', html, re.I):
         try:
@@ -712,13 +743,27 @@ def parse_inoxmare_pdp(html: str, product_code: Optional[str] = None) -> dict[st
     price-boxu konfigurovateľného produktu (často €1.00 placeholder).
     """
     pid = parse_inoxmare_product_id(html)
+    product_title = parse_inoxmare_product_title(html)
     code = inoxmare_norm_code(product_code) if product_code else ""
     row_html = _inoxmare_extract_product_row_html(html, code) if code else None
     if row_html:
         rf = parse_inoxmare_row_fields(row_html)
+        row_label = (rf.get("label") or "").strip() or None
+        if not row_label and code:
+            for m in re.finditer(
+                rf'<tr[^>]*\bid\s*=\s*["\']{re.escape(code)}["\'][^>]*>[\s\S]*?</tr>',
+                html,
+                re.I,
+            ):
+                alt = _inoxmare_descr_label_from_row(m.group(0))
+                if alt:
+                    row_label = alt
+                    break
+        display_label = row_label or product_title
         return {
             "inoxmare_product_id": pid,
-            "pdp_label": rf.get("label"),
+            "product_title": product_title or row_label,
+            "pdp_label": display_label,
             "pack_quantity": rf.get("pack_quantity"),
             "master_pack_quantity": rf.get("master_pack_quantity"),
             "pallet_pack_quantity": rf.get("pallet_pack_quantity"),
@@ -732,7 +777,8 @@ def parse_inoxmare_pdp(html: str, product_code: Optional[str] = None) -> dict[st
     if code:
         return {
             "inoxmare_product_id": pid,
-            "pdp_label": None,
+            "product_title": product_title,
+            "pdp_label": product_title,
             "pack_quantity": None,
             "master_pack_quantity": None,
             "pallet_pack_quantity": None,
@@ -745,7 +791,8 @@ def parse_inoxmare_pdp(html: str, product_code: Optional[str] = None) -> dict[st
     st, rs = parse_inoxmare_stock(html)
     return {
         "inoxmare_product_id": pid,
-        "pdp_label": None,
+        "product_title": product_title,
+        "pdp_label": product_title,
         "pack_quantity": None,
         "master_pack_quantity": None,
         "pallet_pack_quantity": None,

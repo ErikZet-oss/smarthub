@@ -18,6 +18,7 @@ from app.services.schaef_http_client import (
     schaef_base_url,
     schaef_parse_pdp_html,
     schaef_round_qty_to_step,
+    schaef_title_from_pdp_path,
 )
 
 
@@ -74,8 +75,12 @@ PDP_SNIPPET = """
 
 
 def test_schaef_parse_pdp_extracts_core_fields() -> None:
-    data = schaef_parse_pdp_html(PDP_SNIPPET)
+    data = schaef_parse_pdp_html(
+        PDP_SNIPPET,
+        product_title_hint="DIN 933 A2-70 M 12X40",
+    )
     assert data["schaef_item_id"] == "133791"
+    assert data["product_title"] == "DIN 933 A2-70 M 12X40"
     assert data["price_eur"] == 12.2598
     assert data["pack_quantity"] == 100
     assert data["stock"] == 384_500
@@ -89,7 +94,14 @@ def test_schaef_parse_pdp_extracts_core_fields() -> None:
     pv = data["packaging_variants"]
     assert len(pv) == 1
     assert pv[0]["schaef_item_id"] == "133791"
+    assert pv[0]["label"] == "DIN 933 A2-70 M 12X40"
     assert pv[0]["pack_quantity"] == 100
+
+
+def test_schaef_parse_pdp_title_from_canonical_slug() -> None:
+    data = schaef_parse_pdp_html(PDP_SNIPPET)
+    assert data["product_title"] == "DIN 933 A2 70 M 12X40"
+    assert data["packaging_variants"][0]["label"] == "DIN 933 A2 70 M 12X40"
 
 
 def test_schaef_parse_pdp_missing_stock_falls_back_to_availability() -> None:

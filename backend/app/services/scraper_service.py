@@ -2818,7 +2818,8 @@ async def _inoxmare_get_supplier_data_via_http(
         )
     pe = meta.get("price_eur")
     st = meta.get("stock")
-    pdp_label = (meta.get("pdp_label") or "").strip()
+    product_title = (meta.get("product_title") or meta.get("pdp_label") or "").strip()
+    pdp_label = (meta.get("pdp_label") or product_title or code).strip()
     pq = meta.get("pack_quantity")
     mq = meta.get("master_pack_quantity")
     pal = meta.get("pallet_pack_quantity")
@@ -2832,7 +2833,7 @@ async def _inoxmare_get_supplier_data_via_http(
         pack_parts.append(f"Paleta {pal} ks")
     raw_pack = "; ".join(pack_parts)
     pv: dict[str, Any] = {
-        "label": pdp_label or "Inoxmare",
+        "label": pdp_label or product_title or code,
         "inoxmare_product_id": str(pid),
         "inoxmare_referer_path": path,
         "price_eur": pe,
@@ -2850,6 +2851,7 @@ async def _inoxmare_get_supplier_data_via_http(
         "stock": st,
         "raw_price": meta.get("raw_price"),
         "raw_stock": meta.get("raw_stock"),
+        "product_title": product_title or pdp_label or None,
         "pack_quantity": pv.get("pack_quantity"),
         "master_pack_quantity": pv.get("master_pack_quantity"),
         "master_pack_price_eur": mc_pe,

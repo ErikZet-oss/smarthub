@@ -783,6 +783,9 @@ type PackagingVariantRow = {
   /** Inoxmare HTTP: Magento ``product`` ID a relatívna cesta PDP. */
   inoxmare_product_id?: string | null;
   inoxmare_referer_path?: string | null;
+  /** Schaef HTTP: item_id a cesta PDP pre POST košíka. */
+  schaef_item_id?: string | null;
+  schaef_referer_path?: string | null;
   /** Inoxmare: ks v Master Cartone (fa-cubes / hidden mc-qty). */
   master_pack_quantity?: number | null;
   /** Inoxmare: cena za Master Carton (informatívne, košík ostáva na box cene). */
@@ -963,6 +966,29 @@ function supplierNameIsInoxmare(name: string | null | undefined): boolean {
   return c.includes("inoxmare") || c === "inox";
 }
 
+/** Inox / Schaef: v stĺpci Balenie názov produktu, nie placeholder dodávateľa. */
+const GENERIC_VARIANT_LABEL_BLOCKLIST = new Set([
+  "inoxmare",
+  "schäfer-peters",
+  "schaefer-peters",
+  "schafer-peters",
+]);
+
+function supplierVariantProductLabel(
+  scrape: SupplierScrapeState | undefined,
+  pv: PackagingVariantRow,
+): string {
+  const row = (pv.label || "").trim();
+  if (row && !GENERIC_VARIANT_LABEL_BLOCKLIST.has(row.toLowerCase())) {
+    return row;
+  }
+  const title = (scrape?.product_title || "").trim();
+  if (title) {
+    return title;
+  }
+  return row || "—";
+}
+
 function supplierNameIsSchachermayer(name: string | null | undefined): boolean {
   const c = supplierNameCompactLower(name);
   return c.includes("schachermayer") || c.includes("schachermayercom");
@@ -1026,7 +1052,8 @@ function supplierUsesHasplStylePackLabel(name: string | null | undefined): boole
     supplierNameIsHaspl(name) ||
     supplierNameIsHopefix(name) ||
     supplierNameIsFabory(name) ||
-    supplierNameIsInoxmare(name)
+    supplierNameIsInoxmare(name) ||
+    supplierNameIsSchaef(name)
   );
 }
 
@@ -1674,6 +1701,21 @@ function ProductSupplierExpandedTableRow({
                                                 ),
                                             ),
                                         );
+                                      const schaefHttpVariants =
+                                        Boolean(
+                                          scrape &&
+                                            !scrape.loading &&
+                                            supplierNameIsSchaef(
+                                              offer.supplier,
+                                            ) &&
+                                            Array.isArray(pvars) &&
+                                            pvars.length >= 1 &&
+                                            pvars.some((pv) =>
+                                              Boolean(
+                                                (pv.schaef_item_id || "").trim(),
+                                              ),
+                                            ),
+                                        );
                                       const argipHttpVariants =
                                         Boolean(
                                           scrape &&
@@ -1694,6 +1736,7 @@ function ProductSupplierExpandedTableRow({
                                         hopefixHttpVariants ||
                                         hasplHttpVariants ||
                                         inoxmareHttpVariants ||
+                                        schaefHttpVariants ||
                                         argipHttpVariants;
                                       /** Hopefix: HTTP môže vrátiť variant bez product_id — stále treba riadok pre živú cenu/sklad. */
                                       const hopefixHasPackagingFromScrape =
@@ -2290,7 +2333,19 @@ function ProductSupplierExpandedTableRow({
                                                                   offer.supplier,
                                                                 ) ? (
                                                                 <HasplVariantLabelCell
-                                                                  label={pv.label}
+                                                                  label={
+                                                                    supplierNameIsInoxmare(
+                                                                      offer.supplier,
+                                                                    ) ||
+                                                                    supplierNameIsSchaef(
+                                                                      offer.supplier,
+                                                                    )
+                                                                      ? supplierVariantProductLabel(
+                                                                          scrape,
+                                                                          pv,
+                                                                        )
+                                                                      : pv.label
+                                                                  }
                                                                   packQuantity={
                                                                     pv.pack_quantity
                                                                   }
@@ -2501,7 +2556,19 @@ function ProductSupplierExpandedTableRow({
                                                                 offer.supplier,
                                                               ) ? (
                                                               <HasplVariantLabelCell
-                                                                label={pv.label}
+                                                                label={
+                                                                  supplierNameIsInoxmare(
+                                                                    offer.supplier,
+                                                                  ) ||
+                                                                  supplierNameIsSchaef(
+                                                                    offer.supplier,
+                                                                  )
+                                                                    ? supplierVariantProductLabel(
+                                                                        scrape,
+                                                                        pv,
+                                                                      )
+                                                                    : pv.label
+                                                                }
                                                                 packQuantity={
                                                                   pv.pack_quantity
                                                                 }
@@ -3072,6 +3139,7 @@ function ProductSupplierExpandedTableRow({
                                                             ? selVi
                                                             : usesHttpCartVariants &&
                                                                 (inoxmareHttpVariants ||
+                                                                  schaefHttpVariants ||
                                                                   argipHttpVariants)
                                                               ? selVi
                                                               : null,
@@ -3172,6 +3240,16 @@ function ProductSupplierExpandedTableRow({
                                                           inoxmareHttpVariants &&
                                                             activePv
                                                             ? (activePv.inoxmare_referer_path ??
+                                                              null)
+                                                            : null,
+                                                          schaefHttpVariants &&
+                                                            activePv
+                                                            ? (activePv.schaef_item_id ??
+                                                              null)
+                                                            : null,
+                                                          schaefHttpVariants &&
+                                                            activePv
+                                                            ? (activePv.schaef_referer_path ??
                                                               null)
                                                             : null,
                                                         )
@@ -4339,6 +4417,7 @@ export default function Home() {
                   Boolean((row.hopefix_product_id || "").trim()) ||
                   Boolean((row.haspl_variant_code || "").trim()) ||
                   Boolean((row.inoxmare_product_id || "").trim()) ||
+                  Boolean((row.schaef_item_id || "").trim()) ||
                   Boolean((row.argip_sku || "").trim()),
               ));
           if (pvarsNeedVariantPick) {
@@ -5021,6 +5100,8 @@ export default function Home() {
     hasplVariantCode: string | null = null,
     inoxmareProductId: string | null = null,
     inoxmareRefererPath: string | null = null,
+    schaefItemId: string | null = null,
+    schaefRefererPath: string | null = null,
   ) => {
     const feedbackKey = cartStorageKey(supplierId, supplierCode, null);
     const qty =
@@ -5044,7 +5125,8 @@ export default function Home() {
       mekrsProductVariantId?.trim() ||
       hopefixProductId?.trim() ||
       hasplVariantCode?.trim() ||
-      inoxmareProductId?.trim()
+      inoxmareProductId?.trim() ||
+      schaefItemId?.trim()
         ? "Pridávam do košíka (API)…"
         : "Spúšťam prehliadač…";
     setCartFeedback((prev) => ({
@@ -5073,6 +5155,8 @@ export default function Home() {
           haspl_variant_code: hasplVariantCode?.trim() || null,
           inoxmare_product_id: inoxmareProductId?.trim() || null,
           inoxmare_referer_path: inoxmareRefererPath?.trim() || null,
+          schaef_item_id: schaefItemId?.trim() || null,
+          schaef_referer_path: schaefRefererPath?.trim() || null,
         }),
       });
       const parsed = await readApiJsonOrText(response);

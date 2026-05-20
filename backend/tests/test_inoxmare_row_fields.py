@@ -63,3 +63,22 @@ def test_inoxmare_not_login_row_keeps_pack_quantities_without_prices() -> None:
     assert rf["master_pack_price_eur"] is None
     assert rf["stock"] is None
     assert "log in" in (rf["raw_stock"] or "").lower()
+
+
+def test_inoxmare_product_title_from_pdp_html() -> None:
+    from pathlib import Path
+
+    from app.services.inoxmare_http_client import (
+        parse_inoxmare_pdp,
+        parse_inoxmare_product_title,
+    )
+
+    html = Path(__file__).resolve().parents[1] / "data" / "tmp_inoxmare_pdp.html"
+    if not html.is_file():
+        return
+    raw = html.read_text(encoding="utf-8", errors="replace")
+    title = parse_inoxmare_product_title(raw)
+    assert title == "DIN 933/ISO4017 sim. UNI 5739 Hexagon screw"
+    meta = parse_inoxmare_pdp(raw, product_code="57390407002")
+    assert meta.get("product_title") == title
+    assert meta.get("pdp_label") == "SCR. DIN933/ISO4017-4X70-A2-70"

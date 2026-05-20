@@ -111,6 +111,22 @@ _CANONICAL_URL_RE = re.compile(
     r'rel=["\']canonical["\']\s+href=["\']([^"\']+)["\']',
     re.IGNORECASE,
 )
+_PRODUCT_NAME_CONTENT_RE = re.compile(
+    r'itemprop=["\']name["\']\s+content=["\']([^"\']+)["\']',
+    re.IGNORECASE,
+)
+_PRODUCT_HEADLINE_RE = re.compile(
+    r'class=["\']itemcardHeadline["\'][^>]*>\s*([^<]+)',
+    re.IGNORECASE,
+)
+_PRODUCT_TITLE_CLASS_RE = re.compile(
+    r'class=["\'][^"\']*(?:productTitle|itemcard__title|itemcardTitle)[^"\']*["\'][^>]*>\s*([^<]+)',
+    re.IGNORECASE,
+)
+_PAGE_H1_RE = re.compile(
+    r"<h1[^>]*>\s*([^<]{3,240})",
+    re.IGNORECASE,
+)
 _INSPECTION_PERF_RE = re.compile(
     r"input_ihk_certificate_\d+",
     re.IGNORECASE,
@@ -190,7 +206,54 @@ def _strip_html(text: str) -> str:
     return re.sub(r"\s+", " ", s).strip()
 
 
-def schaef_parse_pdp_html(html: str) -> dict[str, Any]:
+def schaef_title_from_pdp_path(path: str) -> Optional[str]:
+    """Z URL slugu typu ``din-933-a2-70-m-12x40-p133791`` — záložný názov."""
+    m = re.search(r"/([^/?#]+)-p\d+/?", path or "", re.I)
+    if not m:
+        return None
+    slug = m.group(1).strip()
+    if not slug or slug.isdigit():
+        return None
+    title = re.sub(r"\s+", " ", slug.replace("-", " ")).strip().upper()
+    return title if len(title) >= 3 else None
+
+
+def schaef_parse_product_title(
+    html: str,
+    *,
+    product_title_hint: Optional[str] = None,
+    pdp_path: Optional[str] = None,
+) -> Optional[str]:
+    hint = (product_title_hint or "").strip()
+    if hint:
+        return hint
+    for pat in (
+        _PRODUCT_NAME_CONTENT_RE,
+        _PRODUCT_HEADLINE_RE,
+        _PRODUCT_TITLE_CLASS_RE,
+        _PAGE_H1_RE,
+    ):
+        m = pat.search(html or "")
+        if not m:
+            continue
+        title = _strip_html(m.group(1))
+        low = title.lower()
+        if title and low not in (
+            "schäfer-peters",
+            "schaefer-peters",
+            "schafer-peters",
+            "schäfer + peters",
+        ):
+            return title
+    return schaef_title_from_pdp_path(pdp_path or "")
+
+
+def schaef_parse_pdp_html(
+    html: str,
+    *,
+    product_title_hint: Optional[str] = None,
+    pdp_path: Optional[str] = None,
+) -> dict[str, Any]:
     """
     Extrahuje cenu, sklad, pack_quantity a ``item_id`` (potrebné pre košík).
 
@@ -307,7 +370,19 @@ def schaef_parse_pdp_html(html: str) -> dict[str, Any]:
         if path:
             canonical_path = path
 
-    label = supplier_label or "Schäfer-Peters"
+    product_title = schaef_parse_product_title(
+        html,
+        product_title_hint=product_title_hint,
+        pdp_path=pdp_path or canonical_path,
+    )
+    display_label = product_title or supplier_label
+    if not display_label or display_label.lower() in (
+        "schäfer-peters",
+        "schaefer-peters",
+        "schafer-peters",
+    ):
+        display_label = product_title or supplier_label or None
+
     if pack_quantity > 1:
         packaging_label = f"{pack_quantity} ks"
     else:
@@ -320,7 +395,7 @@ def schaef_parse_pdp_html(html: str) -> dict[str, Any]:
         raw_pack_quantity = f"Min. {order_min} ks · krok {order_step} ks"
 
     variant: dict[str, Any] = {
-        "label": label,
+        "label": display_label,
         "pack_quantity": pack_quantity,
         "price_eur": price_eur,
         "raw_price": raw_price,
@@ -331,7 +406,8 @@ def schaef_parse_pdp_html(html: str) -> dict[str, Any]:
         "packaging_label": packaging_label,
         "schaef_item_id": item_id,
         "schaef_item_var_code": item_var_code,
-        "schaef_pdp_path": canonical_path,
+        "schaef_pdp_path": canonical_path or pdp_path,
+        "schaef_referer_path": canonical_path or pdp_path,
         "schaef_order_step": order_step,
         "schaef_order_min": order_min,
         "schaef_parcel_size": parcel_size,
@@ -345,12 +421,14 @@ def schaef_parse_pdp_html(html: str) -> dict[str, Any]:
         "pack_quantity": pack_quantity,
         "stock": stock,
         "raw_stock": raw_stock,
+        "product_title": product_title or display_label,
         "currency_code": "eur",
         "currency_symbol": "€",
         "packaging_variants": [variant],
         "schaef_item_id": item_id,
         "schaef_item_var_code": item_var_code,
-        "schaef_pdp_path": canonical_path,
+        "schaef_pdp_path": canonical_path or pdp_path,
+        "schaef_referer_path": canonical_path or pdp_path,
         "schaef_order_step": order_step,
         "schaef_order_min": order_min,
         "schaef_parcel_size": parcel_size,
@@ -630,7 +708,12 @@ class SchaefHttpClient:
                 return path
         return None
 
-    async def _search_to_pdp(self, supplier_code: str) -> Tuple[str, str]:
+    async def _search_to_pdp(
+        self,
+        supplier_code: str,
+        *,
+        algolia_hit: Optional[dict[str, Any]] = None,
+    ) -> Tuple[str, str]:
         """Vráti ``(pdp_path, html)``.
 
         Stratégia (najrýchlejšie → najpomalšie):
@@ -647,7 +730,7 @@ class SchaefHttpClient:
 
         # 1) Algolia: najspoľahlivejšia cesta. Stačí jeden POST a vieme
         # presný PDP path, ku ktorému prejdeme len pre live cenu/sklad.
-        hit = await self._algolia_find_product(raw_code)
+        hit = algolia_hit if algolia_hit is not None else await self._algolia_find_product(raw_code)
         if hit and isinstance(hit, dict):
             item_link = str(hit.get("itemLink") or "").strip()
             if item_link:
@@ -717,8 +800,16 @@ class SchaefHttpClient:
         self, supplier_code: str
     ) -> dict[str, Any]:
         """Spojí search → PDP → parse, vráti slovník v štandardnom tvare."""
-        pdp_path, body = await self._search_to_pdp(supplier_code)
-        data = schaef_parse_pdp_html(body)
+        hit = await self._algolia_find_product(supplier_code)
+        pdp_path, body = await self._search_to_pdp(supplier_code, algolia_hit=hit)
+        title_hint = None
+        if isinstance(hit, dict):
+            title_hint = str(hit.get("description") or hit.get("name") or "").strip() or None
+        data = schaef_parse_pdp_html(
+            body,
+            product_title_hint=title_hint,
+            pdp_path=pdp_path,
+        )
         if not data.get("schaef_pdp_path"):
             data["schaef_pdp_path"] = pdp_path
         if data.get("schaef_item_id") is None:
