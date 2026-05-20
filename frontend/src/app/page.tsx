@@ -2486,7 +2486,7 @@ function ProductSupplierExpandedTableRow({
                                                           >
                                                             <td
                                                               className={cn(
-                                                                "min-w-0 break-words px-1 py-0.5 align-middle text-[10px] leading-tight sm:px-2 sm:py-1.5 sm:text-[13px]",
+                                                                "min-w-0 break-words px-1 py-0.5 align-top text-[10px] leading-tight sm:px-2 sm:py-1.5 sm:text-[13px]",
                                                                 supplierNameIsMekrs(
                                                                   offer.supplier,
                                                                 ) ||
@@ -2542,7 +2542,7 @@ function ProductSupplierExpandedTableRow({
                                                                 `Variant ${vi + 1}`
                                                               )}
                                                             </td>
-                                                            <td className="px-1 py-0.5 align-middle tabular-nums text-[10px] text-slate-900 sm:px-2 sm:py-1.5 sm:text-[13px]">
+                                                            <td className="px-1 py-0.5 align-top tabular-nums text-[10px] text-slate-900 sm:px-2 sm:py-1.5 sm:text-[13px]">
                                                               {pv.price_eur !=
                                                               null ? (
                                                                 <>
@@ -2582,7 +2582,7 @@ function ProductSupplierExpandedTableRow({
                                                             </td>
                                                             <td
                                                               className={cn(
-                                                                "px-1 py-0.5 align-middle text-[10px] text-slate-800 sm:px-2 sm:py-1.5 sm:text-[13px]",
+                                                                "px-1 py-0.5 align-top text-[10px] text-slate-800 sm:px-2 sm:py-1.5 sm:text-[13px]",
                                                                 supplierNameIsFabory(
                                                                   offer.supplier,
                                                                 ) &&
@@ -2593,7 +2593,7 @@ function ProductSupplierExpandedTableRow({
                                                             >
                                                               {stockCell}
                                                             </td>
-                                                            <td className="px-0.5 py-0.5 align-middle sm:px-1.5 sm:py-1.5">
+                                                            <td className="px-0.5 py-0.5 align-top sm:px-1.5 sm:py-1.5">
                                                               <input
                                                                 id={inputId}
                                                                 type="radio"
