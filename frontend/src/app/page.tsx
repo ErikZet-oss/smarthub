@@ -1356,12 +1356,27 @@ function mekrsTotalStockDisplayText(
 function MekrsVariantLabelCell({
   label,
   packQuantity,
+  packageStockText,
 }: {
   label?: string | null;
   packQuantity?: number | null;
+  packageStockText?: string | null;
 }) {
   const { name, packText } = mekrsVariantNameAndPackLine(label, packQuantity);
-  return <VariantPackLabelRow name={name} packText={packText} />;
+  const baleniLine = (packageStockText ?? "").trim();
+  return (
+    <div className="flex min-w-0 flex-col gap-0.5">
+      <VariantPackLabelRow name={name} packText={packText} />
+      {baleniLine ? (
+        <span
+          className="text-[10px] font-normal leading-tight text-slate-600 sm:text-[11px]"
+          title={baleniLine}
+        >
+          {baleniLine}
+        </span>
+      ) : null}
+    </div>
+  );
 }
 
 /** Názov + ks v balení — množstvo vpravo v pevnom stĺpci (zarovnané medzi riadkami). */
@@ -2493,6 +2508,14 @@ function ProductSupplierExpandedTableRow({
                                                                   packQuantity={
                                                                     pv.pack_quantity
                                                                   }
+                                                                  packageStockText={
+                                                                    mekrsEffectivePackageStockText(
+                                                                      pv,
+                                                                      pvars,
+                                                                      scrape?.stock,
+                                                                    ) ??
+                                                                    pv.mekrs_package_stock_text
+                                                                  }
                                                                 />
                                                               ) : supplierUsesHasplStylePackLabel(
                                                                   offer.supplier,
@@ -2691,6 +2714,14 @@ function ProductSupplierExpandedTableRow({
                                                                 label={pv.label}
                                                                 packQuantity={
                                                                   pv.pack_quantity
+                                                                }
+                                                                packageStockText={
+                                                                  mekrsEffectivePackageStockText(
+                                                                    pv,
+                                                                    pvars,
+                                                                    scrape?.stock,
+                                                                  ) ??
+                                                                  pv.mekrs_package_stock_text
                                                                 }
                                                               />
                                                             ) : supplierUsesHasplStylePackLabel(
