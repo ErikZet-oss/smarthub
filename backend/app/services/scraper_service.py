@@ -7297,10 +7297,13 @@ class ScraperService:
                                 data["raw_pack_quantity"] = str(pq0)
                             if len(packaging_variants) > 1:
                                 data["packaging_variants"] = packaging_variants
-                            elif len(packaging_variants) == 1 and _supplier_is_fabory(
-                                supplier
+                            elif len(packaging_variants) == 1 and (
+                                _supplier_is_fabory(supplier)
+                                or _supplier_is_bmkco(supplier)
+                                or _supplier_is_halfmann(supplier)
+                                or _supplier_is_schachermayer(supplier)
                             ):
-                                # Fabory: jeden riadok z modalu — front-end zobrazí názov bez tabuľky (Mekrs má tabuľku).
+                                # Jeden riadok z HTTP/modálu — front-end tabuľka Balenie/Cena/Sklad.
                                 data["packaging_variants"] = packaging_variants
                             if _supplier_is_mekrs(supplier):
                                 _mekrs_apply_total_stock_for_display(

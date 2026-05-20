@@ -493,6 +493,7 @@ class SchachermayerHttpClient:
             "raw_stock": stock_text or (str(avail) if avail is not None else None),
             "schachermayer_article_nr": article_nr or None,
             "price_unit": "per_100_ks",
+            "currency_symbol": "€",
         }
         return {
             "price_eur": price_for_display,
@@ -506,6 +507,7 @@ class SchachermayerHttpClient:
             "logged_in": True,
             "schachermayer_via_http": True,
             "price_unit": "per_100_ks",
+            "currency_symbol": "€",
             "supplier_product_url": search_href,
         }
 

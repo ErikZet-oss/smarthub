@@ -563,6 +563,7 @@ class BmkcoHttpClient:
             "stock": stock,
             "raw_stock": str(stock_raw).strip() if stock_raw not in (None, "") else None,
             "bmkco_karta": karta or None,
+            "currency_symbol": "€",
         }
         return {
             "price_eur": price_eur,
@@ -575,4 +576,5 @@ class BmkcoHttpClient:
             "packaging_variants": [pv],
             "logged_in": True,
             "bmkco_via_http": True,
+            "currency_symbol": "€",
         }

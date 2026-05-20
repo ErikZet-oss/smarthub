@@ -966,12 +966,16 @@ function supplierNameIsInoxmare(name: string | null | undefined): boolean {
   return c.includes("inoxmare") || c === "inox";
 }
 
-/** Inox / Schaef: v stĺpci Balenie názov produktu, nie placeholder dodávateľa. */
+/** Inox / Schaef / HTTP tabuľka: v stĺpci Balenie názov produktu, nie placeholder dodávateľa. */
 const GENERIC_VARIANT_LABEL_BLOCKLIST = new Set([
   "inoxmare",
   "schäfer-peters",
   "schaefer-peters",
   "schafer-peters",
+  "bmco",
+  "bmkco",
+  "halfmann",
+  "schachermayer",
 ]);
 
 function supplierVariantProductLabel(
@@ -1010,8 +1014,47 @@ function supplierNameIsFabory(name: string | null | undefined): boolean {
   return supplierNameCompactLower(name).includes("fabory");
 }
 
+function supplierNameIsBmkco(name: string | null | undefined): boolean {
+  const c = supplierNameCompactLower(name);
+  return c.includes("bmkco") || c.includes("bmco");
+}
+
 function supplierNameIsHalfmann(name: string | null | undefined): boolean {
   return supplierNameCompactLower(name).includes("halfmann");
+}
+
+/** Fabory / BMCo / Halfmann / Schachermayer: jeden HTTP riadok → tabuľka Balenie/Cena/Sklad. */
+function supplierUsesSinglePackVariantTable(
+  name: string | null | undefined,
+): boolean {
+  return (
+    supplierNameIsFabory(name) ||
+    supplierNameIsBmkco(name) ||
+    supplierNameIsHalfmann(name) ||
+    supplierNameIsSchachermayer(name)
+  );
+}
+
+/** Názov produktu v stĺpci Balenie (nie duplicitne nad tabuľkou). */
+function supplierVariantTableHidesTitleAbove(
+  name: string | null | undefined,
+): boolean {
+  return (
+    supplierNameIsInoxmare(name) ||
+    supplierNameIsSchaef(name) ||
+    supplierUsesSinglePackVariantTable(name)
+  );
+}
+
+function variantTablePackLabel(
+  supplier: string | null | undefined,
+  scrape: SupplierScrapeState | undefined,
+  pv: PackagingVariantRow,
+): string {
+  if (supplierVariantTableHidesTitleAbove(supplier)) {
+    return supplierVariantProductLabel(scrape, pv);
+  }
+  return (pv.label || "").trim() || "—";
 }
 
 function supplierNameIsArgip(name: string | null | undefined): boolean {
@@ -1116,7 +1159,7 @@ function supplierUsesHasplStylePackLabel(name: string | null | undefined): boole
   return (
     supplierNameIsHaspl(name) ||
     supplierNameIsHopefix(name) ||
-    supplierNameIsFabory(name) ||
+    supplierUsesSinglePackVariantTable(name) ||
     supplierNameIsInoxmare(name) ||
     supplierNameIsSchaef(name)
   );
@@ -1140,13 +1183,13 @@ function scrapePriceUnitSuffix(
   if (u === "per_1_ks") {
     return " / 1 ks";
   }
-  if (u === "per_100_ks") {
+  if (u === "per_100_ks" || u === "100") {
     return compact ? SCRAPE_PRICE_DISPLAY_SUFFIX : " / 100 ks";
   }
   if (supplierNameIsArgip(supplierName)) {
     return compact ? SCRAPE_PRICE_DISPLAY_SUFFIX : " / 100 ks";
   }
-  if (supplierNameIsFabory(supplierName)) {
+  if (supplierNameIsFabory(supplierName) || supplierNameIsBmkco(supplierName)) {
     return "";
   }
   return SCRAPE_PRICE_DISPLAY_SUFFIX;
@@ -1805,11 +1848,11 @@ function ProductSupplierExpandedTableRow({
                                               ),
                                             ),
                                         );
-                                      const faboryVariantTable =
+                                      const singlePackVariantTable =
                                         Boolean(
                                           scrape &&
                                             !scrape.loading &&
-                                            supplierNameIsFabory(
+                                            supplierUsesSinglePackVariantTable(
                                               offer.supplier,
                                             ) &&
                                             Array.isArray(pvars) &&
@@ -1836,7 +1879,7 @@ function ProductSupplierExpandedTableRow({
                                         hasplHttpVariants ||
                                         inoxmareHttpVariants ||
                                         schaefHttpVariants ||
-                                        faboryVariantTable ||
+                                        singlePackVariantTable ||
                                         argipHttpVariants;
                                       /** Hopefix: HTTP môže vrátiť variant bez product_id — stále treba riadok pre živú cenu/sklad. */
                                       const hopefixHasPackagingFromScrape =
@@ -1854,7 +1897,7 @@ function ProductSupplierExpandedTableRow({
                                         multiPack ||
                                         usesHttpCartVariants ||
                                         hopefixHasPackagingFromScrape;
-                                      /** Inox/Schaef/Fabory: názov produktu len v stĺpci Balenie, nie duplicitne nad tabuľkou. */
+                                      /** Názov produktu len v stĺpci Balenie, nie duplicitne nad tabuľkou. */
                                       const showSupplierProductTitleAboveTable =
                                         Boolean(
                                           scrape &&
@@ -1863,9 +1906,9 @@ function ProductSupplierExpandedTableRow({
                                         ) &&
                                         !(
                                           showPackSelector &&
-                                          (supplierNameIsInoxmare(offer.supplier) ||
-                                            supplierNameIsSchaef(offer.supplier) ||
-                                            supplierNameIsFabory(offer.supplier))
+                                          supplierVariantTableHidesTitleAbove(
+                                            offer.supplier,
+                                          )
                                         );
                                       const selViRaw =
                                         cartKey && showPackSelector && pvars
@@ -2421,22 +2464,11 @@ function ProductSupplierExpandedTableRow({
                                                                   offer.supplier,
                                                                 ) ? (
                                                                 <HasplVariantLabelCell
-                                                                  label={
-                                                                    supplierNameIsInoxmare(
-                                                                      offer.supplier,
-                                                                    ) ||
-                                                                    supplierNameIsSchaef(
-                                                                      offer.supplier,
-                                                                    ) ||
-                                                                    supplierNameIsFabory(
-                                                                      offer.supplier,
-                                                                    )
-                                                                      ? supplierVariantProductLabel(
-                                                                          scrape,
-                                                                          pv,
-                                                                        )
-                                                                      : pv.label
-                                                                  }
+                                                                  label={variantTablePackLabel(
+                                                                    offer.supplier,
+                                                                    scrape,
+                                                                    pv,
+                                                                  )}
                                                                   packQuantity={
                                                                     pv.pack_quantity
                                                                   }
@@ -2637,22 +2669,11 @@ function ProductSupplierExpandedTableRow({
                                                                 offer.supplier,
                                                               ) ? (
                                                               <HasplVariantLabelCell
-                                                                label={
-                                                                  supplierNameIsInoxmare(
-                                                                    offer.supplier,
-                                                                  ) ||
-                                                                  supplierNameIsSchaef(
-                                                                    offer.supplier,
-                                                                  ) ||
-                                                                  supplierNameIsFabory(
-                                                                    offer.supplier,
-                                                                  )
-                                                                    ? supplierVariantProductLabel(
-                                                                        scrape,
-                                                                        pv,
-                                                                      )
-                                                                    : pv.label
-                                                                }
+                                                                label={variantTablePackLabel(
+                                                                  offer.supplier,
+                                                                  scrape,
+                                                                  pv,
+                                                                )}
                                                                 packQuantity={
                                                                   pv.pack_quantity
                                                                 }
@@ -4495,7 +4516,8 @@ export default function Home() {
           const pvarsNeedVariantPick =
             Array.isArray(pvars) &&
             (pvars.length > 1 ||
-              (supplierNameIsFabory(offer.supplier) && pvars.length >= 1) ||
+              (supplierUsesSinglePackVariantTable(offer.supplier) &&
+                pvars.length >= 1) ||
               pvars.some(
                 (row) =>
                   Boolean((row.mekrs_variant_id || "").trim()) ||
