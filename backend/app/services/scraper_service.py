@@ -2822,6 +2822,7 @@ async def _inoxmare_get_supplier_data_via_http(
     pq = meta.get("pack_quantity")
     mq = meta.get("master_pack_quantity")
     pal = meta.get("pallet_pack_quantity")
+    mc_pe = meta.get("master_pack_price_eur")
     pack_parts: list[str] = []
     if isinstance(pq, int) and pq > 0:
         pack_parts.append(f"Box {pq} ks")
@@ -2836,9 +2837,12 @@ async def _inoxmare_get_supplier_data_via_http(
         "inoxmare_referer_path": path,
         "price_eur": pe,
         "raw_price": meta.get("raw_price"),
+        "master_pack_price_eur": mc_pe,
+        "master_pack_raw_price": meta.get("master_pack_raw_price"),
         "stock": st,
         "raw_stock": meta.get("raw_stock"),
         "pack_quantity": pq if isinstance(pq, int) and pq > 0 else None,
+        "master_pack_quantity": mq if isinstance(mq, int) and mq > 0 else None,
         "raw_pack_quantity": raw_pack or (str(pq) if isinstance(pq, int) and pq > 0 else ""),
     }
     data: dict[str, Any] = {
@@ -2847,6 +2851,9 @@ async def _inoxmare_get_supplier_data_via_http(
         "raw_price": meta.get("raw_price"),
         "raw_stock": meta.get("raw_stock"),
         "pack_quantity": pv.get("pack_quantity"),
+        "master_pack_quantity": pv.get("master_pack_quantity"),
+        "master_pack_price_eur": mc_pe,
+        "master_pack_raw_price": meta.get("master_pack_raw_price"),
         "raw_pack_quantity": pv.get("raw_pack_quantity") or "",
         "packaging_variants": [pv],
         "logged_in": True,

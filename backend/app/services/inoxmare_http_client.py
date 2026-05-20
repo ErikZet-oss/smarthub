@@ -381,6 +381,75 @@ def _inoxmare_extract_product_row_html(html: str, product_code: str) -> Optional
     return matches[-1].group(0)
 
 
+def _inoxmare_extract_td_content(row_html: str, class_token: str) -> Optional[str]:
+    m = re.search(
+        rf'<td[^>]*class\s*=\s*["\'][^"\']*\b{re.escape(class_token)}\b[^"\']*["\'][^>]*>'
+        rf"([\s\S]*?)</td>",
+        row_html,
+        re.I,
+    )
+    return m.group(1) if m else None
+
+
+def _inoxmare_row_hidden_numeric(row_html: str, id_suffix: str) -> Optional[float]:
+    for pat in (
+        rf'<input[^>]*id\s*=\s*["\'][^"\']*{re.escape(id_suffix)}["\'][^>]*value\s*=\s*["\']([^"\']+)["\']',
+        rf'<input[^>]*value\s*=\s*["\']([^"\']+)["\'][^>]*id\s*=\s*["\'][^"\']*{re.escape(id_suffix)}["\']',
+    ):
+        m = re.search(pat, row_html, re.I)
+        if not m:
+            continue
+        raw = (m.group(1) or "").strip().replace(",", ".")
+        try:
+            v = float(raw)
+            if 0 < v < 1_000_000:
+                return v
+        except ValueError:
+            continue
+    return None
+
+
+def _inoxmare_parse_price_fragment(fragment: str) -> tuple[Optional[float], Optional[str]]:
+    cleaned = _inoxmare_row_remove_old_price_markup(fragment or "")
+    amounts: list[tuple[float, str]] = []
+    for m in re.finditer(
+        r'data-price-amount\s*=\s*["\']([\d.]+)["\'][^>]{0,240}?'
+        r'data-price-type\s*=\s*["\']finalPrice["\']',
+        cleaned,
+        re.I | re.DOTALL,
+    ):
+        try:
+            v = float(m.group(1))
+            if 0 < v < 1_000_000:
+                amounts.append((v, m.group(0)[:100]))
+        except ValueError:
+            continue
+    for m in re.finditer(
+        r'data-price-type\s*=\s*["\']finalPrice["\'][^>]{0,240}?'
+        r'data-price-amount\s*=\s*["\']([\d.]+)["\']',
+        cleaned,
+        re.I | re.DOTALL,
+    ):
+        try:
+            v = float(m.group(1))
+            if 0 < v < 1_000_000:
+                amounts.append((v, m.group(0)[:100]))
+        except ValueError:
+            continue
+    if amounts:
+        v0, r0 = amounts[0]
+        return round(v0, 4), r0
+    for m in re.finditer(r"(\d+[.,]\d{1,4})\s*(?:€|&euro;|EUR)", cleaned, re.I):
+        t = m.group(1).replace(",", ".")
+        try:
+            v = float(t)
+            if 0 < v < 100_000:
+                return round(v, 4), m.group(0).strip()[:80]
+        except ValueError:
+            continue
+    return None, None
+
+
 def _inoxmare_row_remove_old_price_markup(row_html: str) -> str:
     out = row_html
     for _ in range(24):
@@ -439,6 +508,8 @@ def parse_inoxmare_row_fields(row_html: str) -> dict[str, Any]:
         "pallet_pack_quantity": None,
         "price_eur": None,
         "raw_price": None,
+        "master_pack_price_eur": None,
+        "master_pack_raw_price": None,
         "stock": None,
         "raw_stock": None,
     }
@@ -456,6 +527,14 @@ def parse_inoxmare_row_fields(row_html: str) -> dict[str, Any]:
         out["pack_quantity"] = _inoxmare_parse_pack_level(descr, "box")
         out["master_pack_quantity"] = _inoxmare_parse_pack_level(descr, "master")
         out["pallet_pack_quantity"] = _inoxmare_parse_pack_level(descr, "pallet")
+        mc_hidden = _inoxmare_row_hidden_numeric(row_html, "-mc-qty")
+        if (
+            mc_hidden is not None
+            and mc_hidden >= 1
+            and isinstance(mc_hidden, float)
+            and mc_hidden == int(mc_hidden)
+        ):
+            out["master_pack_quantity"] = int(mc_hidden)
 
     if re.search(r'class\s*=\s*["\'][^"\']*not-login', row_html, re.I):
         nm = re.search(
@@ -491,50 +570,75 @@ def parse_inoxmare_row_fields(row_html: str) -> dict[str, Any]:
                     pass
                 break
 
+    box_td = _inoxmare_extract_td_content(row_html, "price-box")
+    mc_td = _inoxmare_extract_td_content(row_html, "price-mc")
+    box_pe, box_rp = (
+        _inoxmare_parse_price_fragment(box_td) if box_td else (None, None)
+    )
+    mc_pe, mc_rp = (
+        _inoxmare_parse_price_fragment(mc_td) if mc_td else (None, None)
+    )
+    if box_pe is None:
+        box_pe = _inoxmare_row_hidden_numeric(row_html, "-custom-price")
+        if box_pe is not None:
+            box_rp = f"hidden custom-price={box_pe}"
+    if mc_pe is None:
+        mc_pe = _inoxmare_row_hidden_numeric(row_html, "-custom-price-mc")
+        if mc_pe is not None:
+            mc_rp = f"hidden custom-price-mc={mc_pe}"
+
     cleaned = _inoxmare_row_remove_old_price_markup(row_html)
-    amounts: list[tuple[float, str]] = []
-    for m in re.finditer(
-        r'data-price-amount\s*=\s*["\']([\d.]+)["\'][^>]{0,240}?'
-        r'data-price-type\s*=\s*["\']finalPrice["\']',
-        cleaned,
-        re.I | re.DOTALL,
-    ):
-        try:
-            v = float(m.group(1))
-            if 0 < v < 1_000_000:
-                amounts.append((v, m.group(0)[:100]))
-        except ValueError:
-            continue
-    for m in re.finditer(
-        r'data-price-type\s*=\s*["\']finalPrice["\'][^>]{0,240}?'
-        r'data-price-amount\s*=\s*["\']([\d.]+)["\']',
-        cleaned,
-        re.I | re.DOTALL,
-    ):
-        try:
-            v = float(m.group(1))
-            if 0 < v < 1_000_000:
-                amounts.append((v, m.group(0)[:100]))
-        except ValueError:
-            continue
-    if amounts:
-        v0, r0 = amounts[0]
-        out["price_eur"] = round(v0, 4)
-        out["raw_price"] = r0
-    else:
-        euro: list[tuple[float, str]] = []
+    if box_pe is None or mc_pe is None:
+        amounts: list[tuple[float, str]] = []
+        for m in re.finditer(
+            r'data-price-amount\s*=\s*["\']([\d.]+)["\'][^>]{0,240}?'
+            r'data-price-type\s*=\s*["\']finalPrice["\']',
+            cleaned,
+            re.I | re.DOTALL,
+        ):
+            try:
+                v = float(m.group(1))
+                if 0 < v < 1_000_000:
+                    amounts.append((v, m.group(0)[:100]))
+            except ValueError:
+                continue
+        for m in re.finditer(
+            r'data-price-type\s*=\s*["\']finalPrice["\'][^>]{0,240}?'
+            r'data-price-amount\s*=\s*["\']([\d.]+)["\']',
+            cleaned,
+            re.I | re.DOTALL,
+        ):
+            try:
+                v = float(m.group(1))
+                if 0 < v < 1_000_000:
+                    amounts.append((v, m.group(0)[:100]))
+            except ValueError:
+                continue
+        if box_pe is None and amounts:
+            v0, r0 = amounts[0]
+            box_pe, box_rp = round(v0, 4), r0
+        if mc_pe is None and len(amounts) >= 2:
+            v1, r1 = amounts[1]
+            mc_pe, mc_rp = round(v1, 4), r1
+
+    if box_pe is None and mc_pe is None:
         for m in re.finditer(r"(\d+[.,]\d{1,4})\s*(?:€|&euro;|EUR)", cleaned, re.I):
             t = m.group(1).replace(",", ".")
             try:
                 v = float(t)
                 if 0 < v < 100_000:
-                    euro.append((v, m.group(0).strip()[:80]))
+                    box_pe = round(v, 4)
+                    box_rp = m.group(0).strip()[:80]
+                    break
             except ValueError:
                 continue
-        if euro:
-            v0, r0 = euro[0]
-            out["price_eur"] = round(v0, 4)
-            out["raw_price"] = r0
+
+    if box_pe is not None:
+        out["price_eur"] = box_pe
+        out["raw_price"] = box_rp
+    if mc_pe is not None:
+        out["master_pack_price_eur"] = mc_pe
+        out["master_pack_raw_price"] = mc_rp
 
     return out
 
@@ -620,6 +724,8 @@ def parse_inoxmare_pdp(html: str, product_code: Optional[str] = None) -> dict[st
             "pallet_pack_quantity": rf.get("pallet_pack_quantity"),
             "price_eur": rf.get("price_eur"),
             "raw_price": rf.get("raw_price"),
+            "master_pack_price_eur": rf.get("master_pack_price_eur"),
+            "master_pack_raw_price": rf.get("master_pack_raw_price"),
             "stock": rf.get("stock"),
             "raw_stock": rf.get("raw_stock"),
         }

@@ -783,6 +783,11 @@ type PackagingVariantRow = {
   /** Inoxmare HTTP: Magento ``product`` ID a relatívna cesta PDP. */
   inoxmare_product_id?: string | null;
   inoxmare_referer_path?: string | null;
+  /** Inoxmare: ks v Master Cartone (fa-cubes / hidden mc-qty). */
+  master_pack_quantity?: number | null;
+  /** Inoxmare: cena za Master Carton (informatívne, košík ostáva na box cene). */
+  master_pack_price_eur?: number | null;
+  master_pack_raw_price?: string | null;
   /** Haspl: „Balení obsahuje …“ z API (voliteľné, v tabuľke sa zobrazí skôr ``pack_quantity``). */
   raw_pack_quantity?: string | null;
   /** Mekrs API: napr. eur / czk — číslo v price_eur je v tejto mene */
@@ -813,6 +818,11 @@ type SupplierScrapeState = {
   /** Počet kusov v balení (z e-shopu), ak je v JSON pack_quantity_selector. */
   pack_quantity?: number | null;
   raw_pack_quantity?: string | null;
+  /** Inoxmare: ks v Master Cartone. */
+  master_pack_quantity?: number | null;
+  /** Inoxmare: cena za Master Carton. */
+  master_pack_price_eur?: number | null;
+  master_pack_raw_price?: string | null;
   /** Argip: ks v balení na e-shope (pre nápovedu pri košíku). */
   shop_pack_quantity?: number | null;
   /** Viac možností balenia — zobrazí sa viac košíkov v detaile. */
@@ -1280,6 +1290,52 @@ function HasplVariantLabelCell({
       {packText ? (
         <span className="shrink-0 whitespace-nowrap text-xs font-semibold tabular-nums text-slate-900">
           {packText}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+/** Inoxmare: druhý riadok ceny — Master Carton (informatívne). */
+function InoxmareMasterCartonLine({
+  masterPackPriceEur,
+  masterPackQuantity,
+  currencySymbol,
+}: {
+  masterPackPriceEur?: number | null;
+  masterPackQuantity?: number | null;
+  currencySymbol?: string | null;
+}) {
+  const mcQty =
+    typeof masterPackQuantity === "number" &&
+    Number.isFinite(masterPackQuantity) &&
+    masterPackQuantity >= 1
+      ? Math.floor(masterPackQuantity)
+      : null;
+  const mcPrice =
+    typeof masterPackPriceEur === "number" &&
+    Number.isFinite(masterPackPriceEur) &&
+    masterPackPriceEur > 0
+      ? masterPackPriceEur
+      : null;
+  if (mcQty == null && mcPrice == null) {
+    return null;
+  }
+  return (
+    <div className="mt-0.5 text-[9px] font-normal leading-snug text-slate-500 sm:text-[10px]">
+      <span className="font-medium text-slate-600">Master Carton</span>
+      {mcPrice != null ? (
+        <>
+          {": "}
+          <span className="tabular-nums text-slate-700">
+            {formatScrapePriceAmount(mcPrice)} {currencySymbol?.trim() || "€"}
+          </span>
+        </>
+      ) : null}
+      {mcQty != null ? (
+        <span className="tabular-nums text-slate-600">
+          {mcPrice != null ? " · " : ": "}
+          {formatKsQuantity(mcQty)}
         </span>
       ) : null}
     </div>
@@ -2274,6 +2330,22 @@ function ProductSupplierExpandedTableRow({
                                                                       false,
                                                                     )}
                                                                   </span>
+                                                                  {supplierNameIsInoxmare(
+                                                                    offer.supplier,
+                                                                  ) ? (
+                                                                    <InoxmareMasterCartonLine
+                                                                      masterPackPriceEur={
+                                                                        pv.master_pack_price_eur
+                                                                      }
+                                                                      masterPackQuantity={
+                                                                        pv.master_pack_quantity
+                                                                      }
+                                                                      currencySymbol={
+                                                                        pv.currency_symbol ??
+                                                                        scrape?.currency_symbol
+                                                                      }
+                                                                    />
+                                                                  ) : null}
                                                                 </>
                                                               ) : (
                                                                 "—"
@@ -2467,6 +2539,22 @@ function ProductSupplierExpandedTableRow({
                                                                           false,
                                                                         )}
                                                                       </span>
+                                                                      {supplierNameIsInoxmare(
+                                                                        offer.supplier,
+                                                                      ) ? (
+                                                                        <InoxmareMasterCartonLine
+                                                                          masterPackPriceEur={
+                                                                            pv.master_pack_price_eur
+                                                                          }
+                                                                          masterPackQuantity={
+                                                                            pv.master_pack_quantity
+                                                                          }
+                                                                          currencySymbol={
+                                                                            pv.currency_symbol ??
+                                                                            scrape?.currency_symbol
+                                                                          }
+                                                                        />
+                                                                      ) : null}
                                                                     </>
                                                                   ) : (
                                                                     <span className="text-slate-500">
