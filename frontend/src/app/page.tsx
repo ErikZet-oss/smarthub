@@ -659,16 +659,17 @@ function supplierNameCompactLower(name: string | null | undefined): string {
 function supplierShowsScrapeLoginBadge(supplierName: string): boolean {
   const c = supplierNameCompactLower(supplierName);
   return (
-    c.includes("fabory") ||
+    supplierNameIsFabory(supplierName) ||
     c.includes("mekrs") ||
-    c.includes("hopefix") ||
-    c.includes("haspl") ||
-    c.includes("inoxmare") ||
+    supplierNameIsHopefix(supplierName) ||
+    supplierNameIsHaspl(supplierName) ||
+    supplierNameIsInoxmare(supplierName) ||
     c.includes("bmkco") ||
     c.includes("bmco") ||
-    c.includes("halfmann") ||
-    c.includes("argip") ||
-    c.includes("schachermayer") ||
+    supplierNameIsHalfmann(supplierName) ||
+    supplierNameIsArgip(supplierName) ||
+    supplierNameIsSchachermayer(supplierName) ||
+    supplierNameIsSchaef(supplierName) ||
     c.includes("valenta")
   );
 }
@@ -950,6 +951,23 @@ function supplierNameIsInoxmare(name: string | null | undefined): boolean {
   const c = supplierNameCompactLower(name);
   /** „Inox“ = skrátený názov pre Inox Mare (inoxmare.com) v zozname dodávateľov. */
   return c.includes("inoxmare") || c === "inox";
+}
+
+function supplierNameIsSchachermayer(name: string | null | undefined): boolean {
+  const c = supplierNameCompactLower(name);
+  return c.includes("schachermayer") || c.includes("schachermayercom");
+}
+
+function supplierNameIsSchaef(name: string | null | undefined): boolean {
+  const c = (name ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+  return (
+    c.includes("schaef") ||
+    c.includes("schaefer") ||
+    c.includes("schaeffer") ||
+    c.includes("schaeferpeters")
+  );
 }
 
 function supplierNameIsFabory(name: string | null | undefined): boolean {

@@ -117,6 +117,22 @@ def _mekrs_code_key(text: str) -> str:
     return re.sub(r"[.\-_/,\s]+", "", t)
 
 
+def _mekrs_sku2_is_catalog_code(text: str) -> bool:
+    """B2B API občas vráti sku2 „svc“ namiesto katalógového čísla."""
+    t = (text or "").strip().lower()
+    if not t or t in ("svc", "n/a", "-"):
+        return False
+    key = _mekrs_code_key(t)
+    return len(key) >= 8 and any(ch.isdigit() for ch in key)
+
+
+def _mekrs_resolve_sku2(*, product_sku: str, ft_sku: str, query: str) -> str:
+    for candidate in (product_sku, ft_sku, query):
+        if _mekrs_sku2_is_catalog_code(candidate):
+            return candidate.strip()
+    return (query or product_sku or ft_sku or "").strip()
+
+
 def _mekrs_code_keys_compatible(query_key: str, sku_key: str) -> bool:
     """
     Presná zhoda alebo bezpečný prefix (DB „…200“ vs Mekrs „…200.000“).
@@ -209,7 +225,7 @@ def _fulltext_items_for_code(
         return hit
     if fulltext_count == 1 and len(items) == 1:
         it = items[0]
-        if isinstance(it, dict) and it.get("slug") and it.get("sku2"):
+        if isinstance(it, dict) and it.get("slug"):
             return _fulltext_items_dedupe_by_slug([it])
     return []
 
@@ -513,11 +529,12 @@ class MekrsHttpClient:
                 pid = pj.get("id")
                 if not pid:
                     return
+                ft_hit = slug_to_fulltext_item.get(slug) or {}
                 sku2_p = str(pj.get("sku2") or "").strip()
-                if code_key and not _mekrs_code_keys_compatible(
-                    code_key, _mekrs_code_key(sku2_p)
-                ):
-                    return
+                sku2_ft = str(ft_hit.get("sku2") or "").strip()
+                sku2_out = _mekrs_resolve_sku2(
+                    product_sku=sku2_p, ft_sku=sku2_ft, query=code
+                )
                 vr = await self._client.get(
                     f"/api/product/{pid}/variants",
                     headers={"Referer": f"{self.base_url}/produkty/{slug}"},
@@ -561,7 +578,7 @@ class MekrsHttpClient:
                             "product_id": str(pid),
                             "product_slug": slug,
                             "product_title": ptitle or slug,
-                            "sku2": sku2_p,
+                            "sku2": sku2_out,
                             "din": din,
                             "unpack_title": (
                                 None
@@ -626,7 +643,7 @@ class MekrsHttpClient:
                             "product_id": str(pid),
                             "product_slug": slug,
                             "product_title": ptitle or slug,
-                            "sku2": sku2_p,
+                            "sku2": sku2_out,
                             "din": din,
                             "unpack_title": (
                                 None

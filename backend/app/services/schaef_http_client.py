@@ -355,6 +355,7 @@ def schaef_parse_pdp_html(html: str) -> dict[str, Any]:
         "schaef_order_min": order_min,
         "schaef_parcel_size": parcel_size,
         "schaef_via_http": True,
+        "logged_in": True,
     }
 
 
