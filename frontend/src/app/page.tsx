@@ -1031,19 +1031,85 @@ function faboryUiProductTitleOnly(raw: string): string {
   return (t || first).trim();
 }
 
+/** Fabory: text stavu skladu z e-shopu (Skladom, Nie je skladom, …), nie množstvo v ks. */
+function faboryStockDisplayText(
+  ...sources: Array<{ raw_stock?: string | null; stock?: number | null }>
+): string {
+  for (const src of sources) {
+    const raw = (src.raw_stock || "").trim();
+    if (raw) {
+      return raw;
+    }
+  }
+  for (const src of sources) {
+    const qty = src.stock;
+    if (qty != null && Number.isFinite(qty)) {
+      if (qty <= 0) {
+        return "Nie je skladom";
+      }
+      return "Skladom";
+    }
+  }
+  return "—";
+}
+
 /** Fabory: farba textu stavu skladu zo živého scrape. */
 function faboryStockDisplayClass(displayText: string): string | undefined {
   const s = displayText.trim().toLowerCase();
   if (!s) {
     return undefined;
   }
-  if (s.includes("nie je skladom") || s.includes("nie je na sklade")) {
+  if (
+    s.includes("nie je skladom") ||
+    s.includes("nie je na sklade") ||
+    s.includes("vypredan") ||
+    s.includes("nedostupn")
+  ) {
     return "font-medium text-red-600";
   }
-  if (s.includes("čiastočne skladom")) {
+  if (s.includes("čiastočne skladom") || s.includes("ciastocne skladom")) {
     return "font-medium text-orange-600";
   }
+  if (
+    s.includes("skladom") ||
+    s.includes("na sklade") ||
+    s.includes("dostupn")
+  ) {
+    return "font-medium text-emerald-700";
+  }
   return undefined;
+}
+
+/** Text bunky Sklad pre variant riadok (Fabory = status text; Mekrs = balení / ks). */
+function variantRowStockDisplayText(
+  supplier: string | null | undefined,
+  pv: PackagingVariantRow,
+  mekrsCtx?: {
+    allRows: PackagingVariantRow[];
+    totalStock: number | null | undefined;
+  },
+): string {
+  if (supplierNameIsMekrs(supplier)) {
+    return mekrsVariantStockDisplayText(
+      pv,
+      mekrsCtx?.allRows,
+      mekrsCtx?.totalStock,
+    );
+  }
+  if (supplierNameIsFabory(supplier)) {
+    return faboryStockDisplayText({
+      raw_stock: pv.raw_stock,
+      stock: pv.stock,
+    });
+  }
+  if (pv.stock != null) {
+    return formatKsQuantity(pv.stock);
+  }
+  const raw = (pv.raw_stock || "").trim();
+  if (raw) {
+    return formatDigitsInTextCsThousands(raw);
+  }
+  return "—";
 }
 
 /** Rovnaká kompaktná typografia bunky „Balenie“ ako Haspl (názov + ks). */
@@ -1196,17 +1262,35 @@ function mekrsVariantNameAndPackLine(
   return { name: name || cleaned, packText };
 }
 
+function mekrsVariantStockDisplayText(
+  pv: PackagingVariantRow,
+  allRows: PackagingVariantRow[] | null | undefined,
+  totalStock: number | null | undefined,
+): string {
+  const pkg =
+    mekrsEffectivePackageStockText(pv, allRows, totalStock) ??
+    (pv.mekrs_package_stock_text || "").trim();
+  if (pkg) {
+    return pkg;
+  }
+  const pq = pv.pack_quantity;
+  if (typeof pq === "number" && pq === 1 && totalStock != null && Number.isFinite(totalStock)) {
+    if (totalStock <= 0) {
+      return "Nie je skladom";
+    }
+    return formatKsQuantity(totalStock);
+  }
+  return "—";
+}
+
 function MekrsVariantLabelCell({
   label,
   packQuantity,
-  packageStockText,
 }: {
   label?: string | null;
   packQuantity?: number | null;
-  packageStockText?: string | null;
 }) {
   const { name, packText } = mekrsVariantNameAndPackLine(label, packQuantity);
-  const pkgLine = (packageStockText ?? "").trim();
   return (
     <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
       <span
@@ -1218,14 +1302,6 @@ function MekrsVariantLabelCell({
       {packText ? (
         <span className="shrink-0 whitespace-nowrap text-xs font-semibold tabular-nums text-slate-900">
           {packText}
-        </span>
-      ) : null}
-      {pkgLine ? (
-        <span
-          className="min-w-0 max-w-full text-[11px] font-normal leading-tight text-slate-600"
-          title={pkgLine}
-        >
-          {pkgLine}
         </span>
       ) : null}
     </div>
@@ -1577,28 +1653,41 @@ function ProductSupplierExpandedTableRow({
                                       const stockDisplayText =
                                         scrape &&
                                         !scrape.loading &&
-                                        scrape.stock != null
-                                          ? formatKsQuantity(scrape.stock)
+                                        supplierNameIsFabory(offer.supplier)
+                                          ? faboryStockDisplayText(
+                                              {
+                                                raw_stock: scrape.raw_stock,
+                                                stock: scrape.stock,
+                                              },
+                                              {
+                                                raw_stock: scrapePv0?.raw_stock,
+                                                stock: scrapePv0?.stock,
+                                              },
+                                            )
                                           : scrape &&
                                               !scrape.loading &&
-                                              scrapePv0?.stock != null
-                                            ? formatKsQuantity(scrapePv0.stock)
+                                              scrape.stock != null
+                                            ? formatKsQuantity(scrape.stock)
                                             : scrape &&
                                                 !scrape.loading &&
-                                                scrape.raw_stock?.trim()
-                                              ? formatDigitsInTextCsThousands(
-                                                  scrape.raw_stock.trim(),
-                                                )
+                                                scrapePv0?.stock != null
+                                              ? formatKsQuantity(scrapePv0.stock)
                                               : scrape &&
                                                   !scrape.loading &&
-                                                  (scrapePv0?.raw_stock || "").trim()
+                                                  scrape.raw_stock?.trim()
                                                 ? formatDigitsInTextCsThousands(
-                                                    (scrapePv0?.raw_stock || "").trim(),
+                                                    scrape.raw_stock.trim(),
                                                   )
-                                                : typeof displayStock === "number" &&
-                                                    Number.isFinite(displayStock)
-                                                  ? formatKsQuantity(displayStock)
-                                                  : `${displayStock} ks`;
+                                                : scrape &&
+                                                    !scrape.loading &&
+                                                    (scrapePv0?.raw_stock || "").trim()
+                                                  ? formatDigitsInTextCsThousands(
+                                                      (scrapePv0?.raw_stock || "").trim(),
+                                                    )
+                                                  : typeof displayStock === "number" &&
+                                                      Number.isFinite(displayStock)
+                                                    ? formatKsQuantity(displayStock)
+                                                    : `${displayStock} ks`;
                                       const hasLivePriceSignal = Boolean(
                                         scrape &&
                                           !scrape.loading &&
@@ -1798,9 +1887,10 @@ function ProductSupplierExpandedTableRow({
                                         showPackSelector && pvars
                                           ? pvars[selVi]
                                           : null;
-                                      /** Mekrs: len súhrnný sklad (API už neposiela ks po variantoch). */
+                                      /** Mekrs: súhrnný sklad len mimo variant tabuľky. */
                                       const mekrsStockSummaryOnly =
-                                        supplierNameIsMekrs(offer.supplier);
+                                        supplierNameIsMekrs(offer.supplier) &&
+                                        !(showPackSelector && activePv);
                                       const hasplStockTextPerRow =
                                         supplierNameIsHaspl(offer.supplier);
                                       const rowPrice =
@@ -1830,13 +1920,24 @@ function ProductSupplierExpandedTableRow({
                                           : hasplStockTextPerRow && activePv
                                             ? activePv.raw_stock?.trim() || "—"
                                             : usesHttpCartVariants && activePv
-                                              ? activePv.stock != null
-                                                ? formatKsQuantity(activePv.stock)
-                                                : activePv.raw_stock?.trim()
-                                                  ? formatDigitsInTextCsThousands(
-                                                      activePv.raw_stock.trim(),
-                                                    )
-                                                  : "—"
+                                              ? supplierNameIsMekrs(offer.supplier)
+                                                ? mekrsVariantStockDisplayText(
+                                                    activePv,
+                                                    pvars,
+                                                    scrape?.stock,
+                                                  )
+                                                : supplierNameIsFabory(offer.supplier)
+                                                  ? faboryStockDisplayText({
+                                                      raw_stock: activePv.raw_stock,
+                                                      stock: activePv.stock,
+                                                    })
+                                                  : activePv.stock != null
+                                                    ? formatKsQuantity(activePv.stock)
+                                                    : activePv.raw_stock?.trim()
+                                                      ? formatDigitsInTextCsThousands(
+                                                          activePv.raw_stock.trim(),
+                                                        )
+                                                      : "—"
                                               : stockDisplayText;
                                       /** Hopefix/Mekrs HTTP: pri OOS môže mať súhrn 0 € / 0 ks len na scrape, nie v riadku variantu. */
                                       const rowPriceLive =
@@ -1879,14 +1980,23 @@ function ProductSupplierExpandedTableRow({
                                           : hasplStockTextPerRow && activePv
                                             ? Boolean(activePv.raw_stock?.trim())
                                             : usesHttpCartVariants && activePv
-                                              ? activePv.stock != null ||
-                                                Boolean(
-                                                  activePv.raw_stock?.trim(),
-                                                ) ||
-                                                (supplierNameIsHopefix(
-                                                  offer.supplier,
-                                                ) &&
-                                                  hasLiveStockSignalSummary)
+                                              ? supplierNameIsMekrs(offer.supplier)
+                                                ? mekrsVariantStockDisplayText(
+                                                    activePv,
+                                                    pvars,
+                                                    scrape?.stock,
+                                                  ) !== "—"
+                                                : activePv.stock != null ||
+                                                  Boolean(
+                                                    activePv.raw_stock?.trim(),
+                                                  ) ||
+                                                  Boolean(
+                                                    activePv.mekrs_package_stock_text?.trim(),
+                                                  ) ||
+                                                  (supplierNameIsHopefix(
+                                                    offer.supplier,
+                                                  ) &&
+                                                    hasLiveStockSignalSummary)
                                               : stockLive;
                                       const scraperApplicable =
                                         offer.supplier_id != null &&
@@ -2215,20 +2325,8 @@ function ProductSupplierExpandedTableRow({
                                                     <colgroup>
                                                       <col className="w-[52%]" />
                                                       <col className="w-[22%]" />
-                                                      {!supplierNameIsMekrs(
-                                                        offer.supplier,
-                                                      ) ? (
-                                                        <col className="w-[18%]" />
-                                                      ) : null}
-                                                      <col
-                                                        className={
-                                                          supplierNameIsMekrs(
-                                                            offer.supplier,
-                                                          )
-                                                            ? "w-[26%]"
-                                                            : "w-[8%]"
-                                                        }
-                                                      />
+                                                      <col className="w-[18%]" />
+                                                      <col className="w-[8%]" />
                                                     </colgroup>
                                                     <thead>
                                                       <tr className="border-b border-slate-200/80 bg-slate-100/70 text-[9px] uppercase tracking-wide text-slate-600 sm:text-[10px]">
@@ -2238,13 +2336,9 @@ function ProductSupplierExpandedTableRow({
                                                         <th className="px-1.5 py-1 font-medium sm:px-2 sm:py-1.5">
                                                           Cena
                                                         </th>
-                                                        {!supplierNameIsMekrs(
-                                                          offer.supplier,
-                                                        ) ? (
-                                                          <th className="px-1.5 py-1 font-medium sm:px-2 sm:py-1.5">
-                                                            Sklad
-                                                          </th>
-                                                        ) : null}
+                                                        <th className="px-1.5 py-1 font-medium sm:px-2 sm:py-1.5">
+                                                          Sklad
+                                                        </th>
                                                         <th className="w-8 px-1 py-1 font-medium sm:w-10 sm:px-1.5">
                                                           &nbsp;
                                                         </th>
@@ -2296,18 +2390,14 @@ function ProductSupplierExpandedTableRow({
                                                           );
                                                         };
                                                         const stockCell =
-                                                          pv.stock != null
-                                                            ? formatKsQuantity(
-                                                                pv.stock,
-                                                              )
-                                                            : pv.raw_stock?.trim()
-                                                              ? formatDigitsInTextCsThousands(
-                                                                  pv.raw_stock.trim(),
-                                                                )
-                                                              : "—";
-                                                        const hideRowStock =
-                                                          supplierNameIsMekrs(
+                                                          variantRowStockDisplayText(
                                                             offer.supplier,
+                                                            pv,
+                                                            {
+                                                              allRows: pvars,
+                                                              totalStock:
+                                                                scrape?.stock,
+                                                            },
                                                           );
                                                         return (
                                                           <tr
@@ -2345,14 +2435,6 @@ function ProductSupplierExpandedTableRow({
                                                                   label={pv.label}
                                                                   packQuantity={
                                                                     pv.pack_quantity
-                                                                  }
-                                                                  packageStockText={
-                                                                    mekrsEffectivePackageStockText(
-                                                                      pv,
-                                                                      pvars,
-                                                                      scrape?.stock,
-                                                                    ) ??
-                                                                    pv.mekrs_package_stock_text
                                                                   }
                                                                 />
                                                               ) : supplierUsesHasplStylePackLabel(
@@ -2435,21 +2517,19 @@ function ProductSupplierExpandedTableRow({
                                                                 "—"
                                                               )}
                                                             </td>
-                                                            {!hideRowStock ? (
-                                                              <td
-                                                                className={cn(
-                                                                  "px-1 py-0.5 align-middle text-[10px] text-slate-800 sm:px-2 sm:py-1.5 sm:text-[13px]",
-                                                                  supplierNameIsFabory(
-                                                                    offer.supplier,
-                                                                  ) &&
-                                                                    faboryStockDisplayClass(
-                                                                      stockCell,
-                                                                    ),
-                                                                )}
-                                                              >
-                                                                {stockCell}
-                                                              </td>
-                                                            ) : null}
+                                                            <td
+                                                              className={cn(
+                                                                "px-1 py-0.5 align-middle text-[10px] text-slate-800 sm:px-2 sm:py-1.5 sm:text-[13px]",
+                                                                supplierNameIsFabory(
+                                                                  offer.supplier,
+                                                                ) &&
+                                                                  faboryStockDisplayClass(
+                                                                    stockCell,
+                                                                  ),
+                                                              )}
+                                                            >
+                                                              {stockCell}
+                                                            </td>
                                                             <td className="px-0.5 py-0.5 align-middle sm:px-1.5 sm:py-1.5">
                                                               <input
                                                                 id={inputId}
@@ -2571,14 +2651,6 @@ function ProductSupplierExpandedTableRow({
                                                                 label={pv.label}
                                                                 packQuantity={
                                                                   pv.pack_quantity
-                                                                }
-                                                                packageStockText={
-                                                                  mekrsEffectivePackageStockText(
-                                                                    pv,
-                                                                    pvars,
-                                                                    scrape?.stock,
-                                                                  ) ??
-                                                                  pv.mekrs_package_stock_text
                                                                 }
                                                               />
                                                             ) : supplierUsesHasplStylePackLabel(
