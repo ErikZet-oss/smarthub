@@ -3223,34 +3223,15 @@ function ProductSupplierExpandedTableRow({
                                                       ) &&
                                                       argipShopPackQty !=
                                                         null ? (
-                                                        <>
-                                                          <span
-                                                            className="max-w-[4.2rem] truncate text-center text-[8px] leading-tight text-slate-500 sm:max-w-none sm:text-[10px]"
-                                                            title="Počet kusov v jednom balení na e-shope"
-                                                          >
-                                                            (
-                                                            {formatIntegerCsThousands(
-                                                              argipShopPackQty,
-                                                            )}
-                                                            &nbsp;ks/bal.)
-                                                          </span>
-                                                          {rowPack != null &&
-                                                          rowPack !==
-                                                            argipShopPackQty ? (
-                                                            <span
-                                                              className="text-[8px] tabular-nums text-slate-400 sm:text-[10px]"
-                                                              title="Minimálne množstvo / krok pre zvolenú cenovú hladinu"
-                                                            >
-                                                              ×{rowPack}
-                                                            </span>
-                                                          ) : null}
-                                                        </>
-                                                      ) : rowPack != null ? (
                                                         <span
-                                                          className="hidden text-[10px] text-slate-500 sm:inline"
-                                                          title="Objednávka v násobkoch balenia."
+                                                          className="max-w-[4.2rem] truncate text-center text-[8px] leading-tight text-slate-500 sm:max-w-none sm:text-[10px]"
+                                                          title="Počet kusov v jednom balení na e-shope"
                                                         >
-                                                          ×{rowPack}
+                                                          (
+                                                          {formatIntegerCsThousands(
+                                                            argipShopPackQty,
+                                                          )}
+                                                          &nbsp;ks/bal.)
                                                         </span>
                                                       ) : null}
                                                     </div>
