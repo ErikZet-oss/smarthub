@@ -1149,6 +1149,44 @@ function ArgipVariantLabelCell({ pv }: { pv: PackagingVariantRow }) {
   );
 }
 
+function inoxmareVariantPackQuantityText(pv: PackagingVariantRow): string {
+  const pq = pv.pack_quantity;
+  if (typeof pq === "number" && Number.isFinite(pq) && pq >= 1) {
+    return formatKsQuantity(Math.floor(pq));
+  }
+  const raw = (pv.raw_pack_quantity || "").trim();
+  const box = raw.match(/box\s*(\d[\d\s]*)\s*ks/i);
+  if (box) {
+    const n = parseInt(box[1].replace(/\s/g, ""), 10);
+    if (Number.isFinite(n) && n >= 1) {
+      return formatKsQuantity(n);
+    }
+  }
+  const plain = raw.match(/(\d[\d\s]*)\s*ks/i);
+  if (plain) {
+    const n = parseInt(plain[1].replace(/\s/g, ""), 10);
+    if (Number.isFinite(n) && n >= 1) {
+      return formatKsQuantity(n);
+    }
+  }
+  return "";
+}
+
+function InoxmareVariantLabelCell({
+  scrape,
+  pv,
+}: {
+  scrape: SupplierScrapeState | undefined;
+  pv: PackagingVariantRow;
+}) {
+  return (
+    <VariantPackLabelRow
+      name={supplierVariantProductLabel(scrape, pv)}
+      packText={inoxmareVariantPackQuantityText(pv)}
+    />
+  );
+}
+
 /** Pod logo: len krátky názov produktu — bez balenia, zátvoriek „(… ks)“ a „… ks“ na konci riadku. */
 function faboryUiProductTitleOnly(raw: string): string {
   const first = (raw || "").replace(/\r/g, "").split("\n")[0]?.trim() ?? "";
@@ -2552,6 +2590,9 @@ function ProductSupplierExpandedTableRow({
                                                                   supplierUsesHasplStylePackLabel(
                                                                     offer.supplier,
                                                                   ) ||
+                                                                  supplierNameIsInoxmare(
+                                                                    offer.supplier,
+                                                                  ) ||
                                                                   supplierNameIsArgip(
                                                                     offer.supplier,
                                                                   )
@@ -2575,6 +2616,13 @@ function ProductSupplierExpandedTableRow({
                                                                     ) ??
                                                                     pv.mekrs_package_stock_text
                                                                   }
+                                                                />
+                                                              ) : supplierNameIsInoxmare(
+                                                                  offer.supplier,
+                                                                ) ? (
+                                                                <InoxmareVariantLabelCell
+                                                                  scrape={scrape}
+                                                                  pv={pv}
                                                                 />
                                                               ) : supplierUsesHasplStylePackLabel(
                                                                   offer.supplier,
@@ -2759,6 +2807,9 @@ function ProductSupplierExpandedTableRow({
                                                                 supplierUsesHasplStylePackLabel(
                                                                   offer.supplier,
                                                                 ) ||
+                                                                supplierNameIsInoxmare(
+                                                                  offer.supplier,
+                                                                ) ||
                                                                 supplierNameIsArgip(
                                                                   offer.supplier,
                                                                 )
@@ -2782,6 +2833,13 @@ function ProductSupplierExpandedTableRow({
                                                                   ) ??
                                                                   pv.mekrs_package_stock_text
                                                                 }
+                                                              />
+                                                            ) : supplierNameIsInoxmare(
+                                                                offer.supplier,
+                                                              ) ? (
+                                                              <InoxmareVariantLabelCell
+                                                                scrape={scrape}
+                                                                pv={pv}
                                                               />
                                                             ) : supplierUsesHasplStylePackLabel(
                                                                 offer.supplier,

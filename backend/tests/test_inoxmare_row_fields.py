@@ -65,6 +65,24 @@ def test_inoxmare_not_login_row_keeps_pack_quantities_without_prices() -> None:
     assert "log in" in (rf["raw_stock"] or "").lower()
 
 
+_BOX_QTY_ONLY_ROW = """
+<tr id="57390407002">
+  <td class="item">57390407002</td>
+  <td class="descr">SCR. DIN933/ISO4017-4X70-A2-70</td>
+  <td class="A2">A2</td>
+  <td class="col data">5000</td>
+  <td class="price-box">
+    <input type="hidden" id="88421-box-qty" value="200">
+  </td>
+</tr>
+"""
+
+
+def test_inoxmare_pack_from_hidden_box_qty_when_icons_missing() -> None:
+    rf = parse_inoxmare_row_fields(_BOX_QTY_ONLY_ROW)
+    assert rf["pack_quantity"] == 200
+
+
 def test_inoxmare_product_title_from_pdp_html() -> None:
     from pathlib import Path
 

@@ -535,6 +535,15 @@ def parse_inoxmare_row_fields(row_html: str) -> dict[str, Any]:
             and mc_hidden == int(mc_hidden)
         ):
             out["master_pack_quantity"] = int(mc_hidden)
+        if out["pack_quantity"] is None:
+            box_qty = _inoxmare_row_hidden_numeric(row_html, "-box-qty")
+            if (
+                box_qty is not None
+                and box_qty >= 1
+                and isinstance(box_qty, float)
+                and box_qty == int(box_qty)
+            ):
+                out["pack_quantity"] = int(box_qty)
 
     if re.search(r'class\s*=\s*["\'][^"\']*not-login', row_html, re.I):
         nm = re.search(
