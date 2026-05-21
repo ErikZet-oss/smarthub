@@ -270,16 +270,93 @@ def _pick_first(d: dict[str, Any], keys: tuple[str, ...]) -> Any:
 
 
 def _bmkco_pick_pack_quantity(detail: dict[str, Any]) -> Optional[int]:
-    """BMCo nie vždy vracia počet ks v balení pod rovnakým kľúčom.
-    Najprv skúsime známe polia, potom fallback na ďalšie "baleni" metadáta.
-    """
+    """Počet ks v balení — BMCo mení polia podľa produktu (MJ × KUS, pocetMjProObjednani, …)."""
+    baleni_text = str(_pick_first(detail, ("baleni", "Baleni")) or "").strip()
+    merna_web = str(
+        _pick_first(detail, ("mernaJednotkaWEB", "MernaJednotkaWEB", "mernaJednotkaWeb"))
+        or ""
+    ).strip()
+    pocet_mj_obj = _bmkco_parse_int(
+        _pick_first(detail, ("pocetMjProObjednani", "PocetMjProObjednani"))
+    )
+
+    def _pack_from_text(text: str) -> Optional[int]:
+        t = str(text or "").strip().lower()
+        if not t:
+            return None
+        m_mul = re.search(
+            r"(\d+(?:[.,]\d+)?)\s*mj\b.*?(\d+(?:[.,]\d+)?)\s*kus\b",
+            t,
+            re.I,
+        )
+        if m_mul:
+            try:
+                a = int(float(m_mul.group(1).replace(",", ".")))
+                b = int(float(m_mul.group(2).replace(",", ".")))
+                prod = a * b
+                if prod > 0:
+                    return prod
+            except Exception:
+                pass
+        m_kus = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:ks|kus)\b", t, re.I)
+        if m_kus:
+            try:
+                n = int(float(m_kus.group(1).replace(",", ".")))
+                if n > 0:
+                    return n
+            except Exception:
+                pass
+        return None
+
+    if pocet_mj_obj is not None and pocet_mj_obj > 0:
+        unit_u = merna_web.upper().replace(" ", "")
+        if "KUS" in unit_u or unit_u in ("KS", "KU"):
+            return pocet_mj_obj
+
+    from_baleni = _pack_from_text(baleni_text)
+    if from_baleni is not None and from_baleni > 0:
+        m_mul = re.search(
+            r"(\d+(?:[.,]\d+)?)\s*mj\b.*?(\d+(?:[.,]\d+)?)\s*kus\b",
+            baleni_text,
+            re.I,
+        )
+        if m_mul or from_baleni >= 20:
+            return from_baleni
+
+    if pocet_mj_obj is not None and pocet_mj_obj > 0:
+        return pocet_mj_obj
+
+    prepocet_mj = _bmkco_parse_int(
+        _pick_first(detail, ("prepocetBaleninaMJ", "PrepocetBaleninaMJ"))
+    )
+    kus_v_mj = _bmkco_parse_int(
+        _pick_first(
+            detail,
+            (
+                "početMJvBaleni",
+                "pocetMJvBaleni",
+                "pocetKusuVMJ",
+                "pocetKusuVBaleni",
+                "mnozstviVBaleni",
+                "mnozstviVbaleni",
+            ),
+        )
+    )
+    if (
+        prepocet_mj is not None
+        and prepocet_mj > 0
+        and kus_v_mj is not None
+        and kus_v_mj > 0
+    ):
+        prod = prepocet_mj * kus_v_mj
+        if prod > 0:
+            return prod
+
     pack_raw = _pick_first(
         detail,
         (
             "početMJvBaleni",
             "pocetMJvBaleni",
-            "prepocetBaleninaMJ",
-            "baleni",
             "mnozstviVBaleni",
             "mnozstviVbaleni",
             "baleniMj",
@@ -295,10 +372,11 @@ def _bmkco_pick_pack_quantity(detail: dict[str, Any]) -> Optional[int]:
     def _score_key(key_path: str) -> int:
         k = key_path.lower()
         score = 0
+        if "pocetmjproobjednani" in k:
+            score += 14
         if "pocetmjvbaleni" in k or "početmjvbaleni" in k:
             score += 12
         if "prepocetbaleninamj" in k:
-            # Často je to prevodový koeficient (napr. 2), nie reálne ks v balení.
             score += 3
         if "mnozstvivbaleni" in k:
             score += 10
@@ -316,39 +394,12 @@ def _bmkco_pick_pack_quantity(detail: dict[str, Any]) -> Optional[int]:
             score -= 4
         return score
 
-    def _pack_from_text(text: str) -> Optional[int]:
-        t = str(text or "").strip().lower()
-        if not t:
-            return None
-        # BMCo často zobrazuje balenie ako "2 MJ 100 KUS" -> výsledné balenie 200 ks.
-        m_mul = re.search(
-            r"(\d+(?:[.,]\d+)?)\s*mj\b.*?(\d+(?:[.,]\d+)?)\s*kus\b",
-            t,
-            re.I,
-        )
-        if m_mul:
-            try:
-                a = int(float(m_mul.group(1).replace(",", ".")))
-                b = int(float(m_mul.group(2).replace(",", ".")))
-                prod = a * b
-                if prod > 0:
-                    return prod
-            except Exception:
-                pass
-        # Fallback pre "balení 200 ks" / "... 200 kus"
-        m_kus = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:ks|kus)\b", t, re.I)
-        if m_kus:
-            try:
-                n = int(float(m_kus.group(1).replace(",", ".")))
-                if n > 0:
-                    return n
-            except Exception:
-                pass
-        return None
-
     def _walk(node: Any, path: tuple[str, ...]) -> None:
         if isinstance(node, dict):
             for k, v in node.items():
+                lk = str(k).lower()
+                if lk in ("prepocetbaleninamj", "prepocetbaleninamj".lower()):
+                    continue
                 _walk(v, (*path, str(k)))
             return
         if isinstance(node, list):
@@ -369,7 +420,6 @@ def _bmkco_pick_pack_quantity(detail: dict[str, Any]) -> Optional[int]:
             txt = node.lower()
             if "mj" in txt and ("kus" in txt or "ks" in txt):
                 s += 6
-        # Povoliť slabé zhody len pre väčšie hodnoty; zabráni to chybnému výberu typu "2".
         if s < 0:
             return
         if s == 0 and n < 10:
@@ -380,9 +430,35 @@ def _bmkco_pick_pack_quantity(detail: dict[str, Any]) -> Optional[int]:
 
     if not candidates:
         return pack_q if pack_q and pack_q > 0 else None
-    # Najprv kvalita kľúča, potom väčšia hodnota (napr. 200 pred 2).
     candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
     return candidates[0][1]
+
+
+def _bmkco_pick_stock(
+    detail: dict[str, Any],
+    stock_state: Optional[list[Any]] = None,
+) -> tuple[Optional[int], Optional[str]]:
+    """Sklad v ks — e-shop používa samostatný endpoint GetZboziSkladovyStav (Quantity)."""
+    if isinstance(stock_state, list) and stock_state:
+        head = stock_state[0]
+        if isinstance(head, dict):
+            qty = _bmkco_parse_int(head.get("Quantity"))
+            unit = str(
+                head.get("MernaJednotkaWeb")
+                or head.get("mernaJednotkaWEB")
+                or head.get("mernaJednotkaWeb")
+                or ""
+            ).strip()
+            if qty is not None:
+                raw = f"{qty} {unit}".strip() if unit else str(qty)
+                return qty, raw
+    stock_raw = _pick_first(
+        detail,
+        ("mnozstviSkladem", "mnozstviSklademText", "sklad", "Quantity"),
+    )
+    stock = _bmkco_parse_int(stock_raw)
+    raw = str(stock_raw).strip() if stock_raw not in (None, "") else None
+    return stock, raw
 
 
 class BmkcoHttpClient:
@@ -489,6 +565,28 @@ class BmkcoHttpClient:
             return blob
         raise RuntimeError(f"BMCo: neočakávaná odpoveď GetZboziDetail: {type(blob).__name__}")
 
+    async def fetch_product_stock_state(self, karta: str) -> list[dict[str, Any]]:
+        """POST /cs/Data/GetZboziSkladovyStav — sklad v e-shope (Quantity v KUS)."""
+        code = bmkco_norm_code(karta)
+        if not code:
+            raise ValueError("BMCo: prázdny kód produktu (karta).")
+        r = await self._client.post(
+            "/cs/Data/GetZboziSkladovyStav",
+            data={"karta": code},
+            headers={"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"},
+        )
+        r.raise_for_status()
+        txt = (r.text or "").strip()
+        if not txt:
+            return []
+        try:
+            blob = json.loads(txt)
+        except json.JSONDecodeError:
+            return []
+        if isinstance(blob, list):
+            return [x for x in blob if isinstance(x, dict)]
+        return []
+
     async def add_to_cart(self, karta: str, quantity: int) -> None:
         code = bmkco_norm_code(karta)
         if not code:
@@ -544,11 +642,14 @@ class BmkcoHttpClient:
         }
 
     @staticmethod
-    def parse_supplier_data(detail: dict[str, Any]) -> dict[str, Any]:
+    def parse_supplier_data(
+        detail: dict[str, Any],
+        *,
+        stock_state: Optional[list[Any]] = None,
+    ) -> dict[str, Any]:
         raw_price = _pick_first(detail, ("zakaznikCena", "akcniCena", "zakladniCena"))
         price_eur = _bmkco_parse_decimal(str(raw_price or ""))
-        stock_raw = _pick_first(detail, ("mnozstviSkladem", "mnozstviSklademText", "sklad"))
-        stock = _bmkco_parse_int(stock_raw)
+        stock, stock_raw_str = _bmkco_pick_stock(detail, stock_state)
         # Počet kusov v balení: BMCo mení názvy polí podľa produktu.
         pack_q = _bmkco_pick_pack_quantity(detail)
         label = str(
@@ -561,7 +662,7 @@ class BmkcoHttpClient:
             "price_eur": price_eur,
             "raw_price": str(raw_price).strip() if raw_price not in (None, "") else None,
             "stock": stock,
-            "raw_stock": str(stock_raw).strip() if stock_raw not in (None, "") else None,
+            "raw_stock": stock_raw_str,
             "bmkco_karta": karta or None,
             "currency_symbol": "€",
         }

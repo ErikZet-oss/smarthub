@@ -2785,7 +2785,8 @@ async def _bmkco_get_supplier_data_via_http(
     async with BmkcoHttpClient(base) as client:
         await client.ensure_login(supplier.username, supplier.password)
         detail = await client.fetch_product_detail(code)
-    data = BmkcoHttpClient.parse_supplier_data(detail)
+        stock_state = await client.fetch_product_stock_state(code)
+    data = BmkcoHttpClient.parse_supplier_data(detail, stock_state=stock_state)
     pvars = list(data.get("packaging_variants") or [])
     if pvars:
         pvars[0]["bmkco_karta"] = code
