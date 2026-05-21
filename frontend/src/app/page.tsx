@@ -36,6 +36,7 @@ import {
   Moon,
   PackageSearch,
   Plus,
+  RefreshCw,
   ShieldCheck,
   ShoppingCart,
   Terminal,
@@ -843,6 +844,61 @@ type SupplierScrapeState = {
 
 function scrapeCacheKey(internalCode: string, supplierId: number): string {
   return `${internalCode}:${supplierId}`;
+}
+
+function productHasScrapableOffers(product: ProductSearchRow): boolean {
+  return product.offers.some(
+    (o) => o.supplier_id != null && Boolean(o.supplier_code?.trim()),
+  );
+}
+
+function productSupplierScrapeLoading(
+  product: ProductSearchRow,
+  scrapeByKey: Record<string, SupplierScrapeState>,
+): boolean {
+  return product.offers.some((offer) => {
+    if (offer.supplier_id == null || !offer.supplier_code?.trim()) {
+      return false;
+    }
+    return (
+      scrapeByKey[scrapeCacheKey(product.internal_code, offer.supplier_id)]
+        ?.loading === true
+    );
+  });
+}
+
+function ProductScrapeReloadButton({
+  product,
+  scrapeByKey,
+  onReload,
+}: {
+  product: ProductSearchRow;
+  scrapeByKey: Record<string, SupplierScrapeState>;
+  onReload: (product: ProductSearchRow) => void;
+}) {
+  if (!productHasScrapableOffers(product)) {
+    return null;
+  }
+  const loading = productSupplierScrapeLoading(product, scrapeByKey);
+  return (
+    <button
+      type="button"
+      className="inline-flex h-6 w-6 items-center justify-center rounded text-slate-500 hover:bg-sky-100/80 hover:text-sky-700 disabled:opacity-60"
+      title="Znova načítať ceny a sklad od dodávateľov"
+      aria-label={`Znova načítať ceny pre ${product.internal_code}`}
+      disabled={loading}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onReload(product);
+      }}
+    >
+      <RefreshCw
+        className={cn("h-3.5 w-3.5", loading && "animate-spin")}
+        aria-hidden
+      />
+    </button>
+  );
 }
 
 function supplierNameIsMekrs(name: string | null | undefined): boolean {
@@ -4408,6 +4464,211 @@ export default function Home() {
     };
   }, [activeView, openProduct, apiFetch]);
 
+  const reloadProductSupplierScrapes = useCallback(
+    (product: ProductSearchRow) => {
+      const internalCode = product.internal_code;
+      for (const offer of product.offers) {
+        if (offer.supplier_id == null || !offer.supplier_code?.trim()) {
+          continue;
+        }
+        const key = scrapeCacheKey(internalCode, offer.supplier_id);
+        setScrapeByKey((prev) => ({
+          ...prev,
+          [key]: { loading: true, error: null },
+        }));
+
+        const sid = offer.supplier_id;
+        const code = offer.supplier_code.trim();
+
+        void (async () => {
+          try {
+            const response = await apiFetch(
+              `${API_BASE}/api/scraper/supplier-data`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ supplier_id: sid, supplier_code: code }),
+              },
+            );
+            const parsed = await readApiJsonOrText(response);
+            if (!parsed.ok) {
+              setScrapeByKey((p) => ({
+                ...p,
+                [key]: {
+                  loading: false,
+                  error: parsed.detail,
+                  logged_in: false,
+                  login_hint: null,
+                },
+              }));
+              return;
+            }
+            const payload = parsed.data as {
+              product_title?: string | null;
+              price_eur?: number | null;
+              raw_price?: string | null;
+              price_unit?: string | null;
+              stock?: number | null;
+              raw_stock?: string | null;
+              pack_quantity?: number | null;
+              raw_pack_quantity?: string | null;
+              shop_pack_quantity?: number | null;
+              packaging_variants?: PackagingVariantRow[] | null;
+              price_includes_vat?: boolean | null;
+              currency_code?: string | null;
+              currency_symbol?: string | null;
+              detail?: unknown;
+              hint?: string | null;
+              logged_in?: boolean;
+              login_hint?: string | null;
+            };
+
+            if (!response.ok) {
+              setScrapeByKey((p) => ({
+                ...p,
+                [key]: {
+                  loading: false,
+                  error: formatApiDetail(payload.detail),
+                  logged_in: false,
+                  login_hint: payload.login_hint ?? null,
+                },
+              }));
+              return;
+            }
+
+            const loggedIn =
+              typeof payload.logged_in === "boolean" ? payload.logged_in : null;
+            setScrapeByKey((p) => ({
+              ...p,
+              [key]: {
+                loading: false,
+                error: null,
+                product_title: payload.product_title ?? null,
+                price_eur: payload.price_eur ?? null,
+                raw_price: payload.raw_price ?? null,
+                price_unit: payload.price_unit ?? null,
+                stock: payload.stock ?? null,
+                raw_stock: payload.raw_stock ?? null,
+                pack_quantity: payload.pack_quantity ?? null,
+                raw_pack_quantity: payload.raw_pack_quantity ?? null,
+                shop_pack_quantity: payload.shop_pack_quantity ?? null,
+                packaging_variants: payload.packaging_variants ?? null,
+                price_includes_vat: payload.price_includes_vat ?? null,
+                currency_code: payload.currency_code ?? null,
+                currency_symbol: payload.currency_symbol ?? null,
+                hint: payload.hint ?? null,
+                logged_in: loggedIn,
+                login_hint: payload.login_hint ?? null,
+              },
+            }));
+            const pvars = payload.packaging_variants;
+            const pvarsNeedVariantPick =
+              Array.isArray(pvars) &&
+              (pvars.length > 1 ||
+                (supplierUsesSinglePackVariantTable(offer.supplier) &&
+                  pvars.length >= 1) ||
+                pvars.some(
+                  (row) =>
+                    Boolean((row.mekrs_variant_id || "").trim()) ||
+                    Boolean((row.hopefix_product_id || "").trim()) ||
+                    Boolean((row.haspl_variant_code || "").trim()) ||
+                    Boolean((row.inoxmare_product_id || "").trim()) ||
+                    Boolean((row.schaef_item_id || "").trim()) ||
+                    Boolean((row.argip_sku || "").trim()),
+                ));
+            if (pvarsNeedVariantPick) {
+              const baseCk = cartStorageKey(sid, code, null);
+              const argipShopPk0 =
+                supplierNameIsArgip(offer.supplier) &&
+                pvars[0]?.shop_pack_quantity != null &&
+                pvars[0]?.shop_pack_quantity >= 1
+                  ? pvars[0].shop_pack_quantity
+                  : null;
+              const pk0 =
+                argipShopPk0 ??
+                (pvars[0]?.pack_quantity != null && pvars[0]?.pack_quantity >= 1
+                  ? pvars[0].pack_quantity
+                  : null);
+              if (typeof pk0 === "number" && pk0 >= 1) {
+                setCartQuantityByKey((prev) => {
+                  if (
+                    prev[baseCk] !== undefined &&
+                    !(
+                      supplierNameIsArgip(offer.supplier) &&
+                      prev[baseCk] === 1 &&
+                      pk0 > 1
+                    )
+                  ) {
+                    return prev;
+                  }
+                  return { ...prev, [baseCk]: pk0 };
+                });
+              }
+              setPackVariantIndexByKey((prev) => {
+                if (prev[baseCk] !== undefined) {
+                  return prev;
+                }
+                return { ...prev, [baseCk]: 0 };
+              });
+            } else {
+              const pkFromApi =
+                payload.pack_quantity != null && payload.pack_quantity >= 1
+                  ? payload.pack_quantity
+                  : null;
+              const argipShopPk =
+                supplierNameIsArgip(offer.supplier) &&
+                payload.shop_pack_quantity != null &&
+                payload.shop_pack_quantity >= 1
+                  ? payload.shop_pack_quantity
+                  : null;
+              let pkFromRaw: number | null = null;
+              if (pkFromApi == null && payload.raw_pack_quantity?.trim()) {
+                const m = payload.raw_pack_quantity
+                  .trim()
+                  .replace(/\s/g, "")
+                  .match(/^(\d+)/);
+                if (m) {
+                  const n = parseInt(m[1], 10);
+                  if (Number.isFinite(n) && n >= 1) pkFromRaw = n;
+                }
+              }
+              const pkPrefill = argipShopPk ?? pkFromApi ?? pkFromRaw;
+              if (pkPrefill != null && pkPrefill >= 1) {
+                const cartKey = cartStorageKey(sid, code, null);
+                setCartQuantityByKey((prev) => {
+                  if (
+                    prev[cartKey] !== undefined &&
+                    !(
+                      supplierNameIsArgip(offer.supplier) &&
+                      prev[cartKey] === 1 &&
+                      pkPrefill > 1
+                    )
+                  ) {
+                    return prev;
+                  }
+                  return { ...prev, [cartKey]: pkPrefill };
+                });
+              }
+            }
+          } catch (error) {
+            setScrapeByKey((p) => ({
+              ...p,
+              [key]: {
+                loading: false,
+                error:
+                  error instanceof Error
+                    ? error.message
+                    : "Nepodarilo sa načítať údaje.",
+                logged_in: false,
+              },
+            }));
+          }
+        })();
+      }
+    },
+    [apiFetch],
+  );
+
   useEffect(() => {
     if (!openProduct) {
       return;
@@ -4428,194 +4689,8 @@ export default function Home() {
       return;
     }
 
-    for (const offer of product.offers) {
-      if (offer.supplier_id == null || !offer.supplier_code?.trim()) {
-        continue;
-      }
-      const key = scrapeCacheKey(openProduct, offer.supplier_id);
-      setScrapeByKey((prev) => ({
-        ...prev,
-        [key]: { loading: true, error: null },
-      }));
-
-      const sid = offer.supplier_id;
-      const code = offer.supplier_code.trim();
-
-      void (async () => {
-        try {
-          const response = await apiFetch(
-            `${API_BASE}/api/scraper/supplier-data`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ supplier_id: sid, supplier_code: code }),
-            },
-          );
-          // Render proxy / worker crash niekedy vráti plain-text „Internal
-          // Server Error" — bežný JSON.parse by to zhodil na hláške
-          // „Unexpected token 'I' …". `readApiJsonOrText` to robí robustne.
-          const parsed = await readApiJsonOrText(response);
-          if (!parsed.ok) {
-            setScrapeByKey((p) => ({
-              ...p,
-              [key]: {
-                loading: false,
-                error: parsed.detail,
-                logged_in: false,
-                login_hint: null,
-              },
-            }));
-            return;
-          }
-          const payload = parsed.data as {
-            product_title?: string | null;
-            price_eur?: number | null;
-            raw_price?: string | null;
-            price_unit?: string | null;
-            stock?: number | null;
-            raw_stock?: string | null;
-            pack_quantity?: number | null;
-            raw_pack_quantity?: string | null;
-            shop_pack_quantity?: number | null;
-            packaging_variants?: PackagingVariantRow[] | null;
-            price_includes_vat?: boolean | null;
-            currency_code?: string | null;
-            currency_symbol?: string | null;
-            detail?: unknown;
-            hint?: string | null;
-            logged_in?: boolean;
-            login_hint?: string | null;
-          };
-
-          if (!response.ok) {
-            setScrapeByKey((p) => ({
-              ...p,
-              [key]: {
-                loading: false,
-                error: formatApiDetail(payload.detail),
-                logged_in: false,
-                login_hint: payload.login_hint ?? null,
-              },
-            }));
-            return;
-          }
-
-          const loggedIn =
-            typeof payload.logged_in === "boolean" ? payload.logged_in : null;
-          setScrapeByKey((p) => ({
-            ...p,
-            [key]: {
-              loading: false,
-              error: null,
-              product_title: payload.product_title ?? null,
-              price_eur: payload.price_eur ?? null,
-              raw_price: payload.raw_price ?? null,
-              price_unit: payload.price_unit ?? null,
-              stock: payload.stock ?? null,
-              raw_stock: payload.raw_stock ?? null,
-              pack_quantity: payload.pack_quantity ?? null,
-              raw_pack_quantity: payload.raw_pack_quantity ?? null,
-              shop_pack_quantity: payload.shop_pack_quantity ?? null,
-              packaging_variants: payload.packaging_variants ?? null,
-              price_includes_vat: payload.price_includes_vat ?? null,
-              currency_code: payload.currency_code ?? null,
-              currency_symbol: payload.currency_symbol ?? null,
-              hint: payload.hint ?? null,
-              logged_in: loggedIn,
-              login_hint: payload.login_hint ?? null,
-            },
-          }));
-          const pvars = payload.packaging_variants;
-          const pvarsNeedVariantPick =
-            Array.isArray(pvars) &&
-            (pvars.length > 1 ||
-              (supplierUsesSinglePackVariantTable(offer.supplier) &&
-                pvars.length >= 1) ||
-              pvars.some(
-                (row) =>
-                  Boolean((row.mekrs_variant_id || "").trim()) ||
-                  Boolean((row.hopefix_product_id || "").trim()) ||
-                  Boolean((row.haspl_variant_code || "").trim()) ||
-                  Boolean((row.inoxmare_product_id || "").trim()) ||
-                  Boolean((row.schaef_item_id || "").trim()) ||
-                  Boolean((row.argip_sku || "").trim()),
-              ));
-          if (pvarsNeedVariantPick) {
-            const baseCk = cartStorageKey(sid, code, null);
-            const argipShopPk0 =
-              supplierNameIsArgip(offer.supplier) &&
-              pvars[0]?.shop_pack_quantity != null &&
-              pvars[0]?.shop_pack_quantity >= 1
-                ? pvars[0].shop_pack_quantity
-                : null;
-            const pk0 =
-              argipShopPk0 ??
-              (pvars[0]?.pack_quantity != null && pvars[0]?.pack_quantity >= 1
-                ? pvars[0].pack_quantity
-                : null);
-            if (typeof pk0 === "number" && pk0 >= 1) {
-              setCartQuantityByKey((prev) => {
-                if (prev[baseCk] !== undefined && !(supplierNameIsArgip(offer.supplier) && prev[baseCk] === 1 && pk0 > 1)) {
-                  return prev;
-                }
-                return { ...prev, [baseCk]: pk0 };
-              });
-            }
-            setPackVariantIndexByKey((prev) => {
-              if (prev[baseCk] !== undefined) {
-                return prev;
-              }
-              return { ...prev, [baseCk]: 0 };
-            });
-          } else {
-            const pkFromApi =
-              payload.pack_quantity != null && payload.pack_quantity >= 1
-                ? payload.pack_quantity
-                : null;
-            const argipShopPk =
-              supplierNameIsArgip(offer.supplier) &&
-              payload.shop_pack_quantity != null &&
-              payload.shop_pack_quantity >= 1
-                ? payload.shop_pack_quantity
-                : null;
-            let pkFromRaw: number | null = null;
-            if (pkFromApi == null && payload.raw_pack_quantity?.trim()) {
-              const m = payload.raw_pack_quantity
-                .trim()
-                .replace(/\s/g, "")
-                .match(/^(\d+)/);
-              if (m) {
-                const n = parseInt(m[1], 10);
-                if (Number.isFinite(n) && n >= 1) pkFromRaw = n;
-              }
-            }
-            const pkPrefill = argipShopPk ?? pkFromApi ?? pkFromRaw;
-            if (pkPrefill != null && pkPrefill >= 1) {
-              const cartKey = cartStorageKey(sid, code, null);
-              setCartQuantityByKey((prev) => {
-                if (prev[cartKey] !== undefined && !(supplierNameIsArgip(offer.supplier) && prev[cartKey] === 1 && pkPrefill > 1)) {
-                  return prev;
-                }
-                return { ...prev, [cartKey]: pkPrefill };
-              });
-            }
-          }
-        } catch (error) {
-          setScrapeByKey((p) => ({
-            ...p,
-            [key]: {
-              loading: false,
-              error:
-                error instanceof Error
-                  ? error.message
-                  : "Nepodarilo sa načítať údaje.",
-              logged_in: false,
-            },
-          }));
-        }
-      })();
-    }
-  }, [openProduct, activeView, listOpenProductRow, apiFetch]);
+    reloadProductSupplierScrapes(product);
+  }, [openProduct, activeView, listOpenProductRow, reloadProductSupplierScrapes]);
 
   const refreshDevStepScreenshots = useCallback(async () => {
     try {
@@ -6980,6 +7055,13 @@ export default function Home() {
                                     <ImageIcon className="h-4 w-4" />
                                   </button>
                                 ) : null}
+                                {isOpen ? (
+                                  <ProductScrapeReloadButton
+                                    product={product}
+                                    scrapeByKey={scrapeByKey}
+                                    onReload={reloadProductSupplierScrapes}
+                                  />
+                                ) : null}
                               </div>
                             </td>
                             <td className="px-2 py-1.5 font-medium sm:px-3 sm:py-2">{product.internal_code}</td>
@@ -7201,6 +7283,13 @@ export default function Home() {
                                     >
                                       <ImageIcon className="h-4 w-4" />
                                     </button>
+                                  ) : null}
+                                  {isOpen && detailProduct ? (
+                                    <ProductScrapeReloadButton
+                                      product={detailProduct}
+                                      scrapeByKey={scrapeByKey}
+                                      onReload={reloadProductSupplierScrapes}
+                                    />
                                   ) : null}
                                 </div>
                               </td>
