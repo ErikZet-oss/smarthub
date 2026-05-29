@@ -2211,6 +2211,8 @@ async def competitor_price(
     data["competitor_product_url"] = data.get("competitor_product_url") or _competitor_product_url(
         competitor, code
     )
+    if data.get("competitor_product_url"):
+        data["supplier_product_url"] = data["competitor_product_url"]
     return data
 
 

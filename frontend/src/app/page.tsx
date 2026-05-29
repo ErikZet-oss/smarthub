@@ -526,18 +526,37 @@ function productImagePublicUrl(fileName: string | null | undefined): string | nu
   return `${API_BASE}/product-images/${encodeURIComponent(base)}`;
 }
 
-/** Deep link na B2B produkt často skončí loginom; otvárame radšej doménu e-shopu. */
-function supplierSafeExternalUrl(
+/** Validná http(s) URL — bez orezania na domovskú stránku. */
+function normalizeExternalHttpUrl(
   productUrl: string | null | undefined,
 ): string | null {
   const raw = (productUrl || "").trim();
   if (!raw) return null;
   try {
-    const u = new URL(raw);
-    return `${u.origin}/`;
+    const u = new URL(raw.startsWith("http") ? raw : `https://${raw.replace(/^\/+/, "")}`);
+    if (u.protocol !== "http:" && u.protocol !== "https:") {
+      return null;
+    }
+    return u.toString();
   } catch {
-    return raw;
+    return null;
   }
+}
+
+function resolveOfferProductUrl(
+  offer: ProductSearchRow["offers"][number],
+  scrape: SupplierScrapeState | undefined,
+  isCompetitorMode: boolean,
+): string | null {
+  const fromScrape = normalizeExternalHttpUrl(scrape?.supplier_product_url);
+  if (fromScrape) return fromScrape;
+  const fromOffer = normalizeExternalHttpUrl(offer.supplier_product_url);
+  if (fromOffer) return fromOffer;
+  const code = (offer.supplier_code || "").trim();
+  if (isCompetitorMode && /^https?:\/\//i.test(code)) {
+    return normalizeExternalHttpUrl(code);
+  }
+  return null;
 }
 
 type SelectFilterKey =
@@ -854,6 +873,8 @@ type SupplierScrapeState = {
   /** Stav po pokuse o prihlásenie v Playwright (len ak API vráti pole). */
   logged_in?: boolean | null;
   login_hint?: string | null;
+  /** Priama URL produktu zo scrapu (PDP), ak ju API vráti. */
+  supplier_product_url?: string | null;
 };
 
 function scrapeCacheKey(internalCode: string, supplierId: number): string {
@@ -2315,6 +2336,11 @@ function ProductSupplierExpandedTableRow({
                                         : faboryLineLabelRaw && !faboryRawLooksLikeCode
                                           ? faboryUiProductTitleOnly(faboryLineLabelRaw)
                                           : "";
+                                      const offerProductUrl = resolveOfferProductUrl(
+                                        offer,
+                                        scrape,
+                                        isCompetitorMode,
+                                      );
                                       const hideMobilePriceStockSummary = Boolean(
                                         usesHttpCartVariants && pvars && cartKey,
                                       );
@@ -2381,30 +2407,29 @@ function ProductSupplierExpandedTableRow({
                                                   ? offer.supplier_code
                                                   : "—"}
                                               </span>
-                                              {offer.supplier_product_url?.trim() ? (
+                                              {offerProductUrl ? (
                                                 <button
                                                   type="button"
-                                                  title="Otvoriť e-shop dodávateľa (kód sa skopíruje do schránky)"
+                                                  title="Otvoriť stránku produktu na e-shope"
                                                   className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border border-slate-300/80 bg-white/90 text-slate-600 transition hover:border-sky-300 hover:text-sky-700 sm:h-4.5 sm:w-4.5"
                                                   onClick={(event) => {
                                                     event.stopPropagation();
-                                                    const code =
-                                                      offer.supplier_code?.trim() || "";
-                                                    if (code && navigator?.clipboard?.writeText) {
+                                                    if (
+                                                      !isCompetitorMode &&
+                                                      offer.supplier_code?.trim() &&
+                                                      navigator?.clipboard?.writeText
+                                                    ) {
                                                       void navigator.clipboard
-                                                        .writeText(code)
+                                                        .writeText(
+                                                          offer.supplier_code.trim(),
+                                                        )
                                                         .catch(() => undefined);
                                                     }
-                                                    const target = supplierSafeExternalUrl(
-                                                      offer.supplier_product_url,
+                                                    window.open(
+                                                      offerProductUrl,
+                                                      "_blank",
+                                                      "noopener,noreferrer",
                                                     );
-                                                    if (target) {
-                                                      window.open(
-                                                        target,
-                                                        "_blank",
-                                                        "noopener,noreferrer",
-                                                      );
-                                                    }
                                                   }}
                                                 >
                                                   <ExternalLink className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
@@ -4635,6 +4660,9 @@ export default function Home() {
               hint?: string | null;
               logged_in?: boolean;
               login_hint?: string | null;
+              competitor_product_url?: string | null;
+              supplier_product_url?: string | null;
+              pdp_url?: string | null;
             };
 
             if (!response.ok) {
@@ -4652,6 +4680,12 @@ export default function Home() {
 
             const loggedIn =
               typeof payload.logged_in === "boolean" ? payload.logged_in : null;
+            const supplierProductUrl =
+              normalizeExternalHttpUrl(
+                payload.competitor_product_url ??
+                  payload.supplier_product_url ??
+                  payload.pdp_url,
+              ) ?? null;
             setScrapeByKey((p) => ({
               ...p,
               [key]: {
@@ -4673,6 +4707,7 @@ export default function Home() {
                 hint: payload.hint ?? null,
                 logged_in: loggedIn,
                 login_hint: payload.login_hint ?? null,
+                supplier_product_url: supplierProductUrl,
               },
             }));
             const pvars = payload.packaging_variants;
