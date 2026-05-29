@@ -2373,7 +2373,9 @@ function ProductSupplierExpandedTableRow({
                                               ) : null}
                                             </div>
                                             <div className="flex items-center gap-1 text-[8px] leading-tight text-slate-500 sm:text-[11px]">
-                                              <span className="shrink-0">Kód:</span>
+                                              <span className="shrink-0">
+                                                {isCompetitorMode ? "URL:" : "Kód:"}
+                                              </span>
                                               <span className="truncate">
                                                 {offer.supplier_code?.trim()
                                                   ? offer.supplier_code
@@ -8832,7 +8834,7 @@ export default function Home() {
                                   />
                                 </label>
                                 <label className="block text-[11px] text-slate-600 sm:col-span-2">
-                                  Stĺpec v Exceli (kód produktu)
+                                  Stĺpec v Exceli (kód alebo URL produktu)
                                   <SearchableSelect
                                     value={competitor.codeColumn}
                                     onChange={(v) =>
@@ -8868,7 +8870,7 @@ export default function Home() {
                                 scrape_config_json (voliteľné — SVX/Oramat/Bbtechnik majú preset)
                                 <textarea
                                   value={competitor.scrapeConfigJson}
-                                  placeholder='Prázdne = automatický preset podľa URL (oramat.sk, bbtechnik.sk, vkpsteel.com, svx.sk)'
+                                  placeholder='Prázdne = automatický preset podľa URL (feva.sk, oramat.sk, bbtechnik.sk, vkpsteel.com, svx.sk)'
                                   onChange={(e) =>
                                     setCompetitorForms((prev) =>
                                       prev.map((c, i) =>

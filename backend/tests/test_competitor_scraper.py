@@ -2,7 +2,11 @@
 
 from app.services.competitor_scraper_service import (
     _extract_price_from_html,
+    _feva_score_slug,
+    _feva_search_query_variants,
+    _feva_slug_from_input,
     _parse_eur_amount,
+    _wc_store_price_eur,
     competitor_product_url,
     load_competitor_scrape_config,
     resolve_competitor_scrape_config,
@@ -104,6 +108,54 @@ def test_resolve_oramat_preset() -> None:
         competitor_product_url("https://www.oramat.sk/", "PGO-101000-X63", cfg)
         == "https://www.oramat.sk/vyhladavanie/?string=PGO-101000-X63"
     )
+
+
+def test_resolve_feva_preset() -> None:
+    cfg = resolve_competitor_scrape_config("https://feva.sk/", None)
+    assert cfg.search_via_url_template == "{shop_url}/?s={code}"
+    assert (
+        competitor_product_url("https://feva.sk/", "DIN 931 M08 x 30", cfg)
+        == "https://feva.sk/?s=DIN%20931%20M08%20x%2030"
+    )
+
+
+def test_competitor_product_url_direct_feva_url() -> None:
+    cfg = resolve_competitor_scrape_config("https://feva.sk/", None)
+    url = "https://feva.sk/product/din-975-zavitova-tyc-m10-x-1000-2"
+    assert competitor_product_url("https://feva.sk/", url, cfg) == url
+
+
+def test_feva_wc_store_price_minor_unit() -> None:
+    assert _wc_store_price_eur({"price": "5284", "currency_minor_unit": 5}) == 0.05284
+
+
+def test_feva_slug_from_product_url() -> None:
+    slug = _feva_slug_from_input(
+        "https://feva.sk/metricke-skrutky/din-931-skrutka-metricka-so-sesthrannou-hlavou-polzavit-m8-x-30/"
+    )
+    assert slug == "din-931-skrutka-metricka-so-sesthrannou-hlavou-polzavit-m8-x-30"
+
+
+def test_feva_score_prefers_x30_over_x130() -> None:
+    q = "DIN 931 M08 x 30"
+    s30 = _feva_score_slug(
+        "din-931-skrutka-metricka-so-sesthrannou-hlavou-polzavit-m8-x-30",
+        q,
+    )
+    s130 = _feva_score_slug(
+        "din-931-skrutka-metricka-so-sesthrannou-hlavou-polzavit-m8-x-130",
+        q,
+    )
+    assert s30 > s130
+
+
+def test_feva_search_query_variants_normalizes_en_dash() -> None:
+    variants = _feva_search_query_variants("DIN 975 Závitová tyč – M10 x 1000")
+    assert "DIN 975 Závitová tyč M10 x 1000" in variants
+    assert "DIN 975 M10 x 1000" in variants
+
+
+def test_resolve_oramat_price_regex() -> None:
     html = (
         '<div data-config-product-price-secondary class="text-p-small">'
         " 1,32 € <span>bez DPH</span></div>"
