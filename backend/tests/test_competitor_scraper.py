@@ -29,3 +29,17 @@ def test_competitor_product_url_template() -> None:
         competitor_product_url("https://shop.test", "ABC-1", cfg)
         == "https://shop.test/p/ABC-1"
     )
+
+
+def test_extract_price_secondary_svx_style() -> None:
+    html = (
+        '<div data-config-product-price-secondary class="text-p-small">'
+        " 1,32 € <span>bez DPH</span></div>"
+    )
+    cfg = load_competitor_scrape_config(
+        '{"price_selector_regex": '
+        '"data-config-product-price-secondary[^>]*>\\\\s*([0-9,.]+)\\\\s*€"}'
+    )
+    price, raw = _extract_price_from_html(html, cfg)
+    assert price == 1.32
+    assert raw == "1,32"

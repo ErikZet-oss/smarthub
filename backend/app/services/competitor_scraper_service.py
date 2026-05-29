@@ -27,6 +27,7 @@ _DEFAULT_PRICE_RE = re.compile(
 class CompetitorScrapeConfig:
     product_url_template: Optional[str] = None
     search_via_url_template: Optional[str] = None
+    follow_product_link_regex: Optional[str] = None
     price_selector_regex: Optional[str] = None
     pack_quantity_selector_regex: Optional[str] = None
     user_agent: Optional[str] = None
@@ -48,6 +49,7 @@ def load_competitor_scrape_config(raw: str | None) -> CompetitorScrapeConfig:
     return CompetitorScrapeConfig(
         product_url_template=_opt_str(parsed.get("product_url_template")),
         search_via_url_template=_opt_str(parsed.get("search_via_url_template")),
+        follow_product_link_regex=_opt_str(parsed.get("follow_product_link_regex")),
         price_selector_regex=_opt_str(parsed.get("price_selector_regex")),
         pack_quantity_selector_regex=_opt_str(parsed.get("pack_quantity_selector_regex")),
         user_agent=_opt_str(parsed.get("user_agent")),
@@ -175,6 +177,22 @@ async def fetch_competitor_public_price(
         r.raise_for_status()
         html = r.text or ""
         final_url = str(r.url)
+        if cfg.follow_product_link_regex:
+            try:
+                link_pat = re.compile(cfg.follow_product_link_regex, re.IGNORECASE | re.DOTALL)
+                link_m = link_pat.search(html)
+                if link_m:
+                    link = (link_m.group(1) if link_m.lastindex else link_m.group(0)) or ""
+                    link = str(link).strip()
+                    if link:
+                        base = (shop_url or target_url or "").strip().rstrip("/")
+                        product_url = urljoin(f"{base}/", link.lstrip("/"))
+                        r2 = await client.get(product_url)
+                        r2.raise_for_status()
+                        html = r2.text or ""
+                        final_url = str(r2.url)
+            except re.error:
+                pass
 
     price_eur, raw_price = _extract_price_from_html(html, cfg)
     if price_eur is None:

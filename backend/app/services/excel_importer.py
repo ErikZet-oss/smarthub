@@ -176,10 +176,12 @@ def _mapping_entity_name_for_header(
     if hit:
         return hit
     low_h = h.casefold()
-    if "kód" in low_h or "kod" in low_h:
-        for ename in entity_names_longest_first:
-            if low_h.startswith(ename.casefold()):
-                return ename
+    for ename in entity_names_longest_first:
+        en_cf = ename.casefold()
+        if low_h == en_cf:
+            return ename
+        if ("kód" in low_h or "kod" in low_h) and low_h.startswith(en_cf):
+            return ename
     return _to_supplier_name(h)
 
 
@@ -552,8 +554,10 @@ def import_gamechanger_excel(
             if idx in seen_indices:
                 continue
             low_h = header.strip().casefold()
-            if low_h.startswith(low_cn) and ("kód" in low_h or "kod" in low_h):
-                hstrip = header.strip()
+            hstrip = header.strip()
+            if low_h == low_cn or (
+                low_h.startswith(low_cn) and ("kód" in low_h or "kod" in low_h)
+            ):
                 competitor_code_columns.append((idx, hstrip))
                 seen_indices.add(idx)
                 sync_competitor_code_column[cname] = hstrip
