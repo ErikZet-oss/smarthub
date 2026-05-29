@@ -63,6 +63,34 @@ def _opt_str(v: Any) -> Optional[str]:
     return s or None
 
 
+def _normalize_base_url(url: str) -> str:
+    raw = (url or "").strip().rstrip("/")
+    if not raw:
+        return ""
+    if not raw.startswith(("http://", "https://")):
+        raw = f"https://{raw.lstrip('/')}"
+    return raw
+
+
+def _shop_origin(shop_url: str, fallback_request_url: str = "") -> str:
+    base = _normalize_base_url(shop_url)
+    if base:
+        return base
+    parsed = urlparse(fallback_request_url)
+    if parsed.scheme and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}"
+    return ""
+
+
+def _apply_url_template(tmpl: str, shop_url: str, code: str) -> str:
+    enc = quote(code, safe="")
+    base = _normalize_base_url(shop_url)
+    out = tmpl.replace("{code}", enc)
+    if "{shop_url}" in out:
+        out = out.replace("{shop_url}", base)
+    return out
+
+
 def competitor_product_url(
     shop_url: str,
     competitor_code: str,
@@ -74,14 +102,14 @@ def competitor_product_url(
     enc = quote(code, safe="")
     for tmpl in (config.product_url_template, config.search_via_url_template):
         if tmpl and "{code}" in tmpl:
-            return tmpl.replace("{code}", enc)
-    base = (shop_url or "").strip().rstrip("/")
+            return _apply_url_template(tmpl, shop_url, code)
+    base = _normalize_base_url(shop_url)
     if not base:
         return None
     if config.search_via_url_template:
         t = config.search_via_url_template.strip()
         if "{code}" in t:
-            return t.replace("{code}", enc)
+            return _apply_url_template(t, shop_url, code)
         sep = "&" if "?" in t else "?"
         return f"{t}{sep}q={enc}"
     sep = "&" if "?" in base else "?"
@@ -162,6 +190,11 @@ async def fetch_competitor_public_price(
     target_url = competitor_product_url(shop_url, code, cfg)
     if not target_url:
         raise RuntimeError("Chýba URL e-shopu alebo šablóna produktu v scrape_config_json.")
+    if not target_url.startswith(("http://", "https://")):
+        raise RuntimeError(
+            f"Neplatná URL pre scraper (chýba http/https): {target_url[:120]!r}. "
+            "Skontroluj URL e-shopu a scrape_config_json (placeholdery {{shop_url}}, {{code}})."
+        )
 
     ua = cfg.user_agent or DEFAULT_UA
     async with httpx.AsyncClient(
@@ -185,8 +218,8 @@ async def fetch_competitor_public_price(
                     link = (link_m.group(1) if link_m.lastindex else link_m.group(0)) or ""
                     link = str(link).strip()
                     if link:
-                        base = (shop_url or target_url or "").strip().rstrip("/")
-                        product_url = urljoin(f"{base}/", link.lstrip("/"))
+                        origin = _shop_origin(shop_url, target_url)
+                        product_url = urljoin(f"{origin}/", link.lstrip("/"))
                         r2 = await client.get(product_url)
                         r2.raise_for_status()
                         html = r2.text or ""

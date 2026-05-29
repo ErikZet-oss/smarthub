@@ -31,6 +31,26 @@ def test_competitor_product_url_template() -> None:
     )
 
 
+def test_competitor_product_url_shop_url_placeholder() -> None:
+    cfg = load_competitor_scrape_config(
+        '{"search_via_url_template": "{shop_url}/vyhladavanie/?search_query={code}"}'
+    )
+    assert (
+        competitor_product_url("https://www.svx.sk/", "1975110", cfg)
+        == "https://www.svx.sk/vyhladavanie/?search_query=1975110"
+    )
+
+
+def test_competitor_product_url_adds_https() -> None:
+    cfg = load_competitor_scrape_config(
+        '{"search_via_url_template": "{shop_url}/search?q={code}"}'
+    )
+    assert (
+        competitor_product_url("www.svx.sk", "ABC", cfg)
+        == "https://www.svx.sk/search?q=ABC"
+    )
+
+
 def test_extract_price_secondary_svx_style() -> None:
     html = (
         '<div data-config-product-price-secondary class="text-p-small">'

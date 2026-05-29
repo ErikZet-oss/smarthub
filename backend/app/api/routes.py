@@ -2053,6 +2053,8 @@ def upsert_competitor(
 ):
     shop_url = (payload.shop_url or "").strip()
     if shop_url and not shop_url.startswith(("http://", "https://")):
+        shop_url = f"https://{shop_url.lstrip('/')}"
+    if shop_url and not shop_url.startswith(("http://", "https://")):
         raise HTTPException(status_code=400, detail="shop_url must start with http:// or https://")
 
     competitor = None

@@ -5637,9 +5637,11 @@ export default function Home() {
         codeColumn: "",
         scrapeConfigJson: JSON.stringify(
           {
-            search_via_url_template: "{shop_url}/search?q={code}",
+            search_via_url_template:
+              "https://www.example.sk/vyhladavanie/?search_query={code}",
+            follow_product_link_regex: 'href="(/[^"]+_\\d+/+)"',
             price_selector_regex:
-              'itemprop=["\']price["\'][^>]*content=["\']([^"\']+)["\']',
+              'data-config-product-price-secondary[^>]*>\\s*([0-9,.]+)\\s*€',
           },
           null,
           2,
