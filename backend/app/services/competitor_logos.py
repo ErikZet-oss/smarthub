@@ -6,7 +6,18 @@ import os
 from typing import Optional
 
 _DATA_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data"))
+_REPO_ROOT = os.path.abspath(os.path.join(_DATA_DIR, "..", ".."))
+_REPO_LOGO_DIR = os.path.join(_REPO_ROOT, "logo")
 _LOGOS_SUBDIR = "competitor_logos"
+
+_REPO_LOGO_SEEDS: list[tuple[str, str]] = [
+    ("svx", "SVX.png"),
+    ("oramat", "oramat.png"),
+    ("bbtechnik", "bbtechnik.jpg"),
+    ("vkpsteel", "vkp.png"),
+    ("vkp", "vkp.png"),
+    ("feva", "Feva.png"),
+]
 
 _CONTENT_TYPE_EXT = {
     "image/png": ".png",
@@ -86,3 +97,57 @@ def save_competitor_logo_upload(
     with open(path, "wb") as handle:
         handle.write(data)
     return basename
+
+
+def _competitor_name_compact(name: str) -> str:
+    return (name or "").casefold().replace(" ", "").replace("-", "")
+
+
+def _repo_logo_for_competitor_name(name: str) -> Optional[str]:
+    compact = _competitor_name_compact(name)
+    if not compact:
+        return None
+    for key, filename in _REPO_LOGO_SEEDS:
+        if key in compact:
+            path = os.path.join(_REPO_LOGO_DIR, filename)
+            if os.path.isfile(path):
+                return path
+    return None
+
+
+def seed_competitor_logos_from_repo(session) -> int:
+    """Skopíruje logá z logo/ do data/competitor_logos/ pri štarte API."""
+    from sqlmodel import select
+
+    from app.models.entities import Competitor
+
+    if not os.path.isdir(_REPO_LOGO_DIR):
+        return 0
+    updated = 0
+    for competitor in session.exec(select(Competitor)).all():
+        if competitor.id is None:
+            continue
+        src = _repo_logo_for_competitor_name(competitor.name or "")
+        if not src:
+            continue
+        ext = os.path.splitext(src)[1].lower()
+        ct_map = {
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".webp": "image/webp",
+            ".gif": "image/gif",
+        }
+        content_type = ct_map.get(ext, "image/png")
+        with open(src, "rb") as handle:
+            data = handle.read()
+        basename = save_competitor_logo_upload(
+            int(competitor.id),
+            content_type,
+            data,
+            filename=os.path.basename(src),
+        )
+        competitor.logo_path = basename
+        session.add(competitor)
+        updated += 1
+    return updated

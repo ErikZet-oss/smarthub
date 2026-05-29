@@ -25,6 +25,7 @@ _REPO_LOGO_SEEDS: list[tuple[str, str]] = [
     ("bmco", "bmkco.png"),
     # Schäfer-Peters — meno môže prísť ako „Schaef", „Schäfer", „Schäfer-Peters".
     # Hľadáme prefix bez diakritiky (logo seed sa robí proti casefold + bez medzier).
+    ("schaef", "schaef.png"),
     ("schaef", "Schaefer.png"),
 ]
 

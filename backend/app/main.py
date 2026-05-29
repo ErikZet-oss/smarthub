@@ -30,7 +30,7 @@ from app.services.dev_run_log import dev_run_log, dev_screens_dir
 from app.services.product_images import load_product_image_response
 from app.services.smarthub_bootstrap import seed_initial_admin_if_empty
 from app.services.company_logos import company_logos_dir
-from app.services.competitor_logos import competitor_logos_dir
+from app.services.competitor_logos import competitor_logos_dir, seed_competitor_logos_from_repo
 from app.services.supplier_logos import seed_supplier_logos_from_repo, supplier_logos_dir
 
 _uncaught_error_log = logging.getLogger("smarthub.uncaught")
@@ -172,6 +172,7 @@ def on_startup():
     with Session(engine) as session:
         seed_initial_admin_if_empty(session)
         seed_supplier_logos_from_repo(session)
+        seed_competitor_logos_from_repo(session)
         session.commit()
     dev_run_log(
         "api",
