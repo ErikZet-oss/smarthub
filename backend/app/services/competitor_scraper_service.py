@@ -36,6 +36,71 @@ class CompetitorScrapeConfig:
 _price_cache: dict[tuple[int, str], tuple[float, dict[str, Any]]] = {}
 _CACHE_TTL_SEC = 900.0
 
+# SVX: autocomplete ide cez /vyhladavanie/?search_query= (nie /search/?q=).
+_SVX_SCRAPE_CONFIG = CompetitorScrapeConfig(
+    search_via_url_template="https://www.svx.sk/vyhladavanie/?search_query={code}",
+    follow_product_link_regex=r'href="(/[^"]+_\d+/+)"',
+    price_selector_regex=r"data-config-product-price-secondary[^>]*>\s*([0-9,.]+)\s*€",
+)
+
+_SVX_SCRAPE_CONFIG_JSON = json.dumps(
+    {
+        "search_via_url_template": _SVX_SCRAPE_CONFIG.search_via_url_template,
+        "follow_product_link_regex": _SVX_SCRAPE_CONFIG.follow_product_link_regex,
+        "price_selector_regex": _SVX_SCRAPE_CONFIG.price_selector_regex,
+    },
+    ensure_ascii=False,
+    indent=2,
+)
+
+
+def _is_svx_shop(shop_url: str) -> bool:
+    return "svx.sk" in (shop_url or "").lower()
+
+
+def _uses_broken_generic_search(cfg: CompetitorScrapeConfig) -> bool:
+    if cfg.search_via_url_template:
+        low = cfg.search_via_url_template.lower()
+        if "vyhladavanie" in low and "search_query" in low:
+            return False
+        if "/search" in low or "search?q=" in low or "/katalog/?search" in low:
+            return True
+    if cfg.product_url_template:
+        low = cfg.product_url_template.lower()
+        if "/search" in low or "search?q=" in low:
+            return True
+    if not cfg.search_via_url_template and not cfg.product_url_template:
+        return True
+    return False
+
+
+def resolve_competitor_scrape_config(shop_url: str, raw: str | None) -> CompetitorScrapeConfig:
+    """Efektívna konfigurácia — pre svx.sk opraví generickú /search šablónu."""
+    cfg = load_competitor_scrape_config(raw)
+    if not _is_svx_shop(shop_url):
+        return cfg
+    if _uses_broken_generic_search(cfg):
+        return _SVX_SCRAPE_CONFIG
+    return CompetitorScrapeConfig(
+        product_url_template=cfg.product_url_template,
+        search_via_url_template=cfg.search_via_url_template,
+        follow_product_link_regex=cfg.follow_product_link_regex
+        or _SVX_SCRAPE_CONFIG.follow_product_link_regex,
+        price_selector_regex=cfg.price_selector_regex or _SVX_SCRAPE_CONFIG.price_selector_regex,
+        pack_quantity_selector_regex=cfg.pack_quantity_selector_regex,
+        user_agent=cfg.user_agent,
+    )
+
+
+def normalize_scrape_config_json_for_shop(shop_url: str, raw: str | None) -> str | None:
+    """Pri uložení konkurenta vráti opravený JSON (svx.sk — správny search endpoint)."""
+    text = (raw or "").strip()
+    if not _is_svx_shop(shop_url):
+        return text or None
+    if _uses_broken_generic_search(load_competitor_scrape_config(text)):
+        return _SVX_SCRAPE_CONFIG_JSON
+    return text or None
+
 
 def load_competitor_scrape_config(raw: str | None) -> CompetitorScrapeConfig:
     if not (raw or "").strip():
@@ -112,6 +177,8 @@ def competitor_product_url(
             return _apply_url_template(t, shop_url, code)
         sep = "&" if "?" in t else "?"
         return f"{t}{sep}q={enc}"
+    if _is_svx_shop(base):
+        return f"{base}/vyhladavanie/?search_query={enc}"
     sep = "&" if "?" in base else "?"
     return f"{base}{sep}q={enc}"
 
@@ -186,7 +253,7 @@ async def fetch_competitor_public_price(
         out["from_cache"] = True
         return out
 
-    cfg = load_competitor_scrape_config(scrape_config_json)
+    cfg = resolve_competitor_scrape_config(shop_url, scrape_config_json)
     target_url = competitor_product_url(shop_url, code, cfg)
     if not target_url:
         raise RuntimeError("Chýba URL e-shopu alebo šablóna produktu v scrape_config_json.")

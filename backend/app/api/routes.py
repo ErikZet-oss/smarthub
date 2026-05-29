@@ -68,6 +68,8 @@ from app.services.competitor_scraper_service import (
     fetch_competitor_public_price,
     invalidate_competitor_price_cache,
     load_competitor_scrape_config,
+    normalize_scrape_config_json_for_shop,
+    resolve_competitor_scrape_config,
 )
 from app.services.company_logos import (
     company_logo_public_url,
@@ -201,7 +203,7 @@ def _competitor_product_url(competitor: Competitor, competitor_code: str | None)
     code = (competitor_code or "").strip()
     if not code:
         return None
-    cfg = load_competitor_scrape_config(competitor.scrape_config_json)
+    cfg = resolve_competitor_scrape_config(competitor.shop_url or "", competitor.scrape_config_json)
     url = competitor_product_url(competitor.shop_url or "", code, cfg)
     if url:
         return url
@@ -2067,7 +2069,9 @@ def upsert_competitor(
             select(Competitor).where(Competitor.name == payload.name)
         ).first()
 
-    scrape_cfg = (payload.scrape_config_json or "").strip() or None
+    scrape_cfg = normalize_scrape_config_json_for_shop(
+        shop_url, (payload.scrape_config_json or "").strip() or None
+    )
     if competitor is None:
         competitor = Competitor(
             name=payload.name.strip(),

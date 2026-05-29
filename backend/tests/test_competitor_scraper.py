@@ -5,6 +5,7 @@ from app.services.competitor_scraper_service import (
     _parse_eur_amount,
     competitor_product_url,
     load_competitor_scrape_config,
+    resolve_competitor_scrape_config,
 )
 
 
@@ -48,6 +49,20 @@ def test_competitor_product_url_adds_https() -> None:
     assert (
         competitor_product_url("www.svx.sk", "ABC", cfg)
         == "https://www.svx.sk/search?q=ABC"
+    )
+
+
+def test_resolve_svx_replaces_broken_search_template() -> None:
+    cfg = resolve_competitor_scrape_config(
+        "https://www.svx.sk/",
+        '{"search_via_url_template": "{shop_url}/search?q={code}"}',
+    )
+    assert cfg.search_via_url_template == "https://www.svx.sk/vyhladavanie/?search_query={code}"
+    assert cfg.follow_product_link_regex
+    assert cfg.price_selector_regex
+    assert (
+        competitor_product_url("https://www.svx.sk/", "1975110", cfg)
+        == "https://www.svx.sk/vyhladavanie/?search_query=1975110"
     )
 
 
