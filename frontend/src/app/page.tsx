@@ -3693,6 +3693,11 @@ export default function Home() {
   const [mappingProfileLoading, setMappingProfileLoading] = useState(false);
   const [excelImportRunning, setExcelImportRunning] = useState(false);
   const [excelImportProgressPct, setExcelImportProgressPct] = useState<number | null>(null);
+  const [competitorExportRunning, setCompetitorExportRunning] = useState(false);
+  const [competitorExportProgressPct, setCompetitorExportProgressPct] = useState<
+    number | null
+  >(null);
+  const [competitorExportMessage, setCompetitorExportMessage] = useState("");
   const [fieldToColumn, setFieldToColumn] = useState<Record<FilterField, string>>({
     code: "",
     norma: "",
@@ -6760,6 +6765,138 @@ export default function Home() {
     }
   };
 
+  const runCompetitorLowestExport = async () => {
+    if (!apiToken) {
+      setCompetitorExportMessage("Pre export sa prihlás.");
+      return;
+    }
+    const exportBody = {
+      code: debouncedCode.trim() || null,
+      norma: searchFilters.norma || null,
+      surface: searchFilters.surface || null,
+      diameter: searchFilters.diameter || null,
+      length: searchFilters.length || null,
+      v_class: searchFilters.v_class || null,
+      y_money_name: searchFilters.y_money_name || null,
+      image_filename: searchFilters.image_filename || null,
+    };
+    const hasFilter = Object.values(exportBody).some(
+      (value) => typeof value === "string" && value.trim().length > 0,
+    );
+    if (!hasFilter) {
+      setCompetitorExportMessage(
+        "Nastav aspoň jeden filter (napr. normu), potom spusti export.",
+      );
+      return;
+    }
+    setCompetitorExportRunning(true);
+    setCompetitorExportProgressPct(0);
+    setCompetitorExportMessage("Pripravujem export…");
+    try {
+      const startResponse = await apiFetch(
+        `${API_BASE}/api/competitors/export-lowest-prices/start`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(exportBody),
+        },
+      );
+      const startPayload = (await startResponse.json()) as {
+        detail?: unknown;
+        task_id?: string;
+        total?: number;
+      };
+      if (!startResponse.ok || !startPayload.task_id) {
+        throw new Error(formatApiDetail(startPayload.detail));
+      }
+      const taskId = startPayload.task_id;
+      const totalProducts = startPayload.total ?? 0;
+      type ExportTaskResponse = {
+        detail?: unknown;
+        state?: string;
+        progress_pct?: number;
+        processed?: number;
+        total?: number;
+        errors?: number;
+        row_count?: number;
+        filename?: string;
+        error?: string;
+      };
+      let finalPayload: ExportTaskResponse | null = null;
+      while (true) {
+        await new Promise((resolve) => window.setTimeout(resolve, 1500));
+        const statusResponse = await apiFetch(
+          `${API_BASE}/api/competitors/export-lowest-prices/${taskId}`,
+        );
+        const statusPayload = (await statusResponse.json()) as ExportTaskResponse;
+        if (!statusResponse.ok) {
+          throw new Error(formatApiDetail(statusPayload.detail));
+        }
+        const processed = statusPayload.processed ?? 0;
+        const total = statusPayload.total ?? totalProducts;
+        const pct =
+          typeof statusPayload.progress_pct === "number" ?
+            statusPayload.progress_pct
+          : total > 0 ?
+            Math.min(100, Math.round((processed / total) * 100))
+          : 0;
+        setCompetitorExportProgressPct(pct);
+        const errCount = statusPayload.errors ?? 0;
+        setCompetitorExportMessage(
+          total > 0 ?
+            `Načítavam ceny konkurencie… ${pct}% (${processed}/${total} produktov` +
+              (errCount > 0 ? `, ${errCount} bez ceny` : "") +
+              ")"
+          : `Načítavam ceny konkurencie… ${processed} produktov`,
+        );
+        if (statusPayload.state === "done") {
+          finalPayload = statusPayload;
+          break;
+        }
+        if (statusPayload.state === "error") {
+          throw new Error(statusPayload.error || "Export zlyhal.");
+        }
+      }
+      const downloadResponse = await apiFetch(
+        `${API_BASE}/api/competitors/export-lowest-prices/${taskId}/download`,
+      );
+      if (!downloadResponse.ok) {
+        const errPayload = (await downloadResponse.json()) as { detail?: unknown };
+        throw new Error(formatApiDetail(errPayload.detail));
+      }
+      const blob = await downloadResponse.blob();
+      const disposition = downloadResponse.headers.get("Content-Disposition") || "";
+      const nameMatch = disposition.match(/filename="([^"]+)"/i);
+      const filename =
+        nameMatch?.[1] ||
+        finalPayload?.filename ||
+        "najnizsie-ceny-konkurencie.csv";
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      setCompetitorExportProgressPct(100);
+      const rows = finalPayload?.row_count ?? 0;
+      const errors = finalPayload?.errors ?? 0;
+      setCompetitorExportMessage(
+        `Export hotový: ${rows} riadkov` +
+          (errors > 0 ? ` (${errors} produktov bez dostupnej ceny)` : "") +
+          `. Súbor ${filename} bol stiahnutý.`,
+      );
+    } catch (error) {
+      setCompetitorExportMessage(
+        error instanceof Error ? error.message : "Export zlyhal.",
+      );
+      setCompetitorExportProgressPct(null);
+    } finally {
+      setCompetitorExportRunning(false);
+    }
+  };
+
   const dropdownOptions = (field: FilterField) => {
     const column = fieldToColumn[field];
     if (!column || !mappingProfile) {
@@ -7101,6 +7238,25 @@ export default function Home() {
                     >
                       Vymazať filtre
                     </Button>
+                    {priceSourceMode === "competitors" && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={competitorExportRunning}
+                        className="h-8 border-amber-300 bg-amber-50 px-2.5 text-xs text-amber-900 hover:bg-amber-100 sm:h-9 sm:px-3 sm:text-sm"
+                        onClick={() => {
+                          void runCompetitorLowestExport();
+                        }}
+                      >
+                        {competitorExportRunning ? (
+                          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <FileSpreadsheet className="mr-1.5 h-3.5 w-3.5" />
+                        )}
+                        Export najnižších cien
+                      </Button>
+                    )}
                     <button
                       type="button"
                       title={
@@ -7360,6 +7516,30 @@ export default function Home() {
                 {searchMessage && (
                   <p className="mt-2 text-xs text-slate-600">{searchMessage}</p>
                 )}
+                {priceSourceMode === "competitors" && competitorExportMessage && (
+                  <p
+                    className={cn(
+                      "mt-2 text-xs",
+                      competitorExportRunning ?
+                        "text-amber-800"
+                      : competitorExportProgressPct === 100 ?
+                        "text-emerald-800"
+                      : "text-slate-600",
+                    )}
+                  >
+                    {competitorExportMessage}
+                  </p>
+                )}
+                {priceSourceMode === "competitors" &&
+                  competitorExportRunning &&
+                  competitorExportProgressPct != null && (
+                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-amber-100">
+                      <div
+                        className="h-full rounded-full bg-amber-500 transition-[width] duration-300"
+                        style={{ width: `${competitorExportProgressPct}%` }}
+                      />
+                    </div>
+                  )}
                 </div>
               </Card>
 

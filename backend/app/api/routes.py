@@ -63,6 +63,13 @@ from app.services.competitor_logos import (
     remove_competitor_logo_files,
     save_competitor_logo_upload,
 )
+from app.services.competitor_lowest_price_export import (
+    MAX_EXPORT_PRODUCTS,
+    build_lowest_price_csv,
+    count_products_for_export,
+    export_filters_active,
+    run_lowest_price_export,
+)
 from app.services.competitor_scraper_service import (
     competitor_product_url,
     fetch_competitor_public_price,
@@ -105,6 +112,8 @@ router = APIRouter()
 automation = AutomationEngine()
 _IMPORT_TASKS: dict[str, dict[str, object]] = {}
 _IMPORT_TASKS_LOCK = threading.Lock()
+_COMPETITOR_EXPORT_TASKS: dict[str, dict[str, object]] = {}
+_COMPETITOR_EXPORT_TASKS_LOCK = threading.Lock()
 
 # Krátka TTL cache na conditional filter-options. Bez aktívnych filtrov (typický prvý
 # request po otvorení sekcie Vyhľadávanie) ide o najpomalší endpoint — 6× SELECT DISTINCT.
@@ -337,6 +346,17 @@ class CompetitorReorderPayload(BaseModel):
 class CompetitorPricePayload(BaseModel):
     competitor_id: int
     competitor_code: str
+
+
+class CompetitorLowestPriceExportPayload(BaseModel):
+    code: str | None = None
+    norma: str | None = None
+    surface: str | None = None
+    diameter: str | None = None
+    length: str | None = None
+    v_class: str | None = None
+    y_money_name: str | None = None
+    image_filename: str | None = None
 
 
 class ImportExcelPayload(BaseModel):
@@ -2214,6 +2234,168 @@ async def competitor_price(
     if data.get("competitor_product_url"):
         data["supplier_product_url"] = data["competitor_product_url"]
     return data
+
+
+def _competitor_export_filters(payload: CompetitorLowestPriceExportPayload) -> ProductSearchFilters:
+    return ProductSearchFilters(
+        code=(payload.code or "").strip() or None,
+        norma=(payload.norma or "").strip() or None,
+        surface=(payload.surface or "").strip() or None,
+        diameter=(payload.diameter or "").strip() or None,
+        length=(payload.length or "").strip() or None,
+        v_class=(payload.v_class or "").strip() or None,
+        y_money_name=(payload.y_money_name or "").strip() or None,
+        image_filename=(payload.image_filename or "").strip() or None,
+    )
+
+
+def _competitor_export_task_snapshot(task_id: str) -> dict[str, object] | None:
+    with _COMPETITOR_EXPORT_TASKS_LOCK:
+        task = _COMPETITOR_EXPORT_TASKS.get(task_id)
+        if task is None:
+            return None
+        return dict(task)
+
+
+def _competitor_export_task_update(task_id: str, **patch: object) -> None:
+    with _COMPETITOR_EXPORT_TASKS_LOCK:
+        task = _COMPETITOR_EXPORT_TASKS.get(task_id)
+        if task is None:
+            return
+        task.update(patch)
+        task["updated_at"] = time.time()
+
+
+def _run_competitor_lowest_export_task(
+    task_id: str, filters: ProductSearchFilters, total_products: int
+) -> None:
+    _competitor_export_task_update(task_id, state="running", total=total_products)
+
+    def _progress(processed: int, total: int, errors: int) -> None:
+        _competitor_export_task_update(
+            task_id, processed=processed, total=total, errors=errors
+        )
+
+    try:
+        with Session(engine) as session:
+            rows, _ = asyncio.run(
+                run_lowest_price_export(session, filters, progress_cb=_progress)
+            )
+        csv_bytes = build_lowest_price_csv(rows)
+        filename_bits = ["najnizsie-ceny-konkurencie"]
+        if filters.norma:
+            safe_norma = re.sub(r"[^\w\-]+", "-", filters.norma.strip())[:40]
+            if safe_norma:
+                filename_bits.append(safe_norma)
+        filename_bits.append(datetime.now().strftime("%Y%m%d"))
+        filename = "-".join(filename_bits) + ".csv"
+        _competitor_export_task_update(
+            task_id,
+            state="done",
+            csv_bytes=csv_bytes,
+            filename=filename,
+            row_count=len(rows),
+            finished_at=time.time(),
+        )
+    except Exception as exc:
+        _competitor_export_task_update(
+            task_id, state="error", error=str(exc), finished_at=time.time()
+        )
+
+
+@router.post("/competitors/export-lowest-prices/start")
+def competitor_lowest_export_start(
+    payload: CompetitorLowestPriceExportPayload,
+    session: Session = Depends(get_session),
+    _: AuthUserContext = Depends(get_current_user),
+):
+    filters = _competitor_export_filters(payload)
+    if not export_filters_active(filters):
+        raise HTTPException(
+            status_code=400,
+            detail="Nastav aspoň jeden filter (napr. normu), aby export neobsahoval celú databázu.",
+        )
+    total = count_products_for_export(session, filters)
+    if total == 0:
+        raise HTTPException(status_code=400, detail="Podľa filtrov sa nenašiel žiadny produkt.")
+    if total > MAX_EXPORT_PRODUCTS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Filter zodpovedá {total} produktom (max. {MAX_EXPORT_PRODUCTS}). Spresni filter.",
+        )
+
+    task_id = uuid4().hex
+    with _COMPETITOR_EXPORT_TASKS_LOCK:
+        _COMPETITOR_EXPORT_TASKS[task_id] = {
+            "task_id": task_id,
+            "state": "queued",
+            "processed": 0,
+            "total": total,
+            "errors": 0,
+            "row_count": 0,
+            "filename": None,
+            "csv_bytes": None,
+            "error": None,
+            "created_at": time.time(),
+            "updated_at": time.time(),
+            "finished_at": None,
+        }
+    thread = threading.Thread(
+        target=_run_competitor_lowest_export_task,
+        args=(task_id, filters, total),
+        daemon=True,
+    )
+    thread.start()
+    return {"task_id": task_id, "state": "queued", "total": total}
+
+
+@router.get("/competitors/export-lowest-prices/{task_id}")
+def competitor_lowest_export_status(
+    task_id: str,
+    _: AuthUserContext = Depends(get_current_user),
+):
+    task = _competitor_export_task_snapshot(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Export task neexistuje.")
+    total = int(task.get("total") or 0)
+    processed = int(task.get("processed") or 0)
+    progress_pct = 0
+    if total > 0:
+        progress_pct = min(100, int((processed / total) * 100))
+    return {
+        "task_id": task_id,
+        "state": task.get("state"),
+        "processed": processed,
+        "total": total,
+        "errors": int(task.get("errors") or 0),
+        "row_count": int(task.get("row_count") or 0),
+        "progress_pct": progress_pct,
+        "filename": task.get("filename"),
+        "error": task.get("error"),
+        "finished_at": task.get("finished_at"),
+    }
+
+
+@router.get("/competitors/export-lowest-prices/{task_id}/download")
+def competitor_lowest_export_download(
+    task_id: str,
+    _: AuthUserContext = Depends(get_current_user),
+):
+    with _COMPETITOR_EXPORT_TASKS_LOCK:
+        task = _COMPETITOR_EXPORT_TASKS.get(task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail="Export task neexistuje.")
+        if task.get("state") != "done":
+            raise HTTPException(status_code=409, detail="Export ešte nie je dokončený.")
+        csv_bytes = task.get("csv_bytes")
+        filename = str(task.get("filename") or "najnizsie-ceny-konkurencie.csv")
+    if not isinstance(csv_bytes, (bytes, bytearray)) or not csv_bytes:
+        raise HTTPException(status_code=500, detail="Chýba súbor exportu.")
+    return Response(
+        content=bytes(csv_bytes),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 def _import_task_snapshot(task_id: str) -> dict[str, object] | None:
