@@ -79,6 +79,15 @@ def test_resolve_oramat_ignores_example_sk_template() -> None:
     )
 
 
+def test_resolve_bbtechnik_preset() -> None:
+    cfg = resolve_competitor_scrape_config("https://www.bbtechnik.sk/", None)
+    assert cfg.search_via_url_template == "{shop_url}/vyhladavanie/?string={code}"
+    assert (
+        competitor_product_url("https://www.bbtechnik.sk/", "000975001000100000", cfg)
+        == "https://www.bbtechnik.sk/vyhladavanie/?string=000975001000100000"
+    )
+
+
 def test_resolve_oramat_preset() -> None:
     cfg = resolve_competitor_scrape_config("https://www.oramat.sk/", None)
     assert cfg.search_via_url_template == "{shop_url}/vyhladavanie/?string={code}"

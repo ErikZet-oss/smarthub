@@ -53,21 +53,22 @@ _SVX_SCRAPE_CONFIG_JSON = json.dumps(
     indent=2,
 )
 
-# Oramat (Shoptet): vyhľadávanie /vyhladavanie/?string=, cena bez DPH v .price-additional
-_ORAMAT_FOLLOW_LINK_RE = (
+# Shoptet (Oramat, Bbtechnik, …): /vyhladavanie/?string=, cena bez DPH v .price-additional
+_SHOPTET_SHOP_HOSTS = ("oramat.sk", "bbtechnik.sk")
+_SHOPTET_FOLLOW_LINK_RE = (
     r'href="(/[^"]+)"[\s\S]{0,4000}?data-micro="sku">{code}'
 )
-_ORAMAT_SCRAPE_CONFIG = CompetitorScrapeConfig(
+_SHOPTET_SCRAPE_CONFIG = CompetitorScrapeConfig(
     search_via_url_template="{shop_url}/vyhladavanie/?string={code}",
-    follow_product_link_regex=_ORAMAT_FOLLOW_LINK_RE,
+    follow_product_link_regex=_SHOPTET_FOLLOW_LINK_RE,
     price_selector_regex=r'class="price-additional[^"]*"[^>]*>\s*([0-9,.]+)\s*€',
 )
 
-_ORAMAT_SCRAPE_CONFIG_JSON = json.dumps(
+_SHOPTET_SCRAPE_CONFIG_JSON = json.dumps(
     {
-        "search_via_url_template": _ORAMAT_SCRAPE_CONFIG.search_via_url_template,
-        "follow_product_link_regex": _ORAMAT_SCRAPE_CONFIG.follow_product_link_regex,
-        "price_selector_regex": _ORAMAT_SCRAPE_CONFIG.price_selector_regex,
+        "search_via_url_template": _SHOPTET_SCRAPE_CONFIG.search_via_url_template,
+        "follow_product_link_regex": _SHOPTET_SCRAPE_CONFIG.follow_product_link_regex,
+        "price_selector_regex": _SHOPTET_SCRAPE_CONFIG.price_selector_regex,
     },
     ensure_ascii=False,
     indent=2,
@@ -78,8 +79,9 @@ def _is_svx_shop(shop_url: str) -> bool:
     return "svx.sk" in (shop_url or "").lower()
 
 
-def _is_oramat_shop(shop_url: str) -> bool:
-    return "oramat.sk" in (shop_url or "").lower()
+def _is_shoptet_shop(shop_url: str) -> bool:
+    low = (shop_url or "").lower()
+    return any(host in low for host in _SHOPTET_SHOP_HOSTS)
 
 
 def _apply_code_to_regex(pattern: str, code: str) -> str:
@@ -108,7 +110,7 @@ def _is_placeholder_or_foreign_config(shop_url: str, cfg: CompetitorScrapeConfig
     return False
 
 
-def _oramat_config_is_wrong(cfg: CompetitorScrapeConfig) -> bool:
+def _shoptet_config_is_wrong(cfg: CompetitorScrapeConfig) -> bool:
     tmpl = (cfg.search_via_url_template or "").lower()
     if not tmpl:
         return False
@@ -131,7 +133,7 @@ def _svx_config_is_wrong(cfg: CompetitorScrapeConfig) -> bool:
 def _config_needs_shop_preset(shop_url: str, cfg: CompetitorScrapeConfig) -> bool:
     if _is_placeholder_or_foreign_config(shop_url, cfg):
         return True
-    if _is_oramat_shop(shop_url) and _oramat_config_is_wrong(cfg):
+    if _is_shoptet_shop(shop_url) and _shoptet_config_is_wrong(cfg):
         return True
     if _is_svx_shop(shop_url) and _svx_config_is_wrong(cfg):
         return True
@@ -173,16 +175,16 @@ def _uses_broken_generic_search(cfg: CompetitorScrapeConfig) -> bool:
 
 
 def resolve_competitor_scrape_config(shop_url: str, raw: str | None) -> CompetitorScrapeConfig:
-    """Efektívna konfigurácia — známe e-shopy majú preset (SVX, Oramat)."""
+    """Efektívna konfigurácia — známe e-shopy majú preset (SVX, Shoptet)."""
     cfg = load_competitor_scrape_config(raw)
     if _is_svx_shop(shop_url):
         if _config_needs_shop_preset(shop_url, cfg):
             return _SVX_SCRAPE_CONFIG
         return _merge_shop_preset(cfg, _SVX_SCRAPE_CONFIG)
-    if _is_oramat_shop(shop_url):
+    if _is_shoptet_shop(shop_url):
         if _config_needs_shop_preset(shop_url, cfg):
-            return _ORAMAT_SCRAPE_CONFIG
-        return _merge_shop_preset(cfg, _ORAMAT_SCRAPE_CONFIG)
+            return _SHOPTET_SCRAPE_CONFIG
+        return _merge_shop_preset(cfg, _SHOPTET_SCRAPE_CONFIG)
     return cfg
 
 
@@ -193,10 +195,10 @@ def normalize_scrape_config_json_for_shop(shop_url: str, raw: str | None) -> str
         shop_url, load_competitor_scrape_config(text)
     ):
         return _SVX_SCRAPE_CONFIG_JSON
-    if _is_oramat_shop(shop_url) and _config_needs_shop_preset(
+    if _is_shoptet_shop(shop_url) and _config_needs_shop_preset(
         shop_url, load_competitor_scrape_config(text)
     ):
-        return _ORAMAT_SCRAPE_CONFIG_JSON
+        return _SHOPTET_SCRAPE_CONFIG_JSON
     return text or None
 
 
@@ -277,7 +279,7 @@ def competitor_product_url(
         return f"{t}{sep}q={enc}"
     if _is_svx_shop(base):
         return f"{base}/vyhladavanie/?search_query={enc}"
-    if _is_oramat_shop(base):
+    if _is_shoptet_shop(base):
         return f"{base}/vyhladavanie/?string={enc}"
     sep = "&" if "?" in base else "?"
     return f"{base}{sep}q={enc}"

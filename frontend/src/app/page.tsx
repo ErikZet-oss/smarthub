@@ -8865,10 +8865,10 @@ export default function Home() {
                                 </label>
                               </div>
                               <label className="block text-[11px] text-slate-600">
-                                scrape_config_json (voliteľné — SVX/Oramat majú preset)
+                                scrape_config_json (voliteľné — SVX/Oramat/Bbtechnik majú preset)
                                 <textarea
                                   value={competitor.scrapeConfigJson}
-                                  placeholder='Prázdne = automatický preset podľa URL e-shopu (oramat.sk, svx.sk)'
+                                  placeholder='Prázdne = automatický preset podľa URL (oramat.sk, bbtechnik.sk, svx.sk)'
                                   onChange={(e) =>
                                     setCompetitorForms((prev) =>
                                       prev.map((c, i) =>
