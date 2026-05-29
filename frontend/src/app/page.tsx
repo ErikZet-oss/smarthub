@@ -7009,7 +7009,6 @@ export default function Home() {
                       <PackageSearch className="h-4 w-4 shrink-0 text-sky-600" />
                       Filtre (podľa mapovania z Párovania)
                       <Badge
-                        variant="secondary"
                         className={cn(
                           "ml-1 hidden text-[10px] font-medium sm:inline-flex",
                           priceSourceMode === "competitors"
