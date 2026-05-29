@@ -7226,58 +7226,60 @@ export default function Home() {
                         />
                       </button>
                     </div>
-                    <Button
-                      type="button"
-                      variant="default"
-                      size="sm"
-                      className="h-8 px-2.5 text-xs shadow-sm shadow-sky-600/20 sm:h-9 sm:px-3 sm:text-sm"
-                      onClick={() => {
-                        setSearchFilters({ ...initialSearchFilters });
-                        setDebouncedCode("");
-                      }}
-                    >
-                      Vymazať filtre
-                    </Button>
-                    {priceSourceMode === "competitors" && (
+                    <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                       <Button
                         type="button"
-                        variant="outline"
+                        variant="default"
                         size="sm"
-                        disabled={competitorExportRunning}
-                        className="h-8 border-amber-300 bg-amber-50 px-2.5 text-xs text-amber-900 hover:bg-amber-100 sm:h-9 sm:px-3 sm:text-sm"
+                        className="h-8 px-2.5 text-xs shadow-sm shadow-sky-600/20 sm:h-9 sm:px-3 sm:text-sm"
                         onClick={() => {
-                          void runCompetitorLowestExport();
+                          setSearchFilters({ ...initialSearchFilters });
+                          setDebouncedCode("");
                         }}
                       >
-                        {competitorExportRunning ? (
-                          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <FileSpreadsheet className="mr-1.5 h-3.5 w-3.5" />
-                        )}
-                        Export najnižších cien
+                        Vymazať filtre
                       </Button>
-                    )}
-                    <button
-                      type="button"
-                      title={
-                        priceSourceMode === "suppliers"
-                          ? "Prepnúť na ceny konkurencie"
-                          : "Prepnúť na dodávateľov"
-                      }
-                      className={cn(
-                        "inline-flex h-8 w-8 items-center justify-center rounded-md border shadow-sm transition sm:h-9 sm:w-9",
-                        priceSourceMode === "competitors"
-                          ? "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
-                          : "border-sky-200 bg-white text-sky-700 hover:bg-sky-50",
+                      {priceSourceMode === "competitors" && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={competitorExportRunning}
+                          className="h-8 border-amber-300 bg-amber-50 px-2.5 text-xs text-amber-900 hover:bg-amber-100 sm:h-9 sm:px-3 sm:text-sm"
+                          onClick={() => {
+                            void runCompetitorLowestExport();
+                          }}
+                        >
+                          {competitorExportRunning ? (
+                            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <FileSpreadsheet className="mr-1.5 h-3.5 w-3.5" />
+                          )}
+                          Export
+                        </Button>
                       )}
-                      onClick={() =>
-                        setPriceSourceMode((m) =>
-                          m === "suppliers" ? "competitors" : "suppliers",
-                        )
-                      }
-                    >
-                      <Scale className="h-4 w-4" aria-hidden />
-                    </button>
+                      <button
+                        type="button"
+                        title={
+                          priceSourceMode === "suppliers"
+                            ? "Prepnúť na ceny konkurencie"
+                            : "Prepnúť na dodávateľov"
+                        }
+                        className={cn(
+                          "inline-flex h-8 w-8 items-center justify-center rounded-md border shadow-sm transition sm:h-9 sm:w-9",
+                          priceSourceMode === "competitors"
+                            ? "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
+                            : "border-sky-200 bg-white text-sky-700 hover:bg-sky-50",
+                        )}
+                        onClick={() =>
+                          setPriceSourceMode((m) =>
+                            m === "suppliers" ? "competitors" : "suppliers",
+                          )
+                        }
+                      >
+                        <Scale className="h-4 w-4" aria-hidden />
+                      </button>
+                    </div>
                   </div>
                 </div>
                 <div className="p-2.5 sm:p-4">
