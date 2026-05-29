@@ -5635,17 +5635,7 @@ export default function Home() {
         name: "",
         shopUrl: "",
         codeColumn: "",
-        scrapeConfigJson: JSON.stringify(
-          {
-            search_via_url_template:
-              "https://www.example.sk/vyhladavanie/?search_query={code}",
-            follow_product_link_regex: 'href="(/[^"]+_\\d+/+)"',
-            price_selector_regex:
-              'data-config-product-price-secondary[^>]*>\\s*([0-9,.]+)\\s*€',
-          },
-          null,
-          2,
-        ),
+        scrapeConfigJson: "",
         isActive: true,
         logoUrl: null,
       },
@@ -8875,9 +8865,10 @@ export default function Home() {
                                 </label>
                               </div>
                               <label className="block text-[11px] text-slate-600">
-                                scrape_config_json (HTTP selektory ceny)
+                                scrape_config_json (voliteľné — SVX/Oramat majú preset)
                                 <textarea
                                   value={competitor.scrapeConfigJson}
+                                  placeholder='Prázdne = automatický preset podľa URL e-shopu (oramat.sk, svx.sk)'
                                   onChange={(e) =>
                                     setCompetitorForms((prev) =>
                                       prev.map((c, i) =>

@@ -86,7 +86,55 @@ def _apply_code_to_regex(pattern: str, code: str) -> str:
     return pattern.replace("{code}", re.escape(code))
 
 
-def _config_needs_shop_preset(cfg: CompetitorScrapeConfig) -> bool:
+def _template_url_host(tmpl: str | None) -> str:
+    if not tmpl or not tmpl.strip().startswith(("http://", "https://")):
+        return ""
+    return (urlparse(tmpl.strip()).netloc or "").lower()
+
+
+def _is_placeholder_or_foreign_config(shop_url: str, cfg: CompetitorScrapeConfig) -> bool:
+    shop_host = (urlparse(_normalize_base_url(shop_url)).netloc or "").lower()
+    for tmpl in (cfg.search_via_url_template, cfg.product_url_template):
+        if not tmpl:
+            continue
+        low = tmpl.lower()
+        if "example.sk" in low or "example.com" in low:
+            return True
+        if "{shop_url}" in tmpl:
+            continue
+        tmpl_host = _template_url_host(tmpl)
+        if tmpl_host and shop_host and tmpl_host != shop_host:
+            return True
+    return False
+
+
+def _oramat_config_is_wrong(cfg: CompetitorScrapeConfig) -> bool:
+    tmpl = (cfg.search_via_url_template or "").lower()
+    if not tmpl:
+        return False
+    if "search_query" in tmpl:
+        return True
+    if "vyhladavanie" in tmpl and "string=" not in tmpl:
+        return True
+    return False
+
+
+def _svx_config_is_wrong(cfg: CompetitorScrapeConfig) -> bool:
+    tmpl = (cfg.search_via_url_template or "").lower()
+    if not tmpl:
+        return False
+    if "vyhladavanie" in tmpl and "string=" in tmpl:
+        return True
+    return False
+
+
+def _config_needs_shop_preset(shop_url: str, cfg: CompetitorScrapeConfig) -> bool:
+    if _is_placeholder_or_foreign_config(shop_url, cfg):
+        return True
+    if _is_oramat_shop(shop_url) and _oramat_config_is_wrong(cfg):
+        return True
+    if _is_svx_shop(shop_url) and _svx_config_is_wrong(cfg):
+        return True
     if _uses_broken_generic_search(cfg):
         return True
     if not cfg.search_via_url_template and not cfg.product_url_template:
@@ -128,11 +176,11 @@ def resolve_competitor_scrape_config(shop_url: str, raw: str | None) -> Competit
     """Efektívna konfigurácia — známe e-shopy majú preset (SVX, Oramat)."""
     cfg = load_competitor_scrape_config(raw)
     if _is_svx_shop(shop_url):
-        if _config_needs_shop_preset(cfg):
+        if _config_needs_shop_preset(shop_url, cfg):
             return _SVX_SCRAPE_CONFIG
         return _merge_shop_preset(cfg, _SVX_SCRAPE_CONFIG)
     if _is_oramat_shop(shop_url):
-        if _config_needs_shop_preset(cfg):
+        if _config_needs_shop_preset(shop_url, cfg):
             return _ORAMAT_SCRAPE_CONFIG
         return _merge_shop_preset(cfg, _ORAMAT_SCRAPE_CONFIG)
     return cfg
@@ -141,9 +189,13 @@ def resolve_competitor_scrape_config(shop_url: str, raw: str | None) -> Competit
 def normalize_scrape_config_json_for_shop(shop_url: str, raw: str | None) -> str | None:
     """Pri uložení konkurenta vráti opravený JSON pre známe e-shopy."""
     text = (raw or "").strip()
-    if _is_svx_shop(shop_url) and _config_needs_shop_preset(load_competitor_scrape_config(text)):
+    if _is_svx_shop(shop_url) and _config_needs_shop_preset(
+        shop_url, load_competitor_scrape_config(text)
+    ):
         return _SVX_SCRAPE_CONFIG_JSON
-    if _is_oramat_shop(shop_url) and _config_needs_shop_preset(load_competitor_scrape_config(text)):
+    if _is_oramat_shop(shop_url) and _config_needs_shop_preset(
+        shop_url, load_competitor_scrape_config(text)
+    ):
         return _ORAMAT_SCRAPE_CONFIG_JSON
     return text or None
 
