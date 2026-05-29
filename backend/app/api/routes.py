@@ -18,6 +18,8 @@ from app.api.deps import AuthUserContext, get_current_user, require_admin, requi
 from app.db import engine, get_session
 from app.models.entities import (
     CompanySettings,
+    Competitor,
+    CompetitorProductMapping,
     FieldMapping,
     Offer,
     OfferLine,
@@ -55,6 +57,17 @@ from app.services.smarthub_bootstrap import (
     ensure_credentials_for_supplier,
     hash_password,
     verify_password,
+)
+from app.services.competitor_logos import (
+    competitor_logo_public_url,
+    remove_competitor_logo_files,
+    save_competitor_logo_upload,
+)
+from app.services.competitor_scraper_service import (
+    competitor_product_url,
+    fetch_competitor_public_price,
+    invalidate_competitor_price_cache,
+    load_competitor_scrape_config,
 )
 from app.services.company_logos import (
     company_logo_public_url,
@@ -177,6 +190,41 @@ def _next_supplier_sort_order(session: Session) -> int:
     return max((s.sort_order or 0) for s in suppliers) + 10
 
 
+def _next_competitor_sort_order(session: Session) -> int:
+    rows = session.exec(select(Competitor)).all()
+    if not rows:
+        return 0
+    return max((c.sort_order or 0) for c in rows) + 10
+
+
+def _competitor_product_url(competitor: Competitor, competitor_code: str | None) -> str | None:
+    code = (competitor_code or "").strip()
+    if not code:
+        return None
+    cfg = load_competitor_scrape_config(competitor.scrape_config_json)
+    url = competitor_product_url(competitor.shop_url or "", code, cfg)
+    if url:
+        return url
+    base = (competitor.shop_url or "").strip().rstrip("/")
+    if not base:
+        return None
+    sep = "&" if "?" in base else "?"
+    return f"{base}{sep}q={quote(code, safe='')}"
+
+
+def _competitor_row_to_api_dict(competitor: Competitor) -> dict:
+    return {
+        "id": competitor.id,
+        "name": competitor.name,
+        "shop_url": competitor.shop_url,
+        "code_column": competitor.code_column,
+        "scrape_config_json": competitor.scrape_config_json,
+        "logo_url": competitor_logo_public_url(competitor.logo_path),
+        "sort_order": competitor.sort_order,
+        "is_active": competitor.is_active,
+    }
+
+
 def _strip_json_trailing_commas(text: str) -> str:
     """JSON5-friendly: ostrá `json` knižnica padá na „, }" / „, ]"."""
     import re as _re
@@ -265,6 +313,28 @@ class StepScreenshotsPayload(BaseModel):
 class SupplierScrapePayload(BaseModel):
     supplier_id: int
     supplier_code: str
+
+
+class CompetitorUpsertPayload(BaseModel):
+    id: int | None = None
+    name: str
+    shop_url: str = ""
+    code_column: str | None = None
+    scrape_config_json: str | None = None
+    is_active: bool = True
+
+
+class CompetitorRemovePayload(BaseModel):
+    competitor_id: int
+
+
+class CompetitorReorderPayload(BaseModel):
+    ordered_competitor_ids: list[int]
+
+
+class CompetitorPricePayload(BaseModel):
+    competitor_id: int
+    competitor_code: str
 
 
 class ImportExcelPayload(BaseModel):
@@ -725,6 +795,67 @@ async def search_products(
     query = query.limit(limit)
 
     products = session.exec(query).all()
+    product_ids = [p.id for p in products if p.id is not None]
+    use_competitors = (filters.price_source or "suppliers") == "competitors"
+
+    if use_competitors:
+        competitors = session.exec(
+            select(Competitor)
+            .where(Competitor.is_active == True)  # noqa: E712
+            .order_by(Competitor.sort_order, Competitor.id)
+        ).all()
+        competitor_by_id: dict[int, Competitor] = {
+            c.id: c for c in competitors if c.id is not None
+        }
+        mappings_by_product: dict[int, list[tuple[CompetitorProductMapping, Competitor]]] = {}
+        if product_ids:
+            mapping_rows_all = session.exec(
+                select(CompetitorProductMapping).where(
+                    CompetitorProductMapping.product_id.in_(product_ids)  # type: ignore[attr-defined]
+                )
+            ).all()
+            for mp in mapping_rows_all:
+                comp = competitor_by_id.get(mp.competitor_id)
+                if comp is None:
+                    continue
+                mappings_by_product.setdefault(mp.product_id, []).append((mp, comp))
+            for k, lst in mappings_by_product.items():
+                lst.sort(key=lambda pair: ((pair[1].sort_order or 0), pair[1].id or 0))
+
+        response: list[ProductComparison] = []
+        for product in products:
+            offers: list[SupplierOffer] = []
+            mapping_rows = mappings_by_product.get(product.id, []) if product.id else []
+            for mapping, competitor in mapping_rows:
+                offers.append(
+                    SupplierOffer(
+                        supplier=competitor.name,
+                        supplier_id=competitor.id,
+                        supplier_code=mapping.competitor_code,
+                        supplier_product_url=_competitor_product_url(
+                            competitor, mapping.competitor_code
+                        ),
+                        price_eur=0.0,
+                        stock=0,
+                        logo_url=competitor_logo_public_url(competitor.logo_path),
+                    )
+                )
+            response.append(
+                ProductComparison(
+                    product_id=product.id,
+                    internal_code=product.internal_code,
+                    norma=product.norma,
+                    diameter=product.diameter,
+                    length=product.length,
+                    surface=product.surface,
+                    v_class=product.v_class,
+                    y_money_name=product.y_money_name,
+                    image_filename=product.image_filename,
+                    offers=offers,
+                )
+            )
+        return response
+
     suppliers = session.exec(
         select(Supplier)
         .where(Supplier.is_connected == True)  # noqa: E712
@@ -733,7 +864,6 @@ async def search_products(
     supplier_by_id: dict[int, Supplier] = {s.id: s for s in suppliers if s.id is not None}
 
     # N+1 fix: namiesto SELECT pre každý produkt načítaj všetky mappingy naraz.
-    product_ids = [p.id for p in products if p.id is not None]
     mappings_by_product: dict[int, list[tuple[ProductMapping, Supplier]]] = {}
     if product_ids:
         mapping_rows_all = session.exec(
@@ -1043,6 +1173,7 @@ def health_check() -> dict[str, str]:
 class BootstrapPayload(BaseModel):
     code: str | None = None
     limit: int = 25
+    price_source: str = "suppliers"
 
 
 @router.post("/bootstrap/search")
@@ -1063,10 +1194,14 @@ async def bootstrap_search(
         _filter_opts_cache_set(cache_key, cached_opts)
 
     limit = min(max(payload.limit or 25, 1), 100)
+    ps = (payload.price_source or "suppliers").strip().lower()
+    if ps not in ("suppliers", "competitors"):
+        ps = "suppliers"
     search_filters = ProductSearchFilters(
         code=filters.code,
         limit=limit,
         prefetch_live_prices=False,
+        price_source=ps,  # type: ignore[arg-type]
     )
     products = await search_products(  # type: ignore[func-returns-value]
         search_filters, session=session, _=user
@@ -1891,6 +2026,186 @@ def delete_supplier_logo(
     session.add(supplier)
     session.commit()
     return {"ok": True, "logo_url": None}
+
+
+def _delete_competitor_by_id(session: Session, competitor_id: int) -> None:
+    competitor = session.get(Competitor, competitor_id)
+    if competitor is None:
+        raise HTTPException(status_code=404, detail="Konkurencia neexistuje.")
+    mappings = session.exec(
+        select(CompetitorProductMapping).where(
+            CompetitorProductMapping.competitor_id == competitor_id
+        )
+    ).all()
+    for mapping in mappings:
+        session.delete(mapping)
+    remove_competitor_logo_files(competitor_id)
+    invalidate_competitor_price_cache(competitor_id)
+    session.delete(competitor)
+    session.commit()
+
+
+@router.post("/competitors")
+def upsert_competitor(
+    payload: CompetitorUpsertPayload,
+    session: Session = Depends(get_session),
+    _: AuthUserContext = Depends(require_admin),
+):
+    shop_url = (payload.shop_url or "").strip()
+    if shop_url and not shop_url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="shop_url must start with http:// or https://")
+
+    competitor = None
+    if payload.id is not None:
+        competitor = session.get(Competitor, payload.id)
+        if competitor is None:
+            raise HTTPException(status_code=404, detail="Konkurencia neexistuje.")
+    else:
+        competitor = session.exec(
+            select(Competitor).where(Competitor.name == payload.name)
+        ).first()
+
+    scrape_cfg = (payload.scrape_config_json or "").strip() or None
+    if competitor is None:
+        competitor = Competitor(
+            name=payload.name.strip(),
+            shop_url=shop_url,
+            code_column=(payload.code_column or "").strip() or None,
+            scrape_config_json=scrape_cfg,
+            is_active=bool(payload.is_active),
+            sort_order=_next_competitor_sort_order(session),
+        )
+        session.add(competitor)
+    else:
+        competitor.name = payload.name.strip()
+        competitor.shop_url = shop_url
+        competitor.code_column = (payload.code_column or "").strip() or None
+        competitor.scrape_config_json = scrape_cfg
+        competitor.is_active = bool(payload.is_active)
+
+    session.commit()
+    session.refresh(competitor)
+    invalidate_competitor_price_cache(int(competitor.id))
+    return _competitor_row_to_api_dict(competitor)
+
+
+@router.get("/competitors")
+def list_competitors(
+    session: Session = Depends(get_session),
+    _: AuthUserContext = Depends(get_current_user),
+):
+    rows = session.exec(
+        select(Competitor).order_by(Competitor.sort_order, Competitor.id)
+    ).all()
+    return [_competitor_row_to_api_dict(c) for c in rows]
+
+
+@router.post("/competitors/reorder")
+def reorder_competitors(
+    payload: CompetitorReorderPayload,
+    session: Session = Depends(get_session),
+    _: AuthUserContext = Depends(require_admin),
+):
+    order = [int(x) for x in payload.ordered_competitor_ids]
+    for idx, cid in enumerate(order):
+        comp = session.get(Competitor, cid)
+        if comp is not None:
+            comp.sort_order = idx * 10
+            session.add(comp)
+    session.commit()
+    return {"ok": True}
+
+
+@router.post("/competitors/remove")
+def remove_competitor(
+    payload: CompetitorRemovePayload,
+    session: Session = Depends(get_session),
+    _: AuthUserContext = Depends(require_admin),
+):
+    _delete_competitor_by_id(session, payload.competitor_id)
+    return {"ok": True}
+
+
+@router.delete("/competitors/{competitor_id}")
+def delete_competitor(
+    competitor_id: int,
+    session: Session = Depends(get_session),
+    _: AuthUserContext = Depends(require_admin),
+):
+    _delete_competitor_by_id(session, competitor_id)
+    return {"ok": True}
+
+
+@router.post("/competitors/{competitor_id}/logo")
+async def upload_competitor_logo(
+    competitor_id: int,
+    session: Session = Depends(get_session),
+    file: UploadFile = File(...),
+    _: AuthUserContext = Depends(require_admin),
+):
+    competitor = session.get(Competitor, competitor_id)
+    if competitor is None:
+        raise HTTPException(status_code=404, detail="Konkurencia neexistuje.")
+    data = await file.read()
+    try:
+        basename = save_competitor_logo_upload(
+            competitor_id, file.content_type, data, file.filename
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    competitor.logo_path = basename
+    session.add(competitor)
+    session.commit()
+    session.refresh(competitor)
+    return {
+        "ok": True,
+        "logo_url": competitor_logo_public_url(competitor.logo_path),
+    }
+
+
+@router.delete("/competitors/{competitor_id}/logo")
+def delete_competitor_logo(
+    competitor_id: int,
+    session: Session = Depends(get_session),
+    _: AuthUserContext = Depends(require_admin),
+):
+    competitor = session.get(Competitor, competitor_id)
+    if competitor is None:
+        raise HTTPException(status_code=404, detail="Konkurencia neexistuje.")
+    remove_competitor_logo_files(competitor_id)
+    competitor.logo_path = None
+    session.add(competitor)
+    session.commit()
+    return {"ok": True, "logo_url": None}
+
+
+@router.post("/competitors/price")
+async def competitor_price(
+    payload: CompetitorPricePayload,
+    session: Session = Depends(get_session),
+    _: AuthUserContext = Depends(get_current_user),
+):
+    """Verejná cena z e-shopu konkurencie (HTTP, bez prihlásenia)."""
+    competitor = session.get(Competitor, payload.competitor_id)
+    if competitor is None:
+        raise HTTPException(status_code=404, detail="Konkurencia neexistuje.")
+    code = payload.competitor_code.strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="Prázdny kód konkurencie.")
+    try:
+        data = await fetch_competitor_public_price(
+            competitor_id=int(competitor.id),
+            shop_url=competitor.shop_url or "",
+            competitor_code=code,
+            scrape_config_json=competitor.scrape_config_json,
+        )
+    except Exception as exc:
+        msg = str(exc).strip() or f"{type(exc).__name__}"
+        raise HTTPException(status_code=502, detail=f"Konkurencia / e-shop: {msg}") from exc
+    data["competitor_product_url"] = data.get("competitor_product_url") or _competitor_product_url(
+        competitor, code
+    )
+    return data
 
 
 def _import_task_snapshot(task_id: str) -> dict[str, object] | None:

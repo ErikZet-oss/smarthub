@@ -71,6 +71,26 @@ class ProductMapping(SQLModel, table=True):
     supplier_code: str = Field(index=True)
 
 
+class Competitor(SQLModel, table=True):
+    """Verejný e-shop — len porovnanie cien, bez B2B prihlásenia a košíka."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str
+    shop_url: str = ""
+    code_column: Optional[str] = None
+    logo_path: Optional[str] = None
+    scrape_config_json: Optional[str] = None
+    sort_order: int = 0
+    is_active: bool = True
+
+
+class CompetitorProductMapping(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    competitor_id: int = Field(foreign_key="competitor.id", index=True)
+    product_id: int = Field(foreign_key="product.id", index=True)
+    competitor_code: str = Field(index=True)
+
+
 class FieldMapping(SQLModel, table=True):
     """Singleton (id=1): ktorý stĺpec Excelu zodpovedá ktorému internému poľu."""
 

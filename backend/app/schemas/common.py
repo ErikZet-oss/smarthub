@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel
 
@@ -15,6 +15,8 @@ class ProductSearchFilters(BaseModel):
     limit: Optional[int] = 50
     # Ak True, search volá Playwright/HTTP pre každú ponuku (veľmi pomalé). Predvolene len DB + ceny po rozbalení riadku.
     prefetch_live_prices: bool = False
+    # suppliers = B2B dodávatelia; competitors = verejné ceny konkurencie (mapovanie z Excelu).
+    price_source: Literal["suppliers", "competitors"] = "suppliers"
 
 
 class SupplierOffer(BaseModel):

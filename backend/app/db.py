@@ -164,6 +164,12 @@ def _ensure_search_indexes() -> None:
     # ProductMapping — kvôli rýchlemu načítaniu mappings pre product_id IN (...)
     _create_index_if_missing("productmapping", "ix_productmapping_product_id", "product_id")
     _create_index_if_missing("productmapping", "ix_productmapping_supplier_id", "supplier_id")
+    _create_index_if_missing(
+        "competitorproductmapping", "ix_competitorproductmapping_product_id", "product_id"
+    )
+    _create_index_if_missing(
+        "competitorproductmapping", "ix_competitorproductmapping_competitor_id", "competitor_id"
+    )
 
 
 def migrate_sqlite_schema() -> None:

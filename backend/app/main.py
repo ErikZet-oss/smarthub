@@ -30,6 +30,7 @@ from app.services.dev_run_log import dev_run_log, dev_screens_dir
 from app.services.product_images import load_product_image_response
 from app.services.smarthub_bootstrap import seed_initial_admin_if_empty
 from app.services.company_logos import company_logos_dir
+from app.services.competitor_logos import competitor_logos_dir
 from app.services.supplier_logos import seed_supplier_logos_from_repo, supplier_logos_dir
 
 _uncaught_error_log = logging.getLogger("smarthub.uncaught")
@@ -92,11 +93,15 @@ app.mount(
     name="supplier-logos",
 )
 app.mount(
+    "/competitor-logos",
+    StaticFiles(directory=competitor_logos_dir()),
+    name="competitor-logos",
+)
+app.mount(
     "/company-logos",
     StaticFiles(directory=company_logos_dir()),
     name="company-logos",
 )
-
 
 @app.middleware("http")
 async def smarthub_bearer_auth(request: Request, call_next):

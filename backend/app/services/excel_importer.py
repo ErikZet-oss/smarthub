@@ -9,6 +9,8 @@ from openpyxl import load_workbook
 from sqlmodel import Session, select
 
 from app.models.entities import (
+    Competitor,
+    CompetitorProductMapping,
     FieldMapping,
     Product,
     ProductListItem,
@@ -100,6 +102,8 @@ class ImportResult:
     products_legacy_removed: int = 0
     suppliers_upserted: int = 0
     mappings_upserted: int = 0
+    competitors_upserted: int = 0
+    competitor_mappings_upserted: int = 0
     rows_scanned: int = 0
     total_rows: int = 0
     file_resolved: str = ""
@@ -145,13 +149,38 @@ def _row_cell(row: Any, idx: int | None) -> str:
 
 
 def _supplier_index_ci(suppliers: list[Supplier]) -> dict[str, Supplier]:
-    """casefold meno dodávateľa → záznam (prvý výskyt)."""
     out: dict[str, Supplier] = {}
     for s in suppliers:
-        k = (s.name or "").strip().casefold()
-        if k and k not in out:
-            out[k] = s
+        key = (s.name or "").strip().casefold()
+        if key:
+            out[key] = s
     return out
+
+
+def _competitor_index_ci(competitors: list[Competitor]) -> dict[str, Competitor]:
+    out: dict[str, Competitor] = {}
+    for c in competitors:
+        key = (c.name or "").strip().casefold()
+        if key:
+            out[key] = c
+    return out
+
+
+def _mapping_entity_name_for_header(
+    header: str,
+    explicit_header_to_entity: dict[str, str],
+    entity_names_longest_first: list[str],
+) -> str:
+    h = header.strip()
+    hit = explicit_header_to_entity.get(h)
+    if hit:
+        return hit
+    low_h = h.casefold()
+    if "kód" in low_h or "kod" in low_h:
+        for ename in entity_names_longest_first:
+            if low_h.startswith(ename.casefold()):
+                return ename
+    return _to_supplier_name(h)
 
 
 def _normalized_sheet_headers(first_row: Any) -> list[str]:
@@ -444,13 +473,6 @@ def import_gamechanger_excel(
                 sname = (supplier.name or "").strip()
                 if sname:
                     sync_supplier_code_column[sname] = hdr
-    for idx, header in enumerate(headers):
-        if header.endswith(" kód") and idx not in seen_indices:
-            supplier_code_columns.append((idx, header))
-            seen_indices.add(idx)
-            sname = _to_supplier_name(header)
-            if sname:
-                sync_supplier_code_column.setdefault(sname, header)
 
     # Starý názov v DB už nesedí, ale hlavička začína na meno dodávateľa a obsahuje kód.
     suppliers_by_len = sorted(
@@ -474,14 +496,83 @@ def import_gamechanger_excel(
                 sync_supplier_code_column[sname] = hstrip
                 break
 
+    # Stĺpce s kódmi konkurencie (rovnaký pattern ako dodávatelia).
+    competitor_code_columns: list[tuple[int, str]] = []
+    sync_competitor_code_column: dict[str, str] = {}
+    competitors_rows = session.exec(select(Competitor)).all()
+    competitor_names_longest_first = sorted(
+        list({(c.name or "").strip() for c in competitors_rows if (c.name or "").strip()}),
+        key=len,
+        reverse=True,
+    )
+    for competitor in competitors_rows:
+        if competitor.code_column:
+            col_name = competitor.code_column.strip()
+            idx = _resolve_header_col_index(headers, col_name)
+            if idx is not None and idx not in seen_indices:
+                hdr = headers[idx]
+                competitor_code_columns.append((idx, hdr))
+                seen_indices.add(idx)
+                cname = (competitor.name or "").strip()
+                if cname:
+                    sync_competitor_code_column[cname] = hdr
+    for idx, header in enumerate(headers):
+        if idx in seen_indices:
+            continue
+        if not header.endswith(" kód"):
+            continue
+        low_h = header.strip().casefold()
+        matched_competitor = False
+        for cname in competitor_names_longest_first:
+            if low_h.startswith(cname.casefold()):
+                competitor_code_columns.append((idx, header))
+                seen_indices.add(idx)
+                sync_competitor_code_column.setdefault(cname, header)
+                matched_competitor = True
+                break
+        if matched_competitor:
+            continue
+        supplier_code_columns.append((idx, header))
+        seen_indices.add(idx)
+        sname = _to_supplier_name(header)
+        if sname:
+            sync_supplier_code_column.setdefault(sname, header)
+
+    competitors_by_len = sorted(
+        [c for c in competitors_rows if (c.name or "").strip()],
+        key=lambda c: len((c.name or "").strip()),
+        reverse=True,
+    )
+    for competitor in competitors_by_len:
+        cname = (competitor.name or "").strip()
+        if cname in sync_competitor_code_column:
+            continue
+        low_cn = cname.casefold()
+        for idx, header in enumerate(headers):
+            if idx in seen_indices:
+                continue
+            low_h = header.strip().casefold()
+            if low_h.startswith(low_cn) and ("kód" in low_h or "kod" in low_h):
+                hstrip = header.strip()
+                competitor_code_columns.append((idx, hstrip))
+                seen_indices.add(idx)
+                sync_competitor_code_column[cname] = hstrip
+                break
+
     explicit_header_to_supplier: dict[str, str] = {}
     for supplier in suppliers_rows:
         if supplier.code_column and supplier.code_column.strip():
             explicit_header_to_supplier[supplier.code_column.strip()] = supplier.name
 
+    explicit_header_to_competitor: dict[str, str] = {}
+    for competitor in competitors_rows:
+        if competitor.code_column and competitor.code_column.strip():
+            explicit_header_to_competitor[competitor.code_column.strip()] = competitor.name
+
     # Akumulácia z Excelu (jeden prechod), potom batch zápis do DB.
     product_payloads: dict[str, dict[str, str | None]] = {}
     mapping_payloads: dict[tuple[str, str], str] = {}
+    competitor_mapping_payloads: dict[tuple[str, str], str] = {}
     legacy_short_codes: set[str] = set()
 
     for row in rows:
@@ -550,6 +641,18 @@ def import_gamechanger_excel(
             )
             mapping_payloads[(internal_code, supplier_name)] = supplier_code
             result.mappings_upserted += 1
+
+        for col_idx, header in competitor_code_columns:
+            competitor_code = _row_cell(row, col_idx)
+            if not competitor_code:
+                continue
+            competitor_name = _mapping_entity_name_for_header(
+                header,
+                explicit_header_to_competitor,
+                competitor_names_longest_first,
+            )
+            competitor_mapping_payloads[(internal_code, competitor_name)] = competitor_code
+            result.competitor_mappings_upserted += 1
 
     # 1) Produkty: preload + create/update
     existing_products = session.exec(select(Product)).all()
@@ -684,6 +787,71 @@ def import_gamechanger_excel(
         new_hdr = sync_supplier_code_column.get(sname)
         if new_hdr and (supplier.code_column or "").strip() != new_hdr:
             supplier.code_column = new_hdr
+
+    # 4) Konkurencia: create chýbajúcich + mappingy
+    competitors_rows = session.exec(select(Competitor)).all()
+    competitor_by_ci = _competitor_index_ci(competitors_rows)
+    next_comp_sort = (
+        max((c.sort_order or 0) for c in competitors_rows) + 10 if competitors_rows else 0
+    )
+    for _, competitor_name in competitor_mapping_payloads.keys():
+        key_ci = (competitor_name or "").strip().casefold()
+        if not key_ci or key_ci in competitor_by_ci:
+            continue
+        canonical = (competitor_name or "").strip()
+        competitor = Competitor(
+            name=canonical or competitor_name,
+            shop_url="",
+            sort_order=next_comp_sort,
+            is_active=False,
+        )
+        next_comp_sort += 10
+        session.add(competitor)
+        competitor_by_ci[key_ci] = competitor
+        result.competitors_upserted += 1
+
+    session.flush()
+    competitors_rows = session.exec(select(Competitor)).all()
+    competitor_by_ci = _competitor_index_ci(competitors_rows)
+    all_comp_mappings = session.exec(select(CompetitorProductMapping)).all()
+    comp_mapping_by_pair = {
+        (m.product_id, m.competitor_id): m for m in all_comp_mappings
+    }
+    skipped_no_competitor = 0
+    for (internal_code, competitor_name), competitor_code in competitor_mapping_payloads.items():
+        product = product_by_code.get(internal_code)
+        competitor = competitor_by_ci.get((competitor_name or "").strip().casefold())
+        if product is None or product.id is None:
+            continue
+        if competitor is None:
+            skipped_no_competitor += 1
+            continue
+        if competitor.id is None:
+            continue
+        key = (int(product.id), int(competitor.id))
+        mapping = comp_mapping_by_pair.get(key)
+        if mapping is None:
+            mapping = CompetitorProductMapping(
+                product_id=int(product.id),
+                competitor_id=int(competitor.id),
+                competitor_code=competitor_code,
+            )
+            session.add(mapping)
+            comp_mapping_by_pair[key] = mapping
+        else:
+            mapping.competitor_code = competitor_code
+
+    if skipped_no_competitor:
+        result.warnings.append(
+            f"Import: {skipped_no_competitor} väzieb kódu konkurencie sa neuložilo — "
+            f"v databáze nebola konkurencia podľa mena zo stĺpca."
+        )
+
+    for competitor in competitors_rows:
+        cname = (competitor.name or "").strip()
+        new_hdr = sync_competitor_code_column.get(cname)
+        if new_hdr and (competitor.code_column or "").strip() != new_hdr:
+            competitor.code_column = new_hdr
 
     session.commit()
     if progress_cb is not None:

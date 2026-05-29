@@ -146,6 +146,68 @@ def _fabory_product_title_from_pdp_html(html: str) -> Optional[str]:
     return None
 
 
+_ALP_ADD_TO_CART_VALUE_RE = re.compile(
+    r'class="[^"]*\balp-add-to-cart\b[^"]*"[^>]*\bvalue=["\'](\d+)["\']',
+    re.IGNORECASE,
+)
+_ALP_ADD_TO_CART_VALUE_REV_RE = re.compile(
+    r'\bvalue=["\'](\d+)["\'][^>]*class="[^"]*\balp-add-to-cart\b',
+    re.IGNORECASE,
+)
+_FABORY_PACK_LABEL_RE = re.compile(
+    r"(?:Ambalat|Balen[íi]|Balenie|Pack(?:age)?|Verpackung)[^0-9]{0,40}(\d+)",
+    re.IGNORECASE,
+)
+
+
+def _fabory_pack_quantity_from_pdp_html(html: str) -> Optional[int]:
+    """Ks v jednom balení — z inputu ``alp-add-to-cart`` na PDP (nie ``unitQuantity`` z price API).
+
+    Price API vracia ``unitQuantity`` ako základ ceny (typicky 100 ks). Objednávacie
+    balenie môže byť menšie (napr. M30×90 → 10 ks pri cene za 100).
+    """
+    h = html or ""
+    for pat in (_ALP_ADD_TO_CART_VALUE_RE, _ALP_ADD_TO_CART_VALUE_REV_RE):
+        m = pat.search(h)
+        if m:
+            try:
+                pq = int(m.group(1))
+                if pq >= 1:
+                    return pq
+            except (TypeError, ValueError):
+                pass
+    m = _FABORY_PACK_LABEL_RE.search(h)
+    if m:
+        try:
+            pq = int(m.group(1))
+            if pq >= 1:
+                return pq
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def _fabory_price_for_pack(
+    unit_net: Optional[float],
+    *,
+    unit_quantity: int,
+    pack_quantity: int,
+) -> Optional[float]:
+    if unit_net is None:
+        return None
+    uq = max(1, int(unit_quantity))
+    pq = max(1, int(pack_quantity))
+    if pq == uq:
+        return float(unit_net)
+    return round(float(unit_net) * pq / uq, 4)
+
+
+def _fabory_format_net_price_eur(amount: float) -> str:
+    """Slovenský formát ako Fabory API (``11,80\u00a0€``)."""
+    s = f"{amount:.2f}".replace(".", ",")
+    return f"{s}\u00a0€"
+
+
 def fabory_parse_cart_html(
     simulation_html: str,
     *,
@@ -480,7 +542,9 @@ class FaboryHttpClient:
 
         Návratový formát zodpovedá ostatným supplier HTTP cestám (Hopefix, Halfmann):
         ``price_eur``, ``stock``, ``pack_quantity`` + ``raw_*`` + ``packaging_variants``.
-        Cena je tu „za balík ``unitQuantity`` kusov" (rovnako ako Fabory zobrazuje na PDP).
+        Cena je za jedno objednávateľné balenie (``pack_quantity`` ks z PDP). Price API
+        uvádza ``unitNetPrice`` za ``unitQuantity`` ks (často 100) — pri menšom balení
+        cenu proporcionálne prepočítame.
         """
         c = (code or "").strip()
         if not c:
@@ -512,10 +576,29 @@ class FaboryHttpClient:
             unit_quantity = 1
         unit_net = p.get("unitNetPrice")
         try:
-            price_eur = float(unit_net) if unit_net is not None else None
+            unit_net_f = float(unit_net) if unit_net is not None else None
         except (TypeError, ValueError):
-            price_eur = None
+            unit_net_f = None
+
+        pdp_html = ""
+        if self._last_pdp_url:
+            try:
+                pdp_html = await self._fetch_pdp_html(self._last_pdp_url)
+            except Exception:
+                pdp_html = ""
+
+        pack_quantity = _fabory_pack_quantity_from_pdp_html(pdp_html) or unit_quantity
+        price_eur = _fabory_price_for_pack(
+            unit_net_f,
+            unit_quantity=unit_quantity,
+            pack_quantity=pack_quantity,
+        )
         raw_price = p.get("formattedUnitNetPrice") or None
+        if (
+            price_eur is not None
+            and pack_quantity != unit_quantity
+        ):
+            raw_price = _fabory_format_net_price_eur(price_eur)
 
         stock_status = (s.get("stockLevelStatus") or "").upper()
         stock_qty_raw = s.get("stockQuantity")
@@ -536,18 +619,14 @@ class FaboryHttpClient:
         raw_stock = (s.get("stockLevelMessage") or "").strip() or None
 
         title = (p.get("productName") or "").strip() or None
-        if not title and self._last_pdp_url:
-            try:
-                pdp_html = await self._fetch_pdp_html(self._last_pdp_url)
-                title = _fabory_product_title_from_pdp_html(pdp_html)
-            except Exception:
-                pass
+        if not title and pdp_html:
+            title = _fabory_product_title_from_pdp_html(pdp_html)
         label = title
 
         packaging_variants = [
             {
                 "label": label or c,
-                "pack_quantity": unit_quantity,
+                "pack_quantity": pack_quantity,
                 "price_eur": price_eur,
                 "raw_price": raw_price,
                 "stock": stock_final,
@@ -558,10 +637,10 @@ class FaboryHttpClient:
         return {
             "price_eur": price_eur,
             "stock": stock_final,
-            "pack_quantity": unit_quantity,
+            "pack_quantity": pack_quantity,
             "raw_price": raw_price,
             "raw_stock": raw_stock,
-            "raw_pack_quantity": str(unit_quantity),
+            "raw_pack_quantity": str(pack_quantity),
             "packaging_variants": packaging_variants,
             "logged_in": True,
             "fabory_via_http": True,

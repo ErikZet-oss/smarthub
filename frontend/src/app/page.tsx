@@ -43,6 +43,7 @@ import {
   Truck,
   Trash2,
   Users,
+  Scale,
   Sun,
   X,
 } from "lucide-react";
@@ -361,6 +362,19 @@ type SupplierForm = {
   /** Relatívna cesta z API (`/supplier-logos/...`) alebo `null`. */
   logoUrl?: string | null;
 };
+
+type CompetitorForm = {
+  id?: number;
+  name: string;
+  shopUrl: string;
+  codeColumn: string;
+  scrapeConfigJson: string;
+  isActive: boolean;
+  sortOrder?: number;
+  logoUrl?: string | null;
+};
+
+type PriceSourceMode = "suppliers" | "competitors";
 
 type MappingProfile = {
   columns: string[];
@@ -1706,6 +1720,7 @@ function packSizeFromScrape(
 type ProductSupplierExpandedTableRowProps = {
   product: ProductSearchRow;
   colSpan: number;
+  isCompetitorMode?: boolean;
   scrapeByKey: Record<string, SupplierScrapeState>;
   cartQuantityByKey: Record<string, number>;
   setCartQuantityByKey: Dispatch<SetStateAction<Record<string, number>>>;
@@ -1739,6 +1754,7 @@ type ProductSupplierExpandedTableRowProps = {
 function ProductSupplierExpandedTableRow({
   product,
   colSpan,
+  isCompetitorMode = false,
   scrapeByKey,
   cartQuantityByKey,
   setCartQuantityByKey,
@@ -1758,9 +1774,15 @@ function ProductSupplierExpandedTableRow({
                                   <div className="border-b border-slate-200/70 bg-gradient-to-r from-slate-50 via-white to-sky-50/35 px-2.5 py-1.5 sm:px-3 sm:py-2">
                                     <p
                                       className="inline-block max-w-full cursor-help text-[9px] font-semibold uppercase tracking-wider text-sky-900/70 underline decoration-dotted decoration-slate-400/70 underline-offset-2 sm:text-[11px]"
-                                      title="Po otvorení riadku sa pre každého dodávateľa spustí Playwright (cena / sklad podľa JSON selektorov). Kód dodávateľa je z mapovania v databáze."
+                                      title={
+                                        isCompetitorMode
+                                          ? "Po otvorení riadku sa načíta verejná cena z e-shopu konkurencie (HTTP, bez prihlásenia)."
+                                          : "Po otvorení riadku sa pre každého dodávateľa spustí Playwright (cena / sklad podľa JSON selektorov). Kód dodávateľa je z mapovania v databáze."
+                                      }
                                     >
-                                      Detail dodávateľov
+                                      {isCompetitorMode
+                                        ? "Konkurencia"
+                                        : "Detail dodávateľov"}
                                     </p>
                                   </div>
                                   <div className="flex flex-col gap-2 p-2 sm:gap-2 sm:p-2.5">
@@ -1897,6 +1919,7 @@ function ProductSupplierExpandedTableRow({
                                           : "";
                                       const packSize = packSizeFromScrape(scrape);
                                       const canCart =
+                                        !isCompetitorMode &&
                                         offer.supplier_id != null &&
                                         Boolean(offer.supplier_code?.trim());
                                       const pvars = scrape?.packaging_variants;
@@ -2390,6 +2413,7 @@ function ProductSupplierExpandedTableRow({
                                           {sid != null ? (
                                             <div className="ml-auto flex w-auto shrink-0 items-center justify-end gap-1 self-center">
                                               {onRequestAddToOffer &&
+                                              !isCompetitorMode &&
                                               displayPrice != null &&
                                               Number.isFinite(displayPrice) &&
                                               displayPrice > 0 ? (
@@ -3560,6 +3584,14 @@ export default function Home() {
   const [showPassword, setShowPassword] = useState(false);
   const [saveState, setSaveState] = useState<Record<number, string>>({});
   const [supplierForms, setSupplierForms] = useState<SupplierForm[]>(defaultSuppliers);
+  const [competitorForms, setCompetitorForms] = useState<CompetitorForm[]>([]);
+  const [dodavateliaTab, setDodavateliaTab] = useState<"suppliers" | "competitors">(
+    "suppliers",
+  );
+  const [priceSourceMode, setPriceSourceMode] = useState<PriceSourceMode>("suppliers");
+  const [expandedCompetitorKeys, setExpandedCompetitorKeys] = useState<Set<string>>(
+    () => new Set(),
+  );
   /** Kľúče rozbalených kariet dodávateľov v sekcii Dodávatelia (kompaktný zoznam). */
   const [expandedSupplierKeys, setExpandedSupplierKeys] = useState<Set<string>>(
     () => new Set(),
@@ -4062,6 +4094,42 @@ export default function Home() {
     }
   }, [apiFetch]);
 
+  const refetchCompetitorsList = useCallback(async () => {
+    try {
+      const response = await apiFetch(`${API_BASE}/api/competitors`);
+      if (!response.ok) {
+        return;
+      }
+      const data = (await response.json()) as Array<{
+        id: number;
+        name: string;
+        shop_url: string;
+        code_column: string | null;
+        scrape_config_json: string | null;
+        logo_url?: string | null;
+        sort_order?: number | null;
+        is_active: boolean;
+      }>;
+      setCompetitorForms(
+        data.map((row) => ({
+          id: row.id,
+          name: row.name,
+          shopUrl: row.shop_url ?? "",
+          codeColumn: row.code_column ?? "",
+          scrapeConfigJson: row.scrape_config_json ?? "",
+          isActive: row.is_active,
+          sortOrder:
+            row.sort_order != null && Number.isFinite(row.sort_order)
+              ? row.sort_order
+              : 0,
+          logoUrl: row.logo_url ?? null,
+        })),
+      );
+    } catch {
+      // keep previous list
+    }
+  }, [apiFetch]);
+
   const commitSupplierOrder = useCallback(
     async (orderedIds: number[]) => {
       setSupplierReorderBusy(true);
@@ -4521,14 +4589,19 @@ export default function Home() {
 
         void (async () => {
           try {
-            const response = await apiFetch(
-              `${API_BASE}/api/scraper/supplier-data`,
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ supplier_id: sid, supplier_code: code }),
-              },
-            );
+            const endpoint =
+              priceSourceMode === "competitors"
+                ? `${API_BASE}/api/competitors/price`
+                : `${API_BASE}/api/scraper/supplier-data`;
+            const body =
+              priceSourceMode === "competitors"
+                ? { competitor_id: sid, competitor_code: code }
+                : { supplier_id: sid, supplier_code: code };
+            const response = await apiFetch(endpoint, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(body),
+            });
             const parsed = await readApiJsonOrText(response);
             if (!parsed.ok) {
               setScrapeByKey((p) => ({
@@ -4705,7 +4778,7 @@ export default function Home() {
         })();
       }
     },
-    [apiFetch],
+    [apiFetch, priceSourceMode],
   );
 
   useEffect(() => {
@@ -5107,6 +5180,7 @@ export default function Home() {
         y_money_name: searchFilters.y_money_name || null,
         image_filename: searchFilters.image_filename || null,
         prefetch_live_prices: false,
+        price_source: priceSourceMode,
       };
       const noFiltersActive =
         !apiBody.code &&
@@ -5127,7 +5201,7 @@ export default function Home() {
           const bootRes = await apiFetch(`${API_BASE}/api/bootstrap/search`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ code: null, limit: 25 }),
+            body: JSON.stringify({ code: null, limit: 25, price_source: priceSourceMode }),
           });
           if (cancelled) return;
           if (bootRes.ok) {
@@ -5310,14 +5384,22 @@ export default function Home() {
     authSessionReady,
     authConfigError,
     apiToken,
+    priceSourceMode,
   ]);
+
+  useEffect(() => {
+    setScrapeByKey({});
+  }, [priceSourceMode]);
 
   useEffect(() => {
     if (activeView !== "dodavatelia") {
       return;
     }
     void refetchSuppliersList();
-  }, [activeView, refetchSuppliersList]);
+    if (dodavateliaTab === "competitors") {
+      void refetchCompetitorsList();
+    }
+  }, [activeView, dodavateliaTab, refetchSuppliersList, refetchCompetitorsList]);
 
   const addToCart = async (
     supplierId: number,
@@ -5540,6 +5622,181 @@ export default function Home() {
         logoUrl: null,
       },
     ]);
+  };
+
+  const addCompetitorForm = () => {
+    if (!isAppAdmin) {
+      setToastMessage("Novú konkurenciu môže pridať iba administrátor.");
+      return;
+    }
+    setCompetitorForms((prev) => [
+      ...prev,
+      {
+        name: "",
+        shopUrl: "",
+        codeColumn: "",
+        scrapeConfigJson: JSON.stringify(
+          {
+            search_via_url_template: "{shop_url}/search?q={code}",
+            price_selector_regex:
+              'itemprop=["\']price["\'][^>]*content=["\']([^"\']+)["\']',
+          },
+          null,
+          2,
+        ),
+        isActive: true,
+        logoUrl: null,
+      },
+    ]);
+  };
+
+  const competitorCardKey = (row: CompetitorForm, index: number) =>
+    row.id != null ? `c-${row.id}` : `ci-${index}`;
+
+  const toggleCompetitorCard = (key: string) => {
+    setExpandedCompetitorKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const saveCompetitor = async (index: number) => {
+    const data = competitorForms[index];
+    const stateKey = data.id ?? index;
+    if (!data.name.trim()) {
+      setSaveState((prev) => ({
+        ...prev,
+        [stateKey]: "Vyplň názov konkurencie.",
+      }));
+      return;
+    }
+    setSaveState((prev) => ({ ...prev, [stateKey]: "Ukladám…" }));
+    try {
+      const response = await apiFetch(`${API_BASE}/api/competitors`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: data.id,
+          name: data.name.trim(),
+          shop_url: data.shopUrl.trim(),
+          code_column: data.codeColumn.trim() || null,
+          scrape_config_json: data.scrapeConfigJson.trim() || null,
+          is_active: data.isActive,
+        }),
+      });
+      const payload = (await response.json()) as
+        | {
+            id: number;
+            name: string;
+            shop_url: string;
+            code_column?: string | null;
+            scrape_config_json?: string | null;
+            logo_url?: string | null;
+            sort_order?: number | null;
+            is_active: boolean;
+          }
+        | { detail?: unknown };
+      if (!response.ok) {
+        throw new Error(
+          "detail" in payload ? formatApiDetail(payload.detail) : "Uloženie zlyhalo.",
+        );
+      }
+      const saved = payload as {
+        id: number;
+        name: string;
+        shop_url: string;
+        code_column?: string | null;
+        scrape_config_json?: string | null;
+        logo_url?: string | null;
+        sort_order?: number | null;
+        is_active: boolean;
+      };
+      setSaveState((prev) => ({
+        ...prev,
+        [stateKey]: "Konkurencia uložená.",
+      }));
+      setCompetitorForms((prev) =>
+        prev.map((row, rowIndex) =>
+          rowIndex === index
+            ? {
+                ...row,
+                id: saved.id,
+                name: saved.name,
+                shopUrl: saved.shop_url,
+                codeColumn: saved.code_column ?? "",
+                scrapeConfigJson: saved.scrape_config_json ?? "",
+                isActive: saved.is_active,
+                logoUrl: saved.logo_url ?? null,
+                sortOrder: saved.sort_order ?? row.sortOrder,
+              }
+            : row,
+        ),
+      );
+    } catch (error) {
+      setSaveState((prev) => ({
+        ...prev,
+        [stateKey]: error instanceof Error ? error.message : "Uloženie zlyhalo.",
+      }));
+    }
+  };
+
+  const deleteCompetitor = async (index: number) => {
+    const row = competitorForms[index];
+    const stateKey = row.id ?? index;
+    if (!row.id) {
+      setCompetitorForms((prev) => prev.filter((_, i) => i !== index));
+      return;
+    }
+    setSaveState((prev) => ({ ...prev, [stateKey]: "Mažem…" }));
+    try {
+      const response = await apiFetch(`${API_BASE}/api/competitors/remove`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ competitor_id: row.id }),
+      });
+      const payload = (await response.json()) as { detail?: unknown };
+      if (!response.ok) {
+        throw new Error(formatApiDetail(payload.detail));
+      }
+      setCompetitorForms((prev) => prev.filter((_, i) => i !== index));
+      setSaveState((prev) => ({ ...prev, [stateKey]: "Konkurencia odstránená." }));
+    } catch (error) {
+      setSaveState((prev) => ({
+        ...prev,
+        [stateKey]: error instanceof Error ? error.message : "Mazanie zlyhalo.",
+      }));
+    }
+  };
+
+  const uploadCompetitorLogo = async (index: number, file: File) => {
+    const row = competitorForms[index];
+    if (!row.id) {
+      setSaveState((prev) => ({
+        ...prev,
+        [row.id ?? index]: "Najprv ulož konkurenciu.",
+      }));
+      return;
+    }
+    const fd = new FormData();
+    fd.append("file", file);
+    const response = await apiFetch(
+      `${API_BASE}/api/competitors/${row.id}/logo`,
+      { method: "POST", body: fd },
+    );
+    const payload = (await response.json()) as {
+      logo_url?: string | null;
+      detail?: unknown;
+    };
+    if (!response.ok) {
+      throw new Error(formatApiDetail(payload.detail));
+    }
+    setCompetitorForms((prev) =>
+      prev.map((c, i) =>
+        i === index ? { ...c, logoUrl: payload.logo_url ?? null } : c,
+      ),
+    );
   };
 
   const supplierCardKey = (supplier: SupplierForm, index: number) =>
@@ -6751,6 +7008,17 @@ export default function Home() {
                     <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-800 sm:gap-2 sm:text-sm">
                       <PackageSearch className="h-4 w-4 shrink-0 text-sky-600" />
                       Filtre (podľa mapovania z Párovania)
+                      <Badge
+                        variant="secondary"
+                        className={cn(
+                          "ml-1 hidden text-[10px] font-medium sm:inline-flex",
+                          priceSourceMode === "competitors"
+                            ? "bg-amber-100 text-amber-900"
+                            : "bg-sky-100 text-sky-900",
+                        )}
+                      >
+                        {priceSourceMode === "competitors" ? "Konkurencia" : "Dodávatelia"}
+                      </Badge>
                       <button
                         type="button"
                         className="-m-0.5 inline-flex shrink-0 rounded-full p-1 text-slate-500 transition-colors hover:bg-sky-200/50 hover:text-sky-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/80"
@@ -6776,6 +7044,27 @@ export default function Home() {
                     >
                       Vymazať filtre
                     </Button>
+                    <button
+                      type="button"
+                      title={
+                        priceSourceMode === "suppliers"
+                          ? "Prepnúť na ceny konkurencie"
+                          : "Prepnúť na dodávateľov"
+                      }
+                      className={cn(
+                        "inline-flex h-8 w-8 items-center justify-center rounded-md border shadow-sm transition sm:h-9 sm:w-9",
+                        priceSourceMode === "competitors"
+                          ? "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
+                          : "border-sky-200 bg-white text-sky-700 hover:bg-sky-50",
+                      )}
+                      onClick={() =>
+                        setPriceSourceMode((m) =>
+                          m === "suppliers" ? "competitors" : "suppliers",
+                        )
+                      }
+                    >
+                      <Scale className="h-4 w-4" aria-hidden />
+                    </button>
                   </div>
                 </div>
                 <div className="p-2.5 sm:p-4">
@@ -7136,6 +7425,7 @@ export default function Home() {
                           <ProductSupplierExpandedTableRow
                             product={product}
                             colSpan={colSpan}
+                            isCompetitorMode={priceSourceMode === "competitors"}
                             scrapeByKey={scrapeByKey}
                             cartQuantityByKey={cartQuantityByKey}
                             setCartQuantityByKey={setCartQuantityByKey}
@@ -7380,6 +7670,7 @@ export default function Home() {
                               <ProductSupplierExpandedTableRow
                                 product={detailProduct}
                                 colSpan={listColSpan}
+                                isCompetitorMode={priceSourceMode === "competitors"}
                                 scrapeByKey={scrapeByKey}
                                 cartQuantityByKey={cartQuantityByKey}
                                 setCartQuantityByKey={setCartQuantityByKey}
@@ -7906,6 +8197,35 @@ export default function Home() {
 
           {activeView === "dodavatelia" && (
             <section className="space-y-3">
+              <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+                <button
+                  type="button"
+                  className={cn(
+                    "rounded-md px-3 py-1.5 text-sm font-medium transition",
+                    dodavateliaTab === "suppliers"
+                      ? "bg-sky-600 text-white shadow-sm"
+                      : "text-slate-600 hover:bg-slate-50",
+                  )}
+                  onClick={() => setDodavateliaTab("suppliers")}
+                >
+                  Dodávatelia
+                </button>
+                <button
+                  type="button"
+                  className={cn(
+                    "rounded-md px-3 py-1.5 text-sm font-medium transition",
+                    dodavateliaTab === "competitors"
+                      ? "bg-amber-600 text-white shadow-sm"
+                      : "text-slate-600 hover:bg-slate-50",
+                  )}
+                  onClick={() => setDodavateliaTab("competitors")}
+                >
+                  Konkurencia
+                </button>
+              </div>
+
+              {dodavateliaTab === "suppliers" ? (
+                <>
               <Card className="overflow-hidden border-slate-200/90 p-0 shadow-sm">
                 <button
                   type="button"
@@ -8415,6 +8735,216 @@ export default function Home() {
                   );
                 })}
               </div>
+                </>
+              ) : (
+                <>
+                  <Card className="overflow-hidden border-slate-200/90 p-0 shadow-sm">
+                    <div className="border-b border-slate-100 bg-slate-50/80 px-3 py-2">
+                      <p className="text-sm font-semibold text-slate-900">
+                        Excel — stĺpce pre kódy konkurencie
+                      </p>
+                      <p className="mt-1 text-[11px] text-slate-600">
+                        Rovnaký import ako pri dodávateľoch — pridaj stĺpce typu „Názov
+                        konkurencie kód“ alebo nastav stĺpec pri každej konkurencii.
+                      </p>
+                    </div>
+                  </Card>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {isAppAdmin ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-8 border-amber-200 text-xs"
+                        onClick={addCompetitorForm}
+                      >
+                        + Konkurencia
+                      </Button>
+                    ) : null}
+                  </div>
+                  <div className="space-y-2">
+                    {competitorForms.length === 0 ? (
+                      <p className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-sm text-slate-600">
+                        Zatiaľ žiadna konkurencia. Pridaj prvú a nastav URL e-shopu, stĺpec
+                        v Exceli a JSON pre čítanie ceny.
+                      </p>
+                    ) : null}
+                    {competitorForms.map((competitor, index) => {
+                      const rowKey = competitorCardKey(competitor, index);
+                      const expanded = expandedCompetitorKeys.has(rowKey);
+                      return (
+                        <Card
+                          key={`${competitor.id ?? "new"}-${index}`}
+                          className="overflow-hidden border-slate-200/90 p-0 shadow-sm"
+                        >
+                          <button
+                            type="button"
+                            className="flex w-full items-center gap-2 px-2.5 py-2 text-left hover:bg-slate-50/90"
+                            onClick={() => toggleCompetitorCard(rowKey)}
+                          >
+                            <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-md border border-slate-200 bg-white">
+                              {publicApiAssetUrl(competitor.logoUrl) ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img
+                                  src={publicApiAssetUrl(competitor.logoUrl)!}
+                                  alt=""
+                                  className="h-full w-full object-contain p-0.5"
+                                />
+                              ) : (
+                                <Scale className="h-4 w-4 text-amber-600" />
+                              )}
+                            </div>
+                            <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-900">
+                              {competitor.name || "Nová konkurencia"}
+                            </span>
+                            <ChevronRight
+                              className={cn(
+                                "h-4 w-4 shrink-0 text-slate-500 transition-transform",
+                                expanded && "rotate-90",
+                              )}
+                            />
+                          </button>
+                          {expanded ? (
+                            <div className="space-y-3 border-t border-slate-100 px-2.5 py-3">
+                              <div className="grid gap-2 sm:grid-cols-2">
+                                <label className="block text-[11px] text-slate-600">
+                                  Názov
+                                  <Input
+                                    value={competitor.name}
+                                    onChange={(e) =>
+                                      setCompetitorForms((prev) =>
+                                        prev.map((c, i) =>
+                                          i === index
+                                            ? { ...c, name: e.target.value }
+                                            : c,
+                                        ),
+                                      )
+                                    }
+                                    className="mt-1 h-9 text-sm"
+                                  />
+                                </label>
+                                <label className="block text-[11px] text-slate-600">
+                                  URL e-shopu
+                                  <Input
+                                    value={competitor.shopUrl}
+                                    onChange={(e) =>
+                                      setCompetitorForms((prev) =>
+                                        prev.map((c, i) =>
+                                          i === index
+                                            ? { ...c, shopUrl: e.target.value }
+                                            : c,
+                                        ),
+                                      )
+                                    }
+                                    className="mt-1 h-9 text-sm"
+                                    placeholder="https://..."
+                                  />
+                                </label>
+                                <label className="block text-[11px] text-slate-600 sm:col-span-2">
+                                  Stĺpec v Exceli (kód produktu)
+                                  <SearchableSelect
+                                    value={competitor.codeColumn}
+                                    onChange={(v) =>
+                                      setCompetitorForms((prev) =>
+                                        prev.map((c, i) =>
+                                          i === index ? { ...c, codeColumn: v } : c,
+                                        ),
+                                      )
+                                    }
+                                    options={mappingProfile?.columns ?? []}
+                                    placeholder="Vyber stĺpec…"
+                                    emptyLabel="Načítaj stĺpce v Excel paneli vyššie"
+                                  />
+                                </label>
+                                <label className="flex items-center gap-2 text-[11px] text-slate-600 sm:col-span-2">
+                                  <input
+                                    type="checkbox"
+                                    checked={competitor.isActive}
+                                    onChange={(e) =>
+                                      setCompetitorForms((prev) =>
+                                        prev.map((c, i) =>
+                                          i === index
+                                            ? { ...c, isActive: e.target.checked }
+                                            : c,
+                                        ),
+                                      )
+                                    }
+                                  />
+                                  Aktívna (zobrazovať vo vyhľadávaní)
+                                </label>
+                              </div>
+                              <label className="block text-[11px] text-slate-600">
+                                scrape_config_json (HTTP selektory ceny)
+                                <textarea
+                                  value={competitor.scrapeConfigJson}
+                                  onChange={(e) =>
+                                    setCompetitorForms((prev) =>
+                                      prev.map((c, i) =>
+                                        i === index
+                                          ? { ...c, scrapeConfigJson: e.target.value }
+                                          : c,
+                                      ),
+                                    )
+                                  }
+                                  rows={6}
+                                  spellCheck={false}
+                                  className="mt-1 w-full resize-y rounded-md border border-slate-300 px-2 py-1.5 font-mono text-[11px]"
+                                />
+                              </label>
+                              {isAppAdmin && competitor.id ? (
+                                <label className="inline-flex cursor-pointer items-center gap-2 text-xs text-slate-600">
+                                  <input
+                                    type="file"
+                                    accept="image/png,image/jpeg,image/webp,image/gif"
+                                    className="sr-only"
+                                    onChange={(e) => {
+                                      const f = e.target.files?.[0];
+                                      if (f) {
+                                        void uploadCompetitorLogo(index, f).catch(
+                                          () => undefined,
+                                        );
+                                      }
+                                      e.target.value = "";
+                                    }}
+                                  />
+                                  <span className="rounded border border-slate-200 px-2 py-1 hover:bg-slate-50">
+                                    Nahrať logo
+                                  </span>
+                                </label>
+                              ) : null}
+                              <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2">
+                                <Button
+                                  size="sm"
+                                  className="h-8 bg-amber-600 text-xs hover:bg-amber-700"
+                                  onClick={() => void saveCompetitor(index)}
+                                >
+                                  Uložiť
+                                </Button>
+                                {isAppAdmin ? (
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-8 border-red-200 text-xs text-red-700"
+                                    onClick={() => void deleteCompetitor(index)}
+                                  >
+                                    Odstrániť
+                                  </Button>
+                                ) : null}
+                                {saveState[competitor.id ?? index] ? (
+                                  <span className="text-[11px] text-slate-600">
+                                    {saveState[competitor.id ?? index]}
+                                  </span>
+                                ) : null}
+                              </div>
+                            </div>
+                          ) : null}
+                        </Card>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
             </section>
           )}
 
