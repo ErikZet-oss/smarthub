@@ -74,6 +74,22 @@ _SHOPTET_SCRAPE_CONFIG_JSON = json.dumps(
     indent=2,
 )
 
+# VKP Steel (PrestaShop): vyhľadávanie + cena bez DPH v GTM dataLayer na search stránke
+_PRESTASHOP_VKP_HOSTS = ("vkpsteel.com",)
+_PRESTASHOP_VKP_SCRAPE_CONFIG = CompetitorScrapeConfig(
+    search_via_url_template="{shop_url}/vyhladavanie?controller=search&s={code}",
+    price_selector_regex=r'"reference":"{code}"[\s\S]{0,250}?"price_tax_exc":"([0-9.]+)"',
+)
+
+_PRESTASHOP_VKP_SCRAPE_CONFIG_JSON = json.dumps(
+    {
+        "search_via_url_template": _PRESTASHOP_VKP_SCRAPE_CONFIG.search_via_url_template,
+        "price_selector_regex": _PRESTASHOP_VKP_SCRAPE_CONFIG.price_selector_regex,
+    },
+    ensure_ascii=False,
+    indent=2,
+)
+
 
 def _is_svx_shop(shop_url: str) -> bool:
     return "svx.sk" in (shop_url or "").lower()
@@ -82,6 +98,11 @@ def _is_svx_shop(shop_url: str) -> bool:
 def _is_shoptet_shop(shop_url: str) -> bool:
     low = (shop_url or "").lower()
     return any(host in low for host in _SHOPTET_SHOP_HOSTS)
+
+
+def _is_prestashop_vkp_shop(shop_url: str) -> bool:
+    low = (shop_url or "").lower()
+    return any(host in low for host in _PRESTASHOP_VKP_HOSTS)
 
 
 def _apply_code_to_regex(pattern: str, code: str) -> str:
@@ -130,10 +151,23 @@ def _svx_config_is_wrong(cfg: CompetitorScrapeConfig) -> bool:
     return False
 
 
+def _prestashop_vkp_config_is_wrong(cfg: CompetitorScrapeConfig) -> bool:
+    tmpl = (cfg.search_via_url_template or "").lower()
+    if not tmpl:
+        return False
+    if "controller=search" in tmpl:
+        return False
+    if "search_query" in tmpl or "string=" in tmpl:
+        return True
+    return False
+
+
 def _config_needs_shop_preset(shop_url: str, cfg: CompetitorScrapeConfig) -> bool:
     if _is_placeholder_or_foreign_config(shop_url, cfg):
         return True
     if _is_shoptet_shop(shop_url) and _shoptet_config_is_wrong(cfg):
+        return True
+    if _is_prestashop_vkp_shop(shop_url) and _prestashop_vkp_config_is_wrong(cfg):
         return True
     if _is_svx_shop(shop_url) and _svx_config_is_wrong(cfg):
         return True
@@ -163,11 +197,15 @@ def _uses_broken_generic_search(cfg: CompetitorScrapeConfig) -> bool:
         low = cfg.search_via_url_template.lower()
         if "vyhladavanie" in low and "search_query" in low:
             return False
-        if "/search" in low or "search?q=" in low or "/katalog/?search" in low:
+        if "controller=search" in low:
+            return False
+        if "vyhladavanie" in low and "string=" in low:
+            return False
+        if "/search/" in low or "search?q=" in low or "/katalog/?search" in low:
             return True
     if cfg.product_url_template:
         low = cfg.product_url_template.lower()
-        if "/search" in low or "search?q=" in low:
+        if "/search/" in low or "search?q=" in low:
             return True
     if not cfg.search_via_url_template and not cfg.product_url_template:
         return True
@@ -175,7 +213,7 @@ def _uses_broken_generic_search(cfg: CompetitorScrapeConfig) -> bool:
 
 
 def resolve_competitor_scrape_config(shop_url: str, raw: str | None) -> CompetitorScrapeConfig:
-    """Efektívna konfigurácia — známe e-shopy majú preset (SVX, Shoptet)."""
+    """Efektívna konfigurácia — známe e-shopy majú preset (SVX, Shoptet, PrestaShop)."""
     cfg = load_competitor_scrape_config(raw)
     if _is_svx_shop(shop_url):
         if _config_needs_shop_preset(shop_url, cfg):
@@ -185,6 +223,10 @@ def resolve_competitor_scrape_config(shop_url: str, raw: str | None) -> Competit
         if _config_needs_shop_preset(shop_url, cfg):
             return _SHOPTET_SCRAPE_CONFIG
         return _merge_shop_preset(cfg, _SHOPTET_SCRAPE_CONFIG)
+    if _is_prestashop_vkp_shop(shop_url):
+        if _config_needs_shop_preset(shop_url, cfg):
+            return _PRESTASHOP_VKP_SCRAPE_CONFIG
+        return _merge_shop_preset(cfg, _PRESTASHOP_VKP_SCRAPE_CONFIG)
     return cfg
 
 
@@ -199,6 +241,10 @@ def normalize_scrape_config_json_for_shop(shop_url: str, raw: str | None) -> str
         shop_url, load_competitor_scrape_config(text)
     ):
         return _SHOPTET_SCRAPE_CONFIG_JSON
+    if _is_prestashop_vkp_shop(shop_url) and _config_needs_shop_preset(
+        shop_url, load_competitor_scrape_config(text)
+    ):
+        return _PRESTASHOP_VKP_SCRAPE_CONFIG_JSON
     return text or None
 
 
@@ -281,6 +327,8 @@ def competitor_product_url(
         return f"{base}/vyhladavanie/?search_query={enc}"
     if _is_shoptet_shop(base):
         return f"{base}/vyhladavanie/?string={enc}"
+    if _is_prestashop_vkp_shop(base):
+        return f"{base}/vyhladavanie?controller=search&s={enc}"
     sep = "&" if "?" in base else "?"
     return f"{base}{sep}q={enc}"
 

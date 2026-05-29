@@ -8868,7 +8868,7 @@ export default function Home() {
                                 scrape_config_json (voliteľné — SVX/Oramat/Bbtechnik majú preset)
                                 <textarea
                                   value={competitor.scrapeConfigJson}
-                                  placeholder='Prázdne = automatický preset podľa URL (oramat.sk, bbtechnik.sk, svx.sk)'
+                                  placeholder='Prázdne = automatický preset podľa URL (oramat.sk, bbtechnik.sk, vkpsteel.com, svx.sk)'
                                   onChange={(e) =>
                                     setCompetitorForms((prev) =>
                                       prev.map((c, i) =>

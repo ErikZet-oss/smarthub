@@ -79,6 +79,15 @@ def test_resolve_oramat_ignores_example_sk_template() -> None:
     )
 
 
+def test_resolve_vkpsteel_preset() -> None:
+    cfg = resolve_competitor_scrape_config("https://eshop.vkpsteel.com/", None)
+    assert "controller=search" in (cfg.search_via_url_template or "")
+    assert (
+        competitor_product_url("https://eshop.vkpsteel.com/", "049751010100", cfg)
+        == "https://eshop.vkpsteel.com/vyhladavanie?controller=search&s=049751010100"
+    )
+
+
 def test_resolve_bbtechnik_preset() -> None:
     cfg = resolve_competitor_scrape_config("https://www.bbtechnik.sk/", None)
     assert cfg.search_via_url_template == "{shop_url}/vyhladavanie/?string={code}"
