@@ -5767,30 +5767,59 @@ export default function Home() {
   const uploadCompetitorLogo = async (index: number, file: File) => {
     const row = competitorForms[index];
     if (!row.id) {
-      setSaveState((prev) => ({
-        ...prev,
-        [row.id ?? index]: "Najprv ulož konkurenciu.",
-      }));
+      setToastMessage("Najprv ulož konkurenciu, potom môžeš nahrať logo.");
       return;
     }
     const fd = new FormData();
     fd.append("file", file);
-    const response = await apiFetch(
-      `${API_BASE}/api/competitors/${row.id}/logo`,
-      { method: "POST", body: fd },
-    );
-    const payload = (await response.json()) as {
-      logo_url?: string | null;
-      detail?: unknown;
-    };
-    if (!response.ok) {
-      throw new Error(formatApiDetail(payload.detail));
+    try {
+      const response = await apiFetch(
+        `${API_BASE}/api/competitors/${row.id}/logo`,
+        { method: "POST", body: fd },
+      );
+      const payload = (await response.json()) as {
+        logo_url?: string | null;
+        detail?: unknown;
+      };
+      if (!response.ok) {
+        throw new Error(formatApiDetail(payload.detail));
+      }
+      setCompetitorForms((prev) =>
+        prev.map((c, i) =>
+          i === index ? { ...c, logoUrl: payload.logo_url ?? null } : c,
+        ),
+      );
+      setToastMessage("Logo bolo nahraté.");
+    } catch (error) {
+      setToastMessage(
+        error instanceof Error ? error.message : "Nepodarilo sa nahrať logo.",
+      );
     }
-    setCompetitorForms((prev) =>
-      prev.map((c, i) =>
-        i === index ? { ...c, logoUrl: payload.logo_url ?? null } : c,
-      ),
-    );
+  };
+
+  const removeCompetitorLogo = async (index: number) => {
+    const row = competitorForms[index];
+    if (!row.id) {
+      return;
+    }
+    try {
+      const response = await apiFetch(
+        `${API_BASE}/api/competitors/${row.id}/logo`,
+        { method: "DELETE" },
+      );
+      const payload = (await response.json()) as { detail?: unknown };
+      if (!response.ok) {
+        throw new Error(formatApiDetail(payload.detail));
+      }
+      setCompetitorForms((prev) =>
+        prev.map((c, i) => (i === index ? { ...c, logoUrl: null } : c)),
+      );
+      setToastMessage("Logo bolo odstránené.");
+    } catch (error) {
+      setToastMessage(
+        error instanceof Error ? error.message : "Nepodarilo sa odstrániť logo.",
+      );
+    }
   };
 
   const supplierCardKey = (supplier: SupplierForm, index: number) =>
@@ -8799,6 +8828,67 @@ export default function Home() {
                           </button>
                           {expanded ? (
                             <div className="space-y-3 border-t border-slate-100 px-2.5 py-3">
+                              <div className="flex flex-wrap items-start gap-3 rounded-lg border border-slate-100 bg-slate-50/50 p-2">
+                                <div
+                                  className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-white"
+                                  title="Logo konkurencie"
+                                >
+                                  {publicApiAssetUrl(competitor.logoUrl) ? (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img
+                                      src={publicApiAssetUrl(competitor.logoUrl)!}
+                                      alt=""
+                                      className="h-full w-full object-contain p-1"
+                                    />
+                                  ) : (
+                                    <span className="px-1 text-center text-[8px] font-medium uppercase text-slate-400">
+                                      Bez loga
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="min-w-0 flex-1 space-y-1">
+                                  <label className="text-[11px] font-medium text-slate-600">
+                                    Logo (max 2 MB)
+                                  </label>
+                                  <div className="flex flex-wrap gap-1">
+                                    <input
+                                      type="file"
+                                      accept="image/png,image/jpeg,image/webp,image/gif"
+                                      disabled={supplierTemplateLocked}
+                                      className="max-w-full text-[11px] file:mr-1 file:rounded file:bg-amber-600 file:px-2 file:py-1 file:text-[11px] file:text-white disabled:opacity-50"
+                                      onChange={(event) => {
+                                        const file = event.target.files?.[0];
+                                        event.target.value = "";
+                                        if (file) {
+                                          void uploadCompetitorLogo(index, file);
+                                        }
+                                      }}
+                                    />
+                                    {competitor.id &&
+                                    competitor.logoUrl &&
+                                    !supplierTemplateLocked ? (
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-7 text-[11px]"
+                                        onClick={() => void removeCompetitorLogo(index)}
+                                      >
+                                        Zmazať logo
+                                      </Button>
+                                    ) : null}
+                                  </div>
+                                  {!competitor.id ? (
+                                    <p className="text-[10px] text-amber-800">
+                                      Logo po prvom uložení.
+                                    </p>
+                                  ) : supplierTemplateLocked ? (
+                                    <p className="text-[10px] text-slate-500">
+                                      Nahrávanie loga je len pre admina.
+                                    </p>
+                                  ) : null}
+                                </div>
+                              </div>
                               <div className="grid gap-2 sm:grid-cols-2">
                                 <label className="block text-[11px] text-slate-600">
                                   Názov
@@ -8885,27 +8975,6 @@ export default function Home() {
                                   className="mt-1 w-full resize-y rounded-md border border-slate-300 px-2 py-1.5 font-mono text-[11px]"
                                 />
                               </label>
-                              {isAppAdmin && competitor.id ? (
-                                <label className="inline-flex cursor-pointer items-center gap-2 text-xs text-slate-600">
-                                  <input
-                                    type="file"
-                                    accept="image/png,image/jpeg,image/webp,image/gif"
-                                    className="sr-only"
-                                    onChange={(e) => {
-                                      const f = e.target.files?.[0];
-                                      if (f) {
-                                        void uploadCompetitorLogo(index, f).catch(
-                                          () => undefined,
-                                        );
-                                      }
-                                      e.target.value = "";
-                                    }}
-                                  />
-                                  <span className="rounded border border-slate-200 px-2 py-1 hover:bg-slate-50">
-                                    Nahrať logo
-                                  </span>
-                                </label>
-                              ) : null}
                               <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2">
                                 <Button
                                   size="sm"
