@@ -53,9 +53,59 @@ _SVX_SCRAPE_CONFIG_JSON = json.dumps(
     indent=2,
 )
 
+# Oramat (Shoptet): vyhľadávanie /vyhladavanie/?string=, cena bez DPH v .price-additional
+_ORAMAT_FOLLOW_LINK_RE = (
+    r'href="(/[^"]+)"[\s\S]{0,4000}?data-micro="sku">{code}'
+)
+_ORAMAT_SCRAPE_CONFIG = CompetitorScrapeConfig(
+    search_via_url_template="{shop_url}/vyhladavanie/?string={code}",
+    follow_product_link_regex=_ORAMAT_FOLLOW_LINK_RE,
+    price_selector_regex=r'class="price-additional[^"]*"[^>]*>\s*([0-9,.]+)\s*€',
+)
+
+_ORAMAT_SCRAPE_CONFIG_JSON = json.dumps(
+    {
+        "search_via_url_template": _ORAMAT_SCRAPE_CONFIG.search_via_url_template,
+        "follow_product_link_regex": _ORAMAT_SCRAPE_CONFIG.follow_product_link_regex,
+        "price_selector_regex": _ORAMAT_SCRAPE_CONFIG.price_selector_regex,
+    },
+    ensure_ascii=False,
+    indent=2,
+)
+
 
 def _is_svx_shop(shop_url: str) -> bool:
     return "svx.sk" in (shop_url or "").lower()
+
+
+def _is_oramat_shop(shop_url: str) -> bool:
+    return "oramat.sk" in (shop_url or "").lower()
+
+
+def _apply_code_to_regex(pattern: str, code: str) -> str:
+    return pattern.replace("{code}", re.escape(code))
+
+
+def _config_needs_shop_preset(cfg: CompetitorScrapeConfig) -> bool:
+    if _uses_broken_generic_search(cfg):
+        return True
+    if not cfg.search_via_url_template and not cfg.product_url_template:
+        return True
+    return False
+
+
+def _merge_shop_preset(
+    cfg: CompetitorScrapeConfig,
+    preset: CompetitorScrapeConfig,
+) -> CompetitorScrapeConfig:
+    return CompetitorScrapeConfig(
+        product_url_template=cfg.product_url_template,
+        search_via_url_template=cfg.search_via_url_template or preset.search_via_url_template,
+        follow_product_link_regex=cfg.follow_product_link_regex or preset.follow_product_link_regex,
+        price_selector_regex=cfg.price_selector_regex or preset.price_selector_regex,
+        pack_quantity_selector_regex=cfg.pack_quantity_selector_regex,
+        user_agent=cfg.user_agent,
+    )
 
 
 def _uses_broken_generic_search(cfg: CompetitorScrapeConfig) -> bool:
@@ -75,30 +125,26 @@ def _uses_broken_generic_search(cfg: CompetitorScrapeConfig) -> bool:
 
 
 def resolve_competitor_scrape_config(shop_url: str, raw: str | None) -> CompetitorScrapeConfig:
-    """Efektívna konfigurácia — pre svx.sk opraví generickú /search šablónu."""
+    """Efektívna konfigurácia — známe e-shopy majú preset (SVX, Oramat)."""
     cfg = load_competitor_scrape_config(raw)
-    if not _is_svx_shop(shop_url):
-        return cfg
-    if _uses_broken_generic_search(cfg):
-        return _SVX_SCRAPE_CONFIG
-    return CompetitorScrapeConfig(
-        product_url_template=cfg.product_url_template,
-        search_via_url_template=cfg.search_via_url_template,
-        follow_product_link_regex=cfg.follow_product_link_regex
-        or _SVX_SCRAPE_CONFIG.follow_product_link_regex,
-        price_selector_regex=cfg.price_selector_regex or _SVX_SCRAPE_CONFIG.price_selector_regex,
-        pack_quantity_selector_regex=cfg.pack_quantity_selector_regex,
-        user_agent=cfg.user_agent,
-    )
+    if _is_svx_shop(shop_url):
+        if _config_needs_shop_preset(cfg):
+            return _SVX_SCRAPE_CONFIG
+        return _merge_shop_preset(cfg, _SVX_SCRAPE_CONFIG)
+    if _is_oramat_shop(shop_url):
+        if _config_needs_shop_preset(cfg):
+            return _ORAMAT_SCRAPE_CONFIG
+        return _merge_shop_preset(cfg, _ORAMAT_SCRAPE_CONFIG)
+    return cfg
 
 
 def normalize_scrape_config_json_for_shop(shop_url: str, raw: str | None) -> str | None:
-    """Pri uložení konkurenta vráti opravený JSON (svx.sk — správny search endpoint)."""
+    """Pri uložení konkurenta vráti opravený JSON pre známe e-shopy."""
     text = (raw or "").strip()
-    if not _is_svx_shop(shop_url):
-        return text or None
-    if _uses_broken_generic_search(load_competitor_scrape_config(text)):
+    if _is_svx_shop(shop_url) and _config_needs_shop_preset(load_competitor_scrape_config(text)):
         return _SVX_SCRAPE_CONFIG_JSON
+    if _is_oramat_shop(shop_url) and _config_needs_shop_preset(load_competitor_scrape_config(text)):
+        return _ORAMAT_SCRAPE_CONFIG_JSON
     return text or None
 
 
@@ -179,6 +225,8 @@ def competitor_product_url(
         return f"{t}{sep}q={enc}"
     if _is_svx_shop(base):
         return f"{base}/vyhladavanie/?search_query={enc}"
+    if _is_oramat_shop(base):
+        return f"{base}/vyhladavanie/?string={enc}"
     sep = "&" if "?" in base else "?"
     return f"{base}{sep}q={enc}"
 
@@ -199,11 +247,18 @@ def _parse_eur_amount(text: Any) -> Optional[float]:
         return None
 
 
-def _extract_price_from_html(html: str, config: CompetitorScrapeConfig) -> tuple[Optional[float], Optional[str]]:
+def _extract_price_from_html(
+    html: str,
+    config: CompetitorScrapeConfig,
+    competitor_code: str = "",
+) -> tuple[Optional[float], Optional[str]]:
     h = html or ""
     if config.price_selector_regex:
         try:
-            pat = re.compile(config.price_selector_regex, re.IGNORECASE | re.DOTALL)
+            pat = re.compile(
+                _apply_code_to_regex(config.price_selector_regex, competitor_code),
+                re.IGNORECASE | re.DOTALL,
+            )
             m = pat.search(h)
             if m:
                 raw = (m.group(1) if m.lastindex else m.group(0)) or ""
@@ -222,11 +277,18 @@ def _extract_price_from_html(html: str, config: CompetitorScrapeConfig) -> tuple
     return None, None
 
 
-def _extract_pack_quantity(html: str, config: CompetitorScrapeConfig) -> Optional[int]:
+def _extract_pack_quantity(
+    html: str,
+    config: CompetitorScrapeConfig,
+    competitor_code: str = "",
+) -> Optional[int]:
     if not config.pack_quantity_selector_regex:
         return None
     try:
-        pat = re.compile(config.pack_quantity_selector_regex, re.IGNORECASE)
+        pat = re.compile(
+            _apply_code_to_regex(config.pack_quantity_selector_regex, competitor_code),
+            re.IGNORECASE,
+        )
         m = pat.search(html or "")
         if m:
             return max(1, int(m.group(1)))
@@ -279,7 +341,10 @@ async def fetch_competitor_public_price(
         final_url = str(r.url)
         if cfg.follow_product_link_regex:
             try:
-                link_pat = re.compile(cfg.follow_product_link_regex, re.IGNORECASE | re.DOTALL)
+                link_pat = re.compile(
+                    _apply_code_to_regex(cfg.follow_product_link_regex, code),
+                    re.IGNORECASE | re.DOTALL,
+                )
                 link_m = link_pat.search(html)
                 if link_m:
                     link = (link_m.group(1) if link_m.lastindex else link_m.group(0)) or ""
@@ -294,13 +359,13 @@ async def fetch_competitor_public_price(
             except re.error:
                 pass
 
-    price_eur, raw_price = _extract_price_from_html(html, cfg)
+    price_eur, raw_price = _extract_price_from_html(html, cfg, code)
     if price_eur is None:
         raise RuntimeError(
             f"Na stránke sa nepodarilo nájsť cenu (skontroluj scrape_config_json "
             f"price_selector_regex). URL={final_url[:120]!r}"
         )
-    pack_q = _extract_pack_quantity(html, cfg)
+    pack_q = _extract_pack_quantity(html, cfg, code)
     result: dict[str, Any] = {
         "price_eur": price_eur,
         "raw_price": raw_price,

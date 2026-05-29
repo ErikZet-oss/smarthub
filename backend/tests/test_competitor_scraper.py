@@ -66,7 +66,13 @@ def test_resolve_svx_replaces_broken_search_template() -> None:
     )
 
 
-def test_extract_price_secondary_svx_style() -> None:
+def test_resolve_oramat_preset() -> None:
+    cfg = resolve_competitor_scrape_config("https://www.oramat.sk/", None)
+    assert cfg.search_via_url_template == "{shop_url}/vyhladavanie/?string={code}"
+    assert (
+        competitor_product_url("https://www.oramat.sk/", "PGO-101000-X63", cfg)
+        == "https://www.oramat.sk/vyhladavanie/?string=PGO-101000-X63"
+    )
     html = (
         '<div data-config-product-price-secondary class="text-p-small">'
         " 1,32 € <span>bez DPH</span></div>"
