@@ -9,6 +9,7 @@ import pytest
 
 from app.services.fabory_http_client import (
     FaboryHttpClient,
+    _fabory_catalog_price_per_100,
     _fabory_pack_quantity_from_pdp_html,
     _fabory_price_for_pack,
     _fabory_product_title_from_pdp_html,
@@ -120,6 +121,71 @@ def test_fabory_price_for_pack_scales_when_unit_quantity_differs() -> None:
     assert _fabory_price_for_pack(170.5, unit_quantity=100, pack_quantity=100) == 170.5
     assert _fabory_price_for_pack(170.5, unit_quantity=100, pack_quantity=10) == 17.05
     assert _fabory_price_for_pack(2.35, unit_quantity=100, pack_quantity=500) == 11.75
+
+
+def test_fabory_catalog_price_per_100_normalizes_unit_quantity() -> None:
+    assert _fabory_catalog_price_per_100(20.5, 100) == 20.5
+    assert _fabory_catalog_price_per_100(10.25, 50) == 20.5
+    assert _fabory_catalog_price_per_100(41.0, 200) == 20.5
+
+
+@pytest.mark.asyncio
+async def test_fetch_product_price_pack_50_shows_per_100_not_pack_total() -> None:
+    """51010.120.060: balenie 50 ks, cena za 100 ks = 20,50 (nie 10,25 za balenie)."""
+    price = {
+        "51010120060": {
+            "currencyIso": "EUR",
+            "unitNetPrice": 20.5,
+            "formattedUnitNetPrice": "20,50\u00a0€",
+            "unitQuantity": 100,
+        }
+    }
+    stock = {
+        "51010120060": {
+            "stockLevelMessage": "Na sklade",
+            "stockLevelStatus": "INSTOCK",
+            "stockQuantity": 0,
+        }
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/product/price"):
+            return httpx.Response(200, json=price)
+        if path.endswith("/product/stock"):
+            return httpx.Response(200, json=stock)
+        if path.endswith("/search/"):
+            return httpx.Response(
+                302,
+                headers={"Location": "/sk/skrutka/p/51010120060"},
+            )
+        if "/p/" in path:
+            return httpx.Response(
+                200,
+                text=(
+                    '<html><body><h1>Skrutka M12×60</h1>'
+                    '<input class="alp-add-to-cart js-alp-add-to-cart" value="50">'
+                    "<div>Ambalat la 50</div></body></html>"
+                ),
+            )
+        return httpx.Response(404, text="not found")
+
+    client = FaboryHttpClient("https://www.fabory.com/sk")
+    client._client = httpx.AsyncClient(
+        base_url=client._prefix,
+        transport=httpx.MockTransport(handler),
+        follow_redirects=True,
+    )
+    client._login_ok = True
+    try:
+        data = await client.fetch_product_price_and_stock("51010.120.060")
+    finally:
+        await client.aclose()
+
+    assert data["price_eur"] == 20.5
+    assert data["pack_price_eur"] == 10.25
+    assert data["pack_quantity"] == 50
+    assert data["price_unit"] == "per_100_ks"
 
 
 @pytest.mark.asyncio

@@ -202,13 +202,22 @@ def _fabory_price_for_pack(
     return round(float(unit_net) * pq / uq, 4)
 
 
-def _fabory_price_unit_key(unit_quantity: int) -> str:
+def _fabory_catalog_price_per_100(
+    unit_net: Optional[float], unit_quantity: int
+) -> Optional[float]:
+    """Cena ako na PDP Fabory — vždy prepočítaná na 100 ks (``cena za 100``)."""
+    if unit_net is None:
+        return None
     uq = max(1, int(unit_quantity))
-    if uq == 1:
-        return "per_1_ks"
     if uq == 100:
-        return "per_100_ks"
-    return str(uq)
+        return round(float(unit_net), 4)
+    return round(float(unit_net) * 100.0 / uq, 4)
+
+
+def _fabory_price_unit_key(unit_quantity: int) -> str:
+    """Fabory v UI vždy zobrazuje cenu za 100 ks (label na PDP)."""
+    _ = unit_quantity
+    return "per_100_ks"
 
 
 def _fabory_format_net_price_eur(amount: float) -> str:
@@ -602,11 +611,12 @@ class FaboryHttpClient:
             unit_quantity=unit_quantity,
             pack_quantity=pack_quantity,
         )
-        # Ako na PDP Fabory: zobrazovaná cena je unitNetPrice za unitQuantity (typ. /100 ks),
-        # nie súčet za celé objednávateľné balenie (pack_quantity môže byť 500 ks).
-        price_eur = unit_net_f
+        # PDP Fabory: „cena za 100“ — unitNetPrice platí pre unitQuantity z API (50/100/200…).
+        price_eur = _fabory_catalog_price_per_100(unit_net_f, unit_quantity)
         price_unit = _fabory_price_unit_key(unit_quantity)
         raw_price = p.get("formattedUnitNetPrice") or None
+        if price_eur is not None and unit_quantity != 100:
+            raw_price = _fabory_format_net_price_eur(price_eur)
 
         stock_status = (s.get("stockLevelStatus") or "").upper()
         stock_qty_raw = s.get("stockQuantity")

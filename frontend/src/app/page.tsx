@@ -1015,6 +1015,83 @@ function hopefixIsOutOfStock(scrape: SupplierScrapeState | undefined): boolean {
   return false;
 }
 
+const SUPPLIER_OOS_RAW_MARKERS = [
+  "nie je skladom",
+  "nie je na sklade",
+  "neni skladem",
+  "není skladem",
+  "ne skladem",
+  "vypredan",
+  "vyprodano",
+  "vyprodáno",
+  "nedostupn",
+  "momentálne nedostupné",
+  "momentálne nedostupne",
+  "není na sklad",
+  "neni na sklad",
+  "outofstock",
+  "out of stock",
+] as const;
+
+function rawStockIndicatesOutOfStock(raw: string | null | undefined): boolean {
+  const s = (raw || "").trim().toLowerCase();
+  if (!s) {
+    return false;
+  }
+  return SUPPLIER_OOS_RAW_MARKERS.some((m) => s.includes(m));
+}
+
+function faboryIsOutOfStock(
+  ...sources: Array<{ raw_stock?: string | null; stock?: number | null }>
+): boolean {
+  const text = faboryStockDisplayText(...sources);
+  return rawStockIndicatesOutOfStock(text);
+}
+
+/** Živý scrape potvrdil, že produkt u dodávateľa nie je skladom. */
+function supplierOfferOutOfStock(
+  scrape: SupplierScrapeState | undefined,
+  supplier: string | null | undefined,
+  activePv: {
+    stock?: number | null;
+    raw_stock?: string | null;
+  } | null,
+  usesHttpCartVariants: boolean,
+): boolean {
+  if (
+    cartRowLiveOutOfStock(scrape, supplier, activePv, usesHttpCartVariants)
+  ) {
+    return true;
+  }
+  if (!scrape || scrape.loading || scrape.error) {
+    return false;
+  }
+  const check = (src: {
+    stock?: number | null;
+    raw_stock?: string | null;
+  } | null): boolean => {
+    if (!src) {
+      return false;
+    }
+    if (src.stock != null && Number.isFinite(src.stock) && src.stock <= 0) {
+      return true;
+    }
+    return rawStockIndicatesOutOfStock(src.raw_stock);
+  };
+  if (usesHttpCartVariants && activePv && check(activePv)) {
+    return true;
+  }
+  if (supplierNameIsFabory(supplier)) {
+    return faboryIsOutOfStock(
+      activePv
+        ? { raw_stock: activePv.raw_stock, stock: activePv.stock }
+        : {},
+      { raw_stock: scrape.raw_stock, stock: scrape.stock },
+    );
+  }
+  return check(scrape);
+}
+
 /** Živý stav riadka (súhrnný scrape alebo zvolený variant) — košík a „Nie je skladom“. */
 function cartRowLiveOutOfStock(
   scrape: SupplierScrapeState | undefined,
@@ -1347,10 +1424,13 @@ function scrapePriceUnitSuffix(
   if (u === "per_100_ks" || u === "100") {
     return compact ? SCRAPE_PRICE_DISPLAY_SUFFIX : " / 100 ks";
   }
+  if (supplierNameIsFabory(supplierName)) {
+    return compact ? SCRAPE_PRICE_DISPLAY_SUFFIX : " / 100 ks";
+  }
   if (supplierNameIsArgip(supplierName)) {
     return compact ? SCRAPE_PRICE_DISPLAY_SUFFIX : " / 100 ks";
   }
-  if (supplierNameIsFabory(supplierName) || supplierNameIsBmkco(supplierName)) {
+  if (supplierNameIsBmkco(supplierName)) {
     return "";
   }
   return SCRAPE_PRICE_DISPLAY_SUFFIX;
@@ -2217,7 +2297,7 @@ function ProductSupplierExpandedTableRow({
                                       const offerLiveOutOfStock =
                                         scraperApplicable &&
                                         !stockUiLoading &&
-                                        cartRowLiveOutOfStock(
+                                        supplierOfferOutOfStock(
                                           scrape,
                                           offer.supplier,
                                           usesHttpCartVariants && activePv
@@ -2225,6 +2305,8 @@ function ProductSupplierExpandedTableRow({
                                             : null,
                                           usesHttpCartVariants,
                                         );
+                                      const supplierBoxOutOfStock =
+                                        offerLiveOutOfStock;
                                       /** Prihlásený scrape, ale v odpovedi nie je cena ani sklad (napr. riadok v katalógu sa nenašiel). */
                                       const liveScrapeMissingOffer =
                                         scraperApplicable &&
@@ -2348,7 +2430,9 @@ function ProductSupplierExpandedTableRow({
                                         <div
                                           className={cn(
                                             "flex min-w-0 flex-1 flex-wrap items-start gap-0.5 rounded-md border p-1 shadow-sm ring-1 sm:gap-1.5 sm:p-1.5 sm:flex-nowrap sm:items-center",
-                                            supplierDetailHeaderBarClass(offerIndex),
+                                            supplierBoxOutOfStock
+                                              ? "border-slate-200/60 bg-slate-100/95 ring-slate-200/40"
+                                              : supplierDetailHeaderBarClass(offerIndex),
                                           )}
                                         >
                                           <div
@@ -2510,8 +2594,13 @@ function ProductSupplierExpandedTableRow({
                                         <div
                                           key={`${product.internal_code}-${offer.supplier}-${offer.supplier_code ?? offerIndex}`}
                                           className={cn(
-                                            "min-w-0 rounded-md border border-slate-200/80 bg-gradient-to-b from-white via-slate-50/25 to-slate-100/35 p-1 shadow-sm ring-1 sm:rounded-lg sm:p-2",
-                                            supplierDetailCardRingClass(offerIndex),
+                                            "min-w-0 rounded-md border p-1 shadow-sm ring-1 sm:rounded-lg sm:p-2",
+                                            supplierBoxOutOfStock
+                                              ? "border-slate-200/70 bg-slate-100/85 ring-slate-200/45"
+                                              : cn(
+                                                  "border-slate-200/80 bg-gradient-to-b from-white via-slate-50/25 to-slate-100/35",
+                                                  supplierDetailCardRingClass(offerIndex),
+                                                ),
                                           )}
                                         >
                                           <div className="flex flex-col gap-1 lg:flex-row lg:items-start lg:gap-3">
