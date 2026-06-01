@@ -202,6 +202,15 @@ def _fabory_price_for_pack(
     return round(float(unit_net) * pq / uq, 4)
 
 
+def _fabory_price_unit_key(unit_quantity: int) -> str:
+    uq = max(1, int(unit_quantity))
+    if uq == 1:
+        return "per_1_ks"
+    if uq == 100:
+        return "per_100_ks"
+    return str(uq)
+
+
 def _fabory_format_net_price_eur(amount: float) -> str:
     """Slovenský formát ako Fabory API (``11,80\u00a0€``)."""
     s = f"{amount:.2f}".replace(".", ",")
@@ -588,17 +597,16 @@ class FaboryHttpClient:
                 pdp_html = ""
 
         pack_quantity = _fabory_pack_quantity_from_pdp_html(pdp_html) or unit_quantity
-        price_eur = _fabory_price_for_pack(
+        pack_price_eur = _fabory_price_for_pack(
             unit_net_f,
             unit_quantity=unit_quantity,
             pack_quantity=pack_quantity,
         )
+        # Ako na PDP Fabory: zobrazovaná cena je unitNetPrice za unitQuantity (typ. /100 ks),
+        # nie súčet za celé objednávateľné balenie (pack_quantity môže byť 500 ks).
+        price_eur = unit_net_f
+        price_unit = _fabory_price_unit_key(unit_quantity)
         raw_price = p.get("formattedUnitNetPrice") or None
-        if (
-            price_eur is not None
-            and pack_quantity != unit_quantity
-        ):
-            raw_price = _fabory_format_net_price_eur(price_eur)
 
         stock_status = (s.get("stockLevelStatus") or "").upper()
         stock_qty_raw = s.get("stockQuantity")
@@ -628,6 +636,8 @@ class FaboryHttpClient:
                 "label": label or c,
                 "pack_quantity": pack_quantity,
                 "price_eur": price_eur,
+                "pack_price_eur": pack_price_eur,
+                "price_unit": price_unit,
                 "raw_price": raw_price,
                 "stock": stock_final,
                 "raw_stock": raw_stock,
@@ -636,6 +646,8 @@ class FaboryHttpClient:
         ]
         return {
             "price_eur": price_eur,
+            "pack_price_eur": pack_price_eur,
+            "price_unit": price_unit,
             "stock": stock_final,
             "pack_quantity": pack_quantity,
             "raw_price": raw_price,
