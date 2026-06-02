@@ -5239,11 +5239,11 @@ export default function Home() {
   }, [apiFetch]);
 
   useEffect(() => {
-    if (!isAppAdmin && !sectionsUnlocked) {
+    if (!authSessionReady || !apiToken) {
       return;
     }
     void loadFieldMapping();
-  }, [loadFieldMapping, isAppAdmin, sectionsUnlocked]);
+  }, [loadFieldMapping, authSessionReady, apiToken]);
 
   /** Profil stĺpcov z Excelu (unique_values) — inak sú filtre prázdne pri prázdnej DB alebo bez kliku „Načítať stĺpce“. */
   useEffect(() => {

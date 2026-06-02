@@ -1239,8 +1239,9 @@ async def bootstrap_search(
 @router.get("/mapping/fields")
 def get_field_mapping(
     session: Session = Depends(get_session),
-    _: AuthUserContext = Depends(require_sections_unlock),
+    _: AuthUserContext = Depends(get_current_user),
 ):
+    """Mapovanie stĺpcov pre filtre vyhľadávania — čítanie pre všetkých prihlásených."""
     fm = session.get(FieldMapping, 1)
     if fm is None:
         return {
