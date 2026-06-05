@@ -3,7 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 import re
-from typing import Any, Callable
+import threading
+from contextlib import contextmanager
+from typing import Any, Callable, Iterator
 
 from openpyxl import load_workbook
 from sqlmodel import Session, select
@@ -64,7 +66,21 @@ _PROFILE_UNIQUE_FIELD_KEYS: tuple[str, ...] = (
     "image_filename",
 )
 # Profil stĺpcov nepotrebuje unikáty z kódov dodávateľov / EAN — len mapovacie polia.
-_PROFILE_MAX_UNIQUE_PER_COLUMN = 5_000
+_PROFILE_MAX_UNIQUE_PER_COLUMN = 1_000
+# Ukážka hodnôt v UI — nepotrebujeme celý sheet ak už máme dosť unikátov.
+_PROFILE_EARLY_EXIT_MIN_ROWS = 5_000
+
+_EXCEL_IO_LOCK = threading.Lock()
+
+
+@contextmanager
+def excel_io_lock() -> Iterator[None]:
+    """Jeden Excel scan/import naraz — na Renderi inak OOM alebo timeout."""
+    _EXCEL_IO_LOCK.acquire()
+    try:
+        yield
+    finally:
+        _EXCEL_IO_LOCK.release()
 
 
 def _profile_unique_column_indices(headers: list[str]) -> set[int]:
@@ -275,6 +291,51 @@ def _money_short_catalog_col_index(headers: list[str]) -> int | None:
     return None
 
 
+def _material_number_col_indices(headers: list[str]) -> list[int]:
+    """Material Number (without dots) má prednosť pred Material Number."""
+    preferred: list[int] = []
+    fallback: list[int] = []
+    for idx, h in enumerate(headers):
+        low = (h or "").strip().casefold()
+        if "material number" not in low:
+            continue
+        if "without dots" in low:
+            preferred.append(idx)
+        elif low == "material number":
+            fallback.append(idx)
+    return preferred + fallback
+
+
+def _resolve_row_internal_code(
+    row: Any,
+    *,
+    primary_idx: int,
+    smart_code_idx: int | None,
+    money_catalog_idx: int | None,
+    material_number_indices: list[int],
+) -> str:
+    """
+    Interný kód produktu — primárne mapovaný stĺpec (číslo Smart).
+    Ak chýba, použije Material Number / Money Katalóg (nové riadky v Exceli často nemajú Smart kód).
+    """
+    primary = _row_cell(row, primary_idx)
+    if primary:
+        return primary
+    if smart_code_idx is not None and smart_code_idx != primary_idx:
+        alt = _row_cell(row, smart_code_idx)
+        if alt:
+            return alt
+    for idx in material_number_indices:
+        alt = _row_cell(row, idx)
+        if alt:
+            return alt
+    if money_catalog_idx is not None:
+        alt = _row_cell(row, money_catalog_idx)
+        if alt:
+            return alt
+    return ""
+
+
 def _resolve_field_col_index(
     headers: list[str],
     field_key: str,
@@ -374,6 +435,22 @@ def import_gamechanger_excel(
     sheet_name: str = "DIN",
     progress_cb: Callable[[int, int], None] | None = None,
 ) -> ImportResult:
+    with excel_io_lock():
+        return _import_gamechanger_excel_locked(
+            file_path,
+            session,
+            sheet_name=sheet_name,
+            progress_cb=progress_cb,
+        )
+
+
+def _import_gamechanger_excel_locked(
+    file_path: str,
+    session: Session,
+    *,
+    sheet_name: str = "DIN",
+    progress_cb: Callable[[int, int], None] | None = None,
+) -> ImportResult:
     resolved = resolve_gamechanger_xlsx_path(file_path)
     file_path = str(resolved)
     name = (sheet_name or "DIN").strip() or "DIN"
@@ -445,15 +522,16 @@ def import_gamechanger_excel(
         )
 
     leading_idx = _resolve_header_col_index(headers, "Leading standard")
-    stn_idx = _resolve_header_col_index(headers, "STN")
-    if leading_idx is not None and stn_idx is not None and norma_idx == stn_idx:
+    if leading_idx is not None:
+        if norma_idx != leading_idx:
+            old_hdr = headers[norma_idx] if norma_idx is not None else "?"
+            mapping_warnings.append(
+                f"Mapovanie Norma: namiesto „{old_hdr}“ sa pri importe použije "
+                f"„{headers[leading_idx]}“ (Leading standard)."
+            )
         norma_idx = leading_idx
         col_by_field["norma"] = leading_idx
         resolved_hdr_by_field["norma"] = headers[leading_idx]
-        mapping_warnings.append(
-            "Mapovanie Norma: v databáze bol stĺpec „STN“, import použije „Leading standard“ "
-            "(v Exceli sú dva rôzne stĺpce — do aplikácie sa načítajú hodnoty z „Leading standard“)."
-        )
 
     _sync_field_mapping_columns(fm, resolved_hdr_by_field)
 
@@ -617,6 +695,8 @@ def import_gamechanger_excel(
     mapping_payloads: dict[tuple[str, str], str] = {}
     competitor_mapping_payloads: dict[tuple[str, str], str] = {}
     legacy_short_codes: set[str] = set()
+    material_number_indices = _material_number_col_indices(headers)
+    skipped_no_code = 0
 
     for row in rows:
         result.rows_scanned += 1
@@ -624,8 +704,15 @@ def import_gamechanger_excel(
             result.rows_scanned <= 25 or result.rows_scanned % 200 == 0
         ):
             progress_cb(result.rows_scanned, result.total_rows)
-        internal_code = _row_cell(row, internal_code_idx)
+        internal_code = _resolve_row_internal_code(
+            row,
+            primary_idx=internal_code_idx,
+            smart_code_idx=smart_code_idx,
+            money_catalog_idx=money_catalog_idx,
+            material_number_indices=material_number_indices,
+        )
         if not internal_code:
+            skipped_no_code += 1
             continue
 
         if (
@@ -696,6 +783,12 @@ def import_gamechanger_excel(
             )
             competitor_mapping_payloads[(internal_code, competitor_name)] = competitor_code
             result.competitor_mappings_upserted += 1
+
+    if skipped_no_code:
+        result.warnings.append(
+            f"Import: {skipped_no_code} riadkov bez interného kódu "
+            "(prázdne číslo Smart, Material Number aj Money Katalóg) sa preskočilo."
+        )
 
     # 1) Produkty: preload + create/update
     existing_products = session.exec(select(Product)).all()
@@ -909,6 +1002,23 @@ def profile_excel_columns(
     max_scan_rows: int = 500_000,
     preview_row_count: int = 8,
 ) -> ColumnProfileResult:
+    with excel_io_lock():
+        return _profile_excel_columns_locked(
+            file_path,
+            sheet_name=sheet_name,
+            max_unique_values=max_unique_values,
+            max_scan_rows=max_scan_rows,
+            preview_row_count=preview_row_count,
+        )
+
+
+def _profile_excel_columns_locked(
+    file_path: str,
+    sheet_name: str = "DIN",
+    max_unique_values: int = _PROFILE_MAX_UNIQUE_PER_COLUMN,
+    max_scan_rows: int = 500_000,
+    preview_row_count: int = 8,
+) -> ColumnProfileResult:
     file_path = str(resolve_gamechanger_xlsx_path(file_path))
     wb = load_workbook(file_path, read_only=True, data_only=True)
     if sheet_name not in wb.sheetnames:
@@ -923,24 +1033,42 @@ def profile_excel_columns(
     unique_sets = [set() for _ in headers]
 
     scanned = 0
+    rows_without_new_unique = 0
     try:
         for row in rows:
             scanned += 1
-            normalized_row = [_normalize(value) for value in row[: len(headers)]]
-
+            cells = tuple(row) if row is not None else ()
             if len(preview_rows) < preview_row_count:
                 preview_rows.append(
                     {
-                        headers[idx]: normalized_row[idx] if idx < len(normalized_row) else ""
+                        headers[idx]: _normalize(cells[idx]) if idx < len(cells) else ""
                         for idx in range(len(headers))
                     }
                 )
 
+            added_any = False
             for idx in unique_column_indices:
-                value = normalized_row[idx] if idx < len(normalized_row) else ""
-                if value and len(unique_sets[idx]) < max_unique_values:
-                    unique_sets[idx].add(value)
+                if len(unique_sets[idx]) >= max_unique_values:
+                    continue
+                value = _normalize(cells[idx]) if idx < len(cells) else ""
+                if not value:
+                    continue
+                before = len(unique_sets[idx])
+                unique_sets[idx].add(value)
+                if len(unique_sets[idx]) > before:
+                    added_any = True
 
+            if added_any:
+                rows_without_new_unique = 0
+            else:
+                rows_without_new_unique += 1
+
+            if scanned >= _PROFILE_EARLY_EXIT_MIN_ROWS and rows_without_new_unique >= 2_000:
+                break
+            if all(
+                len(unique_sets[idx]) >= max_unique_values for idx in unique_column_indices
+            ):
+                break
             if max_scan_rows > 0 and scanned >= max_scan_rows:
                 break
     finally:
