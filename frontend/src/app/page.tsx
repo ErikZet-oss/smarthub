@@ -769,6 +769,26 @@ function formatApiDetail(detail: unknown): string {
   return "Neznáma chyba";
 }
 
+async function readApiJsonResponse(
+  response: Response,
+): Promise<{ payload: unknown; parseError: string | null }> {
+  const text = await response.text();
+  if (!text.trim()) {
+    return { payload: {}, parseError: null };
+  }
+  try {
+    return { payload: JSON.parse(text) as unknown, parseError: null };
+  } catch {
+    const snippet = text.trim().slice(0, 160);
+    return {
+      payload: {},
+      parseError: response.ok
+        ? `Odpoveď servera nie je JSON: ${snippet}`
+        : `Server HTTP ${response.status}: ${snippet}`,
+    };
+  }
+}
+
 /** Pravda, ak `fetch()` skončil na sieti skôr než prišla HTTP odpoveď (prehliadač často: „Failed to fetch“). */
 function isBrowserFetchNetworkError(message: string): boolean {
   const m = message.trim();
@@ -6694,18 +6714,20 @@ export default function Home() {
         }),
       });
 
-      const payload = (await response.json()) as
-        | MappingProfile
-        | { detail?: string };
+      const { payload, parseError } = await readApiJsonResponse(response);
+      if (parseError) {
+        throw new Error(parseError);
+      }
+      const body = payload as MappingProfile | { detail?: string };
       if (!response.ok) {
         throw new Error(
-          "detail" in payload && payload.detail
-            ? payload.detail
+          "detail" in body && body.detail
+            ? body.detail
             : "Nepodarilo sa nacitat profil stlpcov.",
         );
       }
 
-      setMappingProfile(payload as MappingProfile);
+      setMappingProfile(body as MappingProfile);
       setMappingStatus("Profil stlpcov uspesne nacitany.");
     } catch (error) {
       const message =

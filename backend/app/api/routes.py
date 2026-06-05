@@ -2566,6 +2566,11 @@ def mapping_profile(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Profil stĺpcov zlyhal: {exc}",
+        ) from exc
 
 
 def _ensure_company_settings(session: Session) -> CompanySettings:

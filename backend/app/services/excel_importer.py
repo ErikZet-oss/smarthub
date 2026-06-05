@@ -53,6 +53,45 @@ _FIELD_ATTR_MAP: dict[str, str] = {
     "image_filename": "image_filename_column",
 }
 
+_PROFILE_UNIQUE_FIELD_KEYS: tuple[str, ...] = (
+    "code",
+    "norma",
+    "surface",
+    "diameter",
+    "length",
+    "v_class",
+    "y_money_name",
+    "image_filename",
+)
+# Profil stĺpcov nepotrebuje unikáty z kódov dodávateľov / EAN — len mapovacie polia.
+_PROFILE_MAX_UNIQUE_PER_COLUMN = 5_000
+
+
+def _profile_unique_column_indices(headers: list[str]) -> set[int]:
+    """Stĺpce, pre ktoré sa pri profile zbiera unique_values (filtre + mapovanie)."""
+    names_cf: set[str] = set()
+    for fk in _PROFILE_UNIQUE_FIELD_KEYS:
+        default = FIELD_DEFAULTS.get(fk)
+        if default:
+            names_cf.add(default.casefold())
+        for alt in FIELD_HEADER_ALIASES.get(fk, []):
+            names_cf.add(alt.casefold())
+    letter_headers_cf: set[str] = set()
+    for fk in _PROFILE_UNIQUE_FIELD_KEYS:
+        default = FIELD_DEFAULTS.get(fk) or ""
+        if re.fullmatch(r"[A-Za-z]{1,4}", default):
+            letter_headers_cf.add(default.casefold())
+    indices: set[int] = set()
+    for idx, header in enumerate(headers):
+        h = (header or "").strip()
+        if not h:
+            continue
+        h_cf = h.casefold()
+        if h_cf in names_cf or h_cf in letter_headers_cf:
+            indices.add(idx)
+    return indices
+
+
 _BACKEND_ROOT = Path(__file__).resolve().parent.parent.parent
 _REPO_ROOT = _BACKEND_ROOT.parent
 _DEFAULT_XLSX = _REPO_ROOT / "data" / "Smart_data_Gamechanger.xlsx"
@@ -866,7 +905,7 @@ def import_gamechanger_excel(
 def profile_excel_columns(
     file_path: str,
     sheet_name: str = "DIN",
-    max_unique_values: int = 50_000,
+    max_unique_values: int = _PROFILE_MAX_UNIQUE_PER_COLUMN,
     max_scan_rows: int = 500_000,
     preview_row_count: int = 8,
 ) -> ColumnProfileResult:
@@ -878,30 +917,39 @@ def profile_excel_columns(
     ws = wb[sheet_name]
     rows = ws.iter_rows(min_row=1, values_only=True)
     headers = _normalized_sheet_headers(next(rows))
+    unique_column_indices = _profile_unique_column_indices(headers)
 
     preview_rows: list[dict[str, str]] = []
     unique_sets = [set() for _ in headers]
 
     scanned = 0
-    for row in rows:
-        scanned += 1
-        normalized_row = [_normalize(value) for value in row[: len(headers)]]
+    try:
+        for row in rows:
+            scanned += 1
+            normalized_row = [_normalize(value) for value in row[: len(headers)]]
 
-        if len(preview_rows) < preview_row_count:
-            preview_rows.append(
-                {headers[idx]: normalized_row[idx] if idx < len(normalized_row) else "" for idx in range(len(headers))}
-            )
+            if len(preview_rows) < preview_row_count:
+                preview_rows.append(
+                    {
+                        headers[idx]: normalized_row[idx] if idx < len(normalized_row) else ""
+                        for idx in range(len(headers))
+                    }
+                )
 
-        for idx in range(len(headers)):
-            value = normalized_row[idx] if idx < len(normalized_row) else ""
-            if value and len(unique_sets[idx]) < max_unique_values:
-                unique_sets[idx].add(value)
+            for idx in unique_column_indices:
+                value = normalized_row[idx] if idx < len(normalized_row) else ""
+                if value and len(unique_sets[idx]) < max_unique_values:
+                    unique_sets[idx].add(value)
 
-        if max_scan_rows > 0 and scanned >= max_scan_rows:
-            break
+            if max_scan_rows > 0 and scanned >= max_scan_rows:
+                break
+    finally:
+        wb.close()
 
     unique_values = {
-        headers[idx]: sorted(unique_sets[idx]) for idx in range(len(headers)) if unique_sets[idx]
+        headers[idx]: sorted(unique_sets[idx])
+        for idx in range(len(headers))
+        if idx in unique_column_indices and unique_sets[idx]
     }
     return ColumnProfileResult(
         sheet=sheet_name,
