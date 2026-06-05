@@ -28,6 +28,7 @@ from app.api.routes import router
 from app.db import DATABASE_FILE, create_db_and_tables, engine, migrate_schema
 from app.services.dev_run_log import dev_run_log, dev_screens_dir
 from app.services.product_images import load_product_image_response
+from app.services.excel_startup_sync import schedule_excel_sync_if_stale
 from app.services.smarthub_bootstrap import seed_initial_admin_if_empty
 from app.services.company_logos import company_logos_dir
 from app.services.competitor_logos import competitor_logos_dir, seed_competitor_logos_from_repo
@@ -185,3 +186,4 @@ def on_startup():
         "Trvalý záznam: backend/data/dev_automation.ndjson",
         "info",
     )
+    schedule_excel_sync_if_stale()

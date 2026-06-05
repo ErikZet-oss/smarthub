@@ -637,14 +637,14 @@ function resolveFilterColumnKeyInProfile(
 }
 
 /**
- * Zlúči možnosti filtrov z DB (kaskáda) s hodnotami z profilu Excelu.
- * Ak nie je aktívna kaskáda (žiadny filter), zoberie zjednotenie — v Exceli môže byť viac unikátov ako v orezanom výbere z DB.
+ * Doplní možnosti filtrov z profilu Excelu len ak DB ešte nemá hodnoty (pred importom).
+ * Vyhľadávanie ide vždy proti DB — zobrazenie hodnôt len z Excelu by bolo zavádzajúce.
  */
 function mergeConditionalFilterOptionsWithExcel(
   db: FilterOptions,
   profile: MappingProfile | null,
   fields: Record<FilterField, string>,
-  cascadeActive: boolean,
+  _cascadeActive: boolean,
 ): FilterOptions {
   const fromExcel = (field: SelectFilterKey): string[] => {
     if (!profile?.unique_values) {
@@ -662,16 +662,10 @@ function mergeConditionalFilterOptionsWithExcel(
   };
 
   const pick = (field: SelectFilterKey, dbVals: string[]): string[] => {
-    const ex = fromExcel(field);
-    if (!cascadeActive && (dbVals.length > 0 || ex.length > 0)) {
-      return Array.from(new Set([...dbVals, ...ex])).sort((a, b) =>
-        a.localeCompare(b, "sk"),
-      );
-    }
     if (dbVals.length > 0) {
       return dbVals;
     }
-    return ex;
+    return fromExcel(field);
   };
 
   return {
