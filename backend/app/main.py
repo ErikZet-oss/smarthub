@@ -24,6 +24,7 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 from app.api.deps import AuthUserContext
+from app.api.inquiry_routes import router as inquiry_router
 from app.api.routes import router
 from app.db import DATABASE_FILE, create_db_and_tables, engine, migrate_schema
 from app.services.dev_run_log import dev_run_log, dev_screens_dir
@@ -71,6 +72,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(router, prefix="/api")
+app.include_router(inquiry_router, prefix="/api")
 
 
 @app.get("/product-images/{filename:path}")

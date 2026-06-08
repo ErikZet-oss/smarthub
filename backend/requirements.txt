@@ -12,3 +12,4 @@ PyJWT
 psycopg[binary]
 reportlab>=4.0,<5
 Pillow>=10.0,<12
+google-generativeai>=0.8,<1

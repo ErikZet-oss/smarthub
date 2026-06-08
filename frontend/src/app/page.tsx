@@ -18,6 +18,7 @@ import {
   ChevronUp,
   CircleCheck,
   CircleHelp,
+  ClipboardList,
   DatabaseZap,
   ExternalLink,
   Eye,
@@ -54,6 +55,7 @@ import {
 } from "@/components/offers/AddToOfferDialog";
 import { CompanySettingsAdmin } from "@/components/offers/CompanySettingsAdmin";
 import { OffersPanel } from "@/components/offers/OffersPanel";
+import { InquiriesPanel } from "@/components/inquiries/InquiriesPanel";
 import { SearchableSelect } from "@/components/SearchableSelect";
 import { ProductImageFilter } from "@/components/search/ProductImageFilter";
 import { Badge } from "@/components/ui/badge";
@@ -70,6 +72,7 @@ type View =
   | "kosik"
   | "historia"
   | "ponuky"
+  | "dopyty"
   | "dodavatelia"
   | "parovanie"
   | "admin"
@@ -7165,6 +7168,7 @@ export default function Home() {
               { id: "kosik", label: "Košík", icon: ShoppingCart },
               { id: "historia", label: "História", icon: History },
               { id: "ponuky", label: "Ponuky", icon: FileText },
+              { id: "dopyty", label: "Dopyty", icon: ClipboardList },
             ].map((item) => {
               const Icon = item.icon;
               const active = activeView === item.id;
@@ -9787,6 +9791,16 @@ export default function Home() {
               apiToken={apiToken}
               authReady={authSessionReady}
               companyConfigured={companyConfigured}
+            />
+          )}
+
+          {activeView === "dopyty" && (
+            <InquiriesPanel
+              apiBase={API_BASE}
+              apiFetch={apiFetch}
+              apiToken={apiToken}
+              authReady={authSessionReady}
+              userId={null}
             />
           )}
 
