@@ -283,10 +283,15 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
   }
 
   return (
-    <div className="space-y-4">
+    <div className={cn("space-y-4", rows.length > 0 && "pb-32 md:pb-0")}>
       <div className="flex items-center gap-2">
-        <ClipboardList className="h-5 w-5 text-sky-600" />
-        <h1 className="text-lg font-semibold text-slate-900">Import dopytov</h1>
+        <ClipboardList className="h-5 w-5 shrink-0 text-sky-600" />
+        <div className="min-w-0">
+          <h1 className="text-lg font-semibold text-slate-900">Import dopytov</h1>
+          <p className="text-xs text-slate-500 md:hidden">
+            Nahraj Excel, skontroluj riadky a spusti vyhľadávanie u dodávateľov.
+          </p>
+        </div>
       </div>
 
       <InquirySupplierPicker
@@ -303,11 +308,17 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
             Máte rozpracovaný dopyt ({draftPrompt.rows.length} riadkov,{" "}
             {new Date(draftPrompt.savedAt).toLocaleString("sk-SK")}).
           </p>
-          <div className="mt-2 flex gap-2">
-            <Button type="button" size="sm" onClick={restoreDraft}>
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+            <Button type="button" size="sm" className="w-full sm:w-auto" onClick={restoreDraft}>
               Obnoviť
             </Button>
-            <Button type="button" size="sm" variant="outline" onClick={discardDraft}>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="w-full bg-white sm:w-auto"
+              onClick={discardDraft}
+            >
               Zahodiť
             </Button>
           </div>
@@ -315,11 +326,11 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
       ) : null}
 
       <Card className="space-y-3 p-4">
-        <p className="text-sm text-slate-600">
+        <p className="text-sm leading-relaxed text-slate-600">
           Nahraj XLSX alebo CSV s textom položiek (jeden popis na riadok). AI rozloží parametre;
           chýbajúce polia označíme červeno — doplň ich ručne.
         </p>
-        <label className="inline-flex cursor-pointer items-center gap-2">
+        <label className="flex w-full cursor-pointer md:inline-flex md:w-auto">
           <input
             type="file"
             accept=".xlsx,.xlsm,.csv"
@@ -329,8 +340,8 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
           />
           <span
             className={cn(
-              "inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-4 text-sm font-medium",
-              parsing ? "cursor-not-allowed opacity-60" : "hover:bg-slate-50",
+              "inline-flex h-11 w-full items-center justify-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium md:h-9 md:w-auto",
+              parsing ? "cursor-not-allowed opacity-60" : "hover:bg-slate-50 active:bg-slate-100",
             )}
           >
             {parsing ? (
@@ -349,7 +360,7 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
             />
           </div>
         ) : null}
-        {status ? <p className="text-xs text-slate-500">{status}</p> : null}
+        {status ? <p className="text-xs leading-relaxed text-slate-500">{status}</p> : null}
       </Card>
 
       {rows.length > 0 ? (
@@ -360,7 +371,9 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
             apiFetch={apiFetch}
             onChange={persistRows}
           />
-          <div className="flex flex-wrap items-center gap-3">
+
+          {/* Desktop: akcie pod tabuľkou */}
+          <div className="hidden flex-wrap items-center gap-3 md:flex">
             <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-slate-700">
               <input
                 type="checkbox"
@@ -417,6 +430,56 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
               </div>
             ) : null}
           </div>
+
+          {/* Mobil: fixný panel dole */}
+          <div className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 px-3 py-3 shadow-[0_-4px_24px_rgba(15,23,42,0.08)] backdrop-blur-md md:hidden">
+            <div className="mx-auto max-w-lg space-y-2">
+              {running && runProgressPct != null ? (
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+                  <div
+                    className="h-full bg-emerald-500 transition-all"
+                    style={{ width: `${runProgressPct}%` }}
+                  />
+                </div>
+              ) : null}
+              <p className="text-center text-[11px] text-slate-500">
+                {!canRun
+                  ? !inquirySuppliersReady(selectedSupplierIds)
+                    ? "Vyber aspoň jedného dodávateľa."
+                    : "Doplň riadky alebo zapni „Ignorovať chyby“."
+                  : allValid
+                    ? `${selectedSupplierIds.length} dodávateľov · ${rows.length} riadkov`
+                    : `Spustí sa aj ${invalidRowCount} riadkov s chybami`}
+              </p>
+              <div className="flex items-center gap-2">
+                <label className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={ignoreErrors}
+                    onChange={(e) => setIgnoreErrors(e.target.checked)}
+                    className="h-3.5 w-3.5 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                  />
+                  Ignorovať chyby
+                </label>
+                <Button
+                  type="button"
+                  className="h-11 flex-1 text-sm"
+                  disabled={!canRun || running || parsing}
+                  onClick={() => void onRunInquiry()}
+                >
+                  {running ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Hľadám…
+                    </>
+                  ) : (
+                    "Spustiť dopyt"
+                  )}
+                </Button>
+              </div>
+            </div>
+          </div>
+
           {runResult ? <InquiryResultsTable apiBase={apiBase} result={runResult} /> : null}
         </>
       ) : null}

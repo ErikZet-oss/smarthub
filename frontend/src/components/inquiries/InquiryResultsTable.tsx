@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, ExternalLink } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Download, ExternalLink } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -13,8 +13,14 @@ import {
   parseMarginPercentInput,
   resolveActiveOffer,
 } from "@/lib/inquiry-margin";
+import {
+  buildInquiryResultCsv,
+  downloadInquiryResultCsv,
+  inquiryResultCsvFilename,
+} from "@/lib/inquiry-export-csv";
 import { publicInquiryAssetUrl } from "@/lib/inquiry-suppliers";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import type { InquiryLineRunResult, InquiryRunTaskResult, InquiryScrapedOffer } from "@/types/inquiry";
 
 type Props = {
@@ -51,10 +57,13 @@ function formatScrapePrice(
   return `${formatEur(price).replace(" €", "")}${priceUnitSuffix(supplierName, priceUnit)}`;
 }
 
-function marginInputClassName(focused?: boolean): string {
+function marginInputClassName(focused?: boolean, mobile?: boolean): string {
   return cn(
-    "h-7 w-full min-w-[2.75rem] max-w-[3.25rem] rounded border border-slate-200 bg-white px-1.5 text-right text-xs tabular-nums text-slate-800",
+    "rounded border border-slate-200 bg-white text-right tabular-nums text-slate-800",
     "placeholder:text-slate-400 focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-200",
+    mobile
+      ? "h-9 w-14 px-2 text-sm"
+      : "h-7 w-full min-w-[2.75rem] max-w-[3.25rem] px-1.5 text-xs",
     focused && "border-sky-300",
   );
 }
@@ -148,63 +157,70 @@ function OfferRow({
           : undefined
       }
       className={cn(
-        "flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors",
+        "flex flex-col gap-2 rounded-lg border px-3 py-3 text-sm transition-colors sm:flex-row sm:flex-wrap sm:items-center sm:gap-2 sm:py-2",
         selected
           ? "border-sky-300 bg-sky-50/90 ring-1 ring-sky-200"
           : "border-slate-100 bg-slate-50/50",
-        selectable && !selected && "cursor-pointer hover:border-sky-200 hover:bg-sky-50/50",
+        selectable && !selected && "cursor-pointer hover:border-sky-200 hover:bg-sky-50/50 active:bg-sky-50",
         !selectable && "opacity-80",
       )}
       title={selectable ? "Klikni pre výber tejto ponuky vo výsledku" : undefined}
     >
-      <div className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded border bg-white">
-        {logoSrc ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={logoSrc} alt="" className="h-full w-full object-contain p-0.5" />
-        ) : (
-          <span className="text-[9px] font-semibold text-slate-400">
-            {offer.supplier_name.slice(0, 2).toUpperCase()}
-          </span>
-        )}
+      <div className="flex min-w-0 items-center gap-2">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded border bg-white">
+          {logoSrc ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={logoSrc} alt="" className="h-full w-full object-contain p-0.5" />
+          ) : (
+            <span className="text-[9px] font-semibold text-slate-400">
+              {offer.supplier_name.slice(0, 2).toUpperCase()}
+            </span>
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="font-medium text-slate-800">{offer.supplier_name}</p>
+          {code ? (
+            <p className="truncate font-mono text-xs text-slate-500" title="Kód dodávateľa">
+              {code}
+            </p>
+          ) : null}
+        </div>
+        {selected ? (
+          <span className="shrink-0 text-xs font-medium text-sky-700">Vybrané</span>
+        ) : null}
       </div>
-      <span className="font-medium text-slate-800">{offer.supplier_name}</span>
-      {code ? (
-        <span className="font-mono text-xs text-slate-500" title="Kód dodávateľa">
-          {code}
-        </span>
-      ) : null}
-      {offer.error ? (
-        <span className="text-xs text-red-600">{offer.error}</span>
-      ) : (offer.stock ?? 0) <= 0 ? (
-        <>
-          <span className="text-slate-600">
-            {formatScrapePrice(offer.price_eur, offer.supplier_name, offer.price_unit)}
-          </span>
-          <span className="text-xs text-amber-700">Nie je skladom</span>
-        </>
-      ) : (
-        <>
-          <span className="text-slate-600">
-            {formatScrapePrice(offer.price_eur, offer.supplier_name, offer.price_unit)}
-          </span>
-          <span className="text-xs text-slate-500">sklad: {offer.stock}</span>
-        </>
-      )}
-      {selected ? (
-        <span className="text-xs font-medium text-sky-700">Vybrané</span>
-      ) : null}
-      {offer.supplier_product_url ? (
-        <a
-          href={offer.supplier_product_url}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={(e) => e.stopPropagation()}
-          className="ml-auto inline-flex items-center gap-1 text-xs text-sky-700 hover:underline"
-        >
-          Otvoriť
-          <ExternalLink className="h-3 w-3" />
-        </a>
-      ) : null}
+
+      <div className="flex flex-wrap items-center justify-between gap-2 sm:contents">
+        {offer.error ? (
+          <span className="text-xs text-red-600">{offer.error}</span>
+        ) : (offer.stock ?? 0) <= 0 ? (
+          <>
+            <span className="text-slate-600">
+              {formatScrapePrice(offer.price_eur, offer.supplier_name, offer.price_unit)}
+            </span>
+            <span className="text-xs text-amber-700">Nie je skladom</span>
+          </>
+        ) : (
+          <>
+            <span className="font-medium tabular-nums text-slate-700">
+              {formatScrapePrice(offer.price_eur, offer.supplier_name, offer.price_unit)}
+            </span>
+            <span className="text-xs text-slate-500">sklad: {offer.stock}</span>
+          </>
+        )}
+        {offer.supplier_product_url ? (
+          <a
+            href={offer.supplier_product_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="inline-flex min-h-[36px] items-center gap-1 rounded-md px-2 text-xs font-medium text-sky-700 hover:bg-sky-50 hover:underline sm:ml-auto"
+          >
+            Otvoriť
+            <ExternalLink className="h-3 w-3" />
+          </a>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -250,15 +266,118 @@ function ResultRow({
 
   return (
     <div className="border-b border-slate-100 last:border-b-0">
+      {/* Mobil: karta */}
+      <div className="lg:hidden">
+        <button
+          type="button"
+          className="flex w-full items-start gap-2 px-3 py-3 text-left active:bg-slate-50"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+        >
+          <span className="mt-0.5 shrink-0 text-slate-400">
+            {open ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
+          </span>
+          <div className="min-w-0 flex-1 space-y-2">
+            <div>
+              <p className="text-sm font-medium leading-snug text-slate-900">{row.raw_text}</p>
+              <p className="mt-0.5 text-xs text-slate-500">
+                #{row.row_index}
+                {row.internal_code ? ` · ${row.internal_code}` : ""}
+                {row.quantity != null ? ` · ${row.quantity} ks` : ""}
+              </p>
+            </div>
+            {active ? (
+              <div className="flex flex-wrap items-end justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-xs text-slate-500">{active.supplier_name}</p>
+                  <p
+                    className={cn(
+                      "text-sm font-semibold tabular-nums",
+                      showWithMargin ? "text-sky-900" : "text-slate-900",
+                    )}
+                  >
+                    {formatScrapePrice(unitPrice, active.supplier_name, active.price_unit)}
+                  </p>
+                  {showWithMargin ? (
+                    <p className="text-[10px] text-slate-400 line-through">
+                      {formatScrapePrice(active.price_eur, active.supplier_name, active.price_unit)}
+                    </p>
+                  ) : null}
+                </div>
+                <div className="text-right">
+                  <p className="text-[10px] uppercase tracking-wide text-slate-400">Spolu</p>
+                  <p
+                    className={cn(
+                      "text-base font-semibold tabular-nums",
+                      showWithMargin ? "text-sky-900" : "text-slate-800",
+                    )}
+                  >
+                    {formatEur(lineTotal)}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div>{statusBadge(row)}</div>
+            )}
+            {active ? <div className="flex flex-wrap gap-2">{statusBadge(row)}</div> : null}
+          </div>
+        </button>
+
+        <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 px-3 py-2">
+          <label className="flex items-center gap-2 text-xs text-slate-600">
+            Marža %
+            <input
+              type="text"
+              inputMode="decimal"
+              placeholder="%"
+              value={rowMargin}
+              onChange={(e) => onRowMarginChange(e.target.value)}
+              onClick={(e) => e.stopPropagation()}
+              className={marginInputClassName(parseMarginPercentInput(rowMargin) !== null, true)}
+            />
+          </label>
+          {row.offers.length > 0 ? (
+            <span className="text-[11px] text-slate-500">
+              {open ? "Skryť" : "Zobraziť"} {row.offers.length} ponúk
+            </span>
+          ) : null}
+        </div>
+
+        {!active && row.error ? (
+          <p className="px-3 pb-2 text-xs leading-relaxed text-slate-600">{row.error}</p>
+        ) : null}
+
+        {open && row.offers.length > 0 ? (
+          <div className="space-y-2 bg-slate-50/80 px-3 pb-3 pt-1">
+            <p className="text-[11px] text-slate-500">Klikni na dodávateľa pre výber do výsledku.</p>
+            {row.offers.map((offer) => (
+              <OfferRow
+                key={`${offer.supplier_id}-${offer.supplier_code}`}
+                apiBase={apiBase}
+                offer={offer}
+                selected={active?.supplier_id === offer.supplier_id}
+                onSelect={
+                  isSelectableInquiryOffer(offer)
+                    ? () => onSelectSupplier(offer.supplier_id)
+                    : undefined
+                }
+              />
+            ))}
+          </div>
+        ) : null}
+      </div>
+
+      {/* Desktop: tabuľkový riadok */}
+      <div className="hidden lg:block">
       <div
         className={cn(
-          "grid grid-cols-1 gap-2 px-3 py-3 sm:grid-cols-[2.5rem_1fr_auto] sm:items-center",
+          "grid gap-2 px-3 py-3 items-center",
           GRID_COLS,
         )}
       >
         <button
           type="button"
-          className="hidden text-slate-400 hover:text-slate-600 sm:inline-flex"
+          className="text-slate-400 hover:text-slate-600 inline-flex"
           onClick={() => setOpen((v) => !v)}
           aria-label={open ? "Skryť ponuky" : "Zobraziť ponuky"}
         >
@@ -274,10 +393,10 @@ function ResultRow({
             {row.quantity != null ? ` · ${row.quantity} ks` : ""}
           </p>
         </div>
-        <div className="hidden text-sm text-slate-700 lg:block">
+        <div className="text-sm text-slate-700">
           {active ? active.supplier_name : "—"}
         </div>
-        <div className="hidden lg:block">
+        <div>
           {active ? (
             <div>
               <p
@@ -298,7 +417,7 @@ function ResultRow({
             <span className="text-sm text-slate-400">—</span>
           )}
         </div>
-        <div className="hidden lg:flex lg:justify-end">
+        <div className="flex justify-end">
           <input
             type="text"
             inputMode="decimal"
@@ -310,7 +429,7 @@ function ResultRow({
             aria-label={`Marža % riadok ${row.row_index}`}
           />
         </div>
-        <div className="hidden lg:block">
+        <div>
           {lineTotal != null ? (
             <div>
               <p
@@ -331,46 +450,15 @@ function ResultRow({
         </div>
         <div className="flex min-w-0 items-center gap-2">
           {statusBadge(row)}
-          <button
-            type="button"
-            className="text-slate-400 hover:text-slate-600 sm:hidden"
-            onClick={() => setOpen((v) => !v)}
-          >
-            {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-          </button>
         </div>
       </div>
 
       {!active && row.error ? (
-        <p className="px-3 pb-2 text-xs text-slate-600 sm:pl-12">{row.error}</p>
+        <p className="px-3 pb-2 text-xs text-slate-600 pl-12">{row.error}</p>
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-2 px-3 pb-2 sm:pl-12 lg:hidden">
-        <label className="flex items-center gap-1.5 text-xs text-slate-500">
-          Marža %
-          <input
-            type="text"
-            inputMode="decimal"
-            placeholder="%"
-            value={rowMargin}
-            onChange={(e) => onRowMarginChange(e.target.value)}
-            className={marginInputClassName(parseMarginPercentInput(rowMargin) !== null)}
-          />
-        </label>
-        {active ? (
-          <p className="text-xs text-slate-600">
-            {active.supplier_name} ·{" "}
-            {formatScrapePrice(unitPrice, active.supplier_name, active.price_unit)}
-            {showWithMargin ? " · " : " · spolu "}
-            {formatEur(lineTotal)}
-          </p>
-        ) : (
-          <p className="text-xs text-red-600">{statusLabel(row)}</p>
-        )}
-      </div>
-
       {open && row.offers.length > 0 ? (
-        <div className="space-y-1.5 px-3 pb-3 sm:pl-12">
+        <div className="space-y-1.5 px-3 pb-3 pl-12">
           <p className="text-[10px] text-slate-500">Klikni na dodávateľa pre výber do výsledku riadku.</p>
           {row.offers.map((offer) => (
             <OfferRow
@@ -387,6 +475,7 @@ function ResultRow({
           ))}
         </div>
       ) : null}
+      </div>
     </div>
   );
 }
@@ -435,20 +524,43 @@ export function InquiryResultsTable({ apiBase, result }: Props) {
       ? displayTotal
       : result.total_eur ?? purchaseTotal;
 
+  const handleExportCsv = () => {
+    const csv = buildInquiryResultCsv({
+      result,
+      globalMargin,
+      rowMargins,
+      selectedSupplierByRow,
+      purchaseTotal,
+      displayTotal: headerTotal,
+    });
+    downloadInquiryResultCsv(inquiryResultCsvFilename(result), csv);
+  };
+
   return (
     <Card className="overflow-hidden border-slate-200/80 shadow-sm">
-      <div className="border-b border-emerald-100/80 bg-gradient-to-r from-emerald-50 via-white to-slate-50 px-4 py-3 sm:px-5">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
+      <div className="border-b border-emerald-100/80 bg-gradient-to-r from-emerald-50 via-white to-slate-50 px-4 py-4 sm:px-5">
+        <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
+          <div className="min-w-0">
             <h2 className="text-sm font-semibold text-slate-900">Výsledok dopytu</h2>
-            <p className="mt-0.5 text-xs text-slate-600">
+            <p className="mt-0.5 text-xs leading-relaxed text-slate-600">
               {result.rows_with_offer} / {result.total_rows} riadkov s cenou
               {result.rows_no_stock > 0 ? ` · ${result.rows_no_stock} nie je skladom` : ""}
               {result.rows_failed > 0 ? ` · ${result.rows_failed} neúspešných` : ""}
             </p>
           </div>
-          <div className="flex flex-wrap items-end gap-4">
-            <label className="flex flex-col items-end gap-1">
+          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-10 w-full gap-2 bg-white sm:h-9 sm:w-auto"
+              onClick={handleExportCsv}
+            >
+              <Download className="h-4 w-4" />
+              Export CSV
+            </Button>
+            <div className="flex items-end justify-between gap-4 rounded-xl border border-emerald-100/80 bg-white/80 p-3 sm:border-0 sm:bg-transparent sm:p-0">
+            <label className="flex flex-col gap-1">
               <span className="text-xs text-slate-500">Marža %</span>
               <input
                 type="text"
@@ -456,7 +568,7 @@ export function InquiryResultsTable({ apiBase, result }: Props) {
                 placeholder="%"
                 value={globalMargin}
                 onChange={(e) => setGlobalMargin(e.target.value)}
-                className={cn(marginInputClassName(globalMarginPct !== null), "h-8 max-w-[4rem]")}
+                className={cn(marginInputClassName(globalMarginPct !== null, true), "w-16")}
                 title="Marža pre všetky riadky (riadok môže prepísať)"
                 aria-label="Celková marža percent"
               />
@@ -467,7 +579,7 @@ export function InquiryResultsTable({ apiBase, result }: Props) {
               </p>
               <p
                 className={cn(
-                  "text-lg font-semibold tabular-nums",
+                  "text-xl font-semibold tabular-nums sm:text-lg",
                   hasAnyMargin ? "text-sky-900" : "text-emerald-800",
                 )}
               >
@@ -481,6 +593,7 @@ export function InquiryResultsTable({ apiBase, result }: Props) {
             </div>
           </div>
         </div>
+      </div>
       </div>
 
       <div
