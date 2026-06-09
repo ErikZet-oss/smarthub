@@ -25,6 +25,25 @@ def _build_user_prompt(raw_text: str) -> str:
     return f"Text položky dopytu:\n{raw_text.strip()}"
 
 
+def _gemini_inquiry_response_schema() -> dict[str, object]:
+    """
+    Ručne zostavená schéma pre Gemini structured output.
+    Pydantic model_json_schema() obsahuje polia (title, $defs, …), ktoré API odmietne.
+    """
+    return {
+        "type": "object",
+        "properties": {
+            "diameter": {"type": "string", "nullable": True},
+            "length": {"type": "string", "nullable": True},
+            "norm": {"type": "string", "nullable": True},
+            "class": {"type": "string", "nullable": True},
+            "leading_standard": {"type": "string", "nullable": True},
+            "material": {"type": "string", "nullable": True},
+            "quantity": {"type": "integer", "nullable": True},
+        },
+    }
+
+
 def _gemini_model():
     api_key = (os.environ.get("GEMINI_API_KEY") or "").strip()
     if not api_key:
@@ -37,7 +56,7 @@ def _gemini_model():
 
     genai.configure(api_key=api_key)
     model_name = (os.environ.get("GEMINI_MODEL") or "gemini-2.0-flash").strip()
-    schema = InquiryLineAIOutput.model_json_schema()
+    schema = _gemini_inquiry_response_schema()
     return genai.GenerativeModel(
         model_name,
         generation_config={

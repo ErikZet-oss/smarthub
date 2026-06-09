@@ -3,7 +3,13 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from app.schemas.inquiry import InquiryLineAIOutput
-from app.services.inquiry.parser import parse_inquiry_line
+from app.services.inquiry.parser import _gemini_inquiry_response_schema, parse_inquiry_line
+
+
+def test_gemini_schema_has_no_title() -> None:
+    schema = _gemini_inquiry_response_schema()
+    assert "title" not in schema
+    assert "class" in schema["properties"]  # type: ignore[index]
 
 
 def test_parse_inquiry_line_without_api_key(monkeypatch) -> None:
