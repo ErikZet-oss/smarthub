@@ -50,7 +50,7 @@ PRODUCT_NORM_HINTS: tuple[ProductNormHint, ...] = (
             r"washer",
         ),
         norma="DIN125",
-        description_sk="Podložka bez uvedenej normy → DIN 125",
+        description_sk="Podložka bez uvedenej normy → DIN 125 (v katalógu 125a)",
         requires_length=False,
         requires_v_class=False,
     ),

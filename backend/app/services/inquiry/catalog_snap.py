@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from sqlmodel import Session, select
@@ -28,6 +29,27 @@ _SURFACE_V_CLASS: tuple[tuple[str, str], ...] = (
     ("oceľ", "8.8"),
     ("ocel", "8.8"),
 )
+
+# Priemer dier podložky DIN 125 (vnútorný Ø) podľa veľkosti skrutky M*.
+_WASHER_BOLT_TO_INNER: dict[str, str] = {
+    "2": "2.2",
+    "2.5": "2.7",
+    "3": "3.2",
+    "4": "4.3",
+    "5": "5.3",
+    "6": "6.4",
+    "8": "8.4",
+    "10": "10.5",
+    "12": "13",
+    "14": "15",
+    "16": "17",
+    "18": "19",
+    "20": "21",
+    "22": "23",
+    "24": "25",
+    "27": "28",
+    "30": "31",
+}
 
 
 @dataclass
@@ -78,7 +100,7 @@ def infer_v_class_from_surface(surface: str | None) -> str | None:
 
 
 def resolve_catalog_norma(norma: str | None, *, known: list[str] | None = None) -> str | None:
-    """DIN934 → 934 podľa hodnôt v DB."""
+    """DIN934 → 934, DIN125 → 125a podľa hodnôt v DB."""
     raw = (norma or "").strip()
     if not raw:
         return None
@@ -98,7 +120,53 @@ def resolve_catalog_norma(norma: str | None, *, known: list[str] | None = None) 
             for val in known:
                 if search_key(val) == search_key(candidate):
                     return val
+    suffix_a = _resolve_catalog_norma_suffix_a(raw, known=known)
+    if suffix_a is not None:
+        return suffix_a
     return raw
+
+
+def _resolve_catalog_norma_suffix_a(raw: str, *, known: list[str]) -> str | None:
+    """
+    DIN 125 / DIN125 / DIN 125-1A → 125a (v DB bez prefixu DIN).
+    Všeobecne: DIN### → ###a ak existuje.
+    """
+    key = search_key(raw)
+    m = re.match(r"^DIN(\d+)", key)
+    if not m:
+        return None
+    base = m.group(1)
+    if len(base) > 3 and base.endswith("1"):
+        alt = f"{base[:-1]}a"
+        if alt in known:
+            return alt
+    for val in known:
+        if val == f"{base}a" or search_key(val) == f"{base}A":
+            return val
+    return None
+
+
+def _is_washer_norm(norma: str | None, raw_text: str) -> bool:
+    low = (raw_text or "").casefold()
+    if "podložk" in low or "podlozk" in low:
+        return True
+    nk = search_key(norma)
+    return nk.startswith("DIN125") or nk in ("125", "125A") or bool(re.match(r"^125A?$", nk))
+
+
+def resolve_washer_inner_diameter(bolt_m: str | None, options: list[str]) -> str | None:
+    """M3 → 3.2 mm (vnútorný priemer podložky), ak je v katalógu."""
+    if not bolt_m or not options:
+        return None
+    bare = str(bolt_m).strip().upper().removeprefix("M").replace(",", ".")
+    if not bare:
+        return None
+    inner = _WASHER_BOLT_TO_INNER.get(bare)
+    if inner and inner in options:
+        return inner
+    if bare in options:
+        return bare
+    return None
 
 
 def snap_value_to_options(value: str | None, options: list[str]) -> str | None:
@@ -225,6 +293,15 @@ def snap_inquiry_line_to_catalog(
 
     base = InquiryLineParsed.model_validate({**data, "raw_text": row.raw_text})
     opts = snap_cache.filter_options(session, _row_to_filters(base))
+
+    if _is_washer_norm(str(data.get("norma") or ""), row.raw_text):
+        diam_opts = opts.get("diameter", [])
+        current_d = str(data.get("diameter") or "")
+        if current_d and current_d not in diam_opts:
+            resolved = resolve_washer_inner_diameter(current_d, diam_opts)
+            if resolved:
+                data["diameter"] = resolved
+
     _snap_fields_from_options(data, opts)
 
     if not data.get("v_class"):

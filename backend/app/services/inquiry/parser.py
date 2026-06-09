@@ -188,9 +188,13 @@ def _heuristic_parse(raw_text: str) -> InquiryLineAIOutput | None:
             length = m.group(1).replace(",", ".")
 
     norma = None
-    m = re.search(r"\bDIN\s*[-]?\s*(\d+)\b", t, re.IGNORECASE)
+    m = re.search(r"\bDIN\s*125\s*[-]?\s*1?\s*A\b", t, re.IGNORECASE)
     if m:
-        norma = f"DIN{m.group(1)}"
+        norma = "DIN125"
+    else:
+        m = re.search(r"\bDIN\s*[-]?\s*(\d+)\b", t, re.IGNORECASE)
+        if m:
+            norma = f"DIN{m.group(1)}"
     if norma is None:
         norma = infer_norma_from_text(t)
 

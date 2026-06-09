@@ -31,6 +31,8 @@ def norm_display_candidates(parsed: InquiryLineParsed) -> list[str]:
         add(f"DIN-{num}")
         if num:
             add(num)
+            add(f"{num}a")
+            add(f"DIN {num}a")
     elif key.startswith("ISO") and len(key) > 3:
         rest = key[3:]
         add(f"ISO {rest}")
