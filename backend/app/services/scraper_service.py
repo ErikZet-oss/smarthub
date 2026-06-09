@@ -2584,6 +2584,24 @@ async def _fabory_get_supplier_data_via_http(
     async def _login(c: FaboryHttpClient) -> None:
         await c.ensure_login(user, pwd)
 
+    def _fabory_transient_http(exc: BaseException) -> bool:
+        msg = str(exc).lower()
+        return any(
+            needle in msg
+            for needle in (
+                "connectionstate.closed",
+                "send_headers",
+                "connection reset",
+                "connection closed",
+                "localprotocolerror",
+                "remoteprotocolerror",
+                "readerror",
+                "connecterror",
+                "pool timeout",
+                "broken pipe",
+            )
+        )
+
     client: FaboryHttpClient = await _supplier_http_client_get_or_create(
         "fabory",
         supplier,
@@ -2592,31 +2610,59 @@ async def _fabory_get_supplier_data_via_http(
         _login,
     )
 
-    try:
-        data = await client.fetch_product_price_and_stock(code)
-    except httpx.HTTPStatusError as exc:
-        # 401/403/302 → session expirovala (cookie po B2B logoute). Zhoď cache a skús raz znova.
-        status = exc.response.status_code if exc.response is not None else None
-        if status in (401, 403, 302):
-            _log(
-                run_label,
-                supplier,
-                run_id,
-                f"Fabory HTTP: status {status} → invalidujem session a relogujem",
-                "warn",
-            )
-            await _supplier_http_client_invalidate("fabory", supplier.id, automation_user_id)
-            client = await _supplier_http_client_get_or_create(
-                "fabory", supplier, automation_user_id, _factory, _login
-            )
+    data: dict[str, Any] | None = None
+    last_exc: BaseException | None = None
+    for attempt in range(2):
+        try:
             data = await client.fetch_product_price_and_stock(code)
-        else:
+            break
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code if exc.response is not None else None
+            if status in (401, 403, 302) and attempt == 0:
+                _log(
+                    run_label,
+                    supplier,
+                    run_id,
+                    f"Fabory HTTP: status {status} → invalidujem session a relogujem",
+                    "warn",
+                )
+                await _supplier_http_client_invalidate(
+                    "fabory", supplier.id, automation_user_id
+                )
+                client = await _supplier_http_client_get_or_create(
+                    "fabory", supplier, automation_user_id, _factory, _login
+                )
+                continue
             raise
-    except RuntimeError as exc:
-        msg = str(exc).lower()
-        if "prihlás" in msg or "login" in msg or "302" in msg:
-            await _supplier_http_client_invalidate("fabory", supplier.id, automation_user_id)
-        raise
+        except RuntimeError as exc:
+            msg = str(exc).lower()
+            if "prihlás" in msg or "login" in msg or "302" in msg:
+                await _supplier_http_client_invalidate(
+                    "fabory", supplier.id, automation_user_id
+                )
+            raise
+        except Exception as exc:
+            last_exc = exc
+            if attempt == 0 and _fabory_transient_http(exc):
+                _log(
+                    run_label,
+                    supplier,
+                    run_id,
+                    f"Fabory HTTP: prechodná chyba spojenia ({exc!r}) → nová session",
+                    "warn",
+                )
+                await _supplier_http_client_invalidate(
+                    "fabory", supplier.id, automation_user_id
+                )
+                client = await _supplier_http_client_get_or_create(
+                    "fabory", supplier, automation_user_id, _factory, _login
+                )
+                continue
+            raise
+
+    if data is None:
+        assert last_exc is not None
+        raise last_exc
     _log(
         run_label,
         supplier,

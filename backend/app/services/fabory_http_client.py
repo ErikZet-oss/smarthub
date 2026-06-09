@@ -13,6 +13,7 @@ HAR / skúsenosť:
 
 from __future__ import annotations
 
+import asyncio
 import html as html_module
 import json
 import re
@@ -337,32 +338,36 @@ class FaboryHttpClient:
     def __init__(self, shop_url: str) -> None:
         self._prefix = fabory_shop_prefix(shop_url)
         self._shop_url = (shop_url or "").strip()
-        try:
-            # HTTP/2 šetrí pár 100 ms pri viacerých XHR-och z jedného hosta.
-            self._client = httpx.AsyncClient(
-                base_url=self._prefix,
-                headers={
-                    "User-Agent": DEFAULT_UA,
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                    "Accept-Language": "sk,sk-SK;q=0.9,cs;q=0.8,en;q=0.7",
-                },
-                follow_redirects=True,
-                timeout=httpx.Timeout(45.0),
-                http2=True,
-            )
-        except (ImportError, RuntimeError):
-            self._client = httpx.AsyncClient(
-                base_url=self._prefix,
-                headers={
-                    "User-Agent": DEFAULT_UA,
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                    "Accept-Language": "sk,sk-SK;q=0.9,cs;q=0.8,en;q=0.7",
-                },
-                follow_redirects=True,
-                timeout=httpx.Timeout(45.0),
-            )
+        # HTTP/1.1: pri HTTP/2 + keep-alive pooli (Render, paralelný dopyt) Fabory/CDN
+        # občas zavrie spojenie a ďalší request skončí
+        # ``ConnectionState.CLOSED / SEND_HEADERS`` — produkt pritom na webe existuje.
+        self._client = self._build_httpx_client()
         self._login_ok = False
         self._last_pdp_url: Optional[str] = None
+        self._lock = asyncio.Lock()
+
+    def _build_httpx_client(self) -> httpx.AsyncClient:
+        return httpx.AsyncClient(
+            base_url=self._prefix,
+            headers={
+                "User-Agent": DEFAULT_UA,
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "sk,sk-SK;q=0.9,cs;q=0.8,en;q=0.7",
+            },
+            follow_redirects=True,
+            timeout=httpx.Timeout(45.0, connect=10.0),
+            http2=False,
+            limits=httpx.Limits(max_keepalive_connections=4, max_connections=8),
+        )
+
+    async def _reset_transport(self) -> None:
+        """Zahoď rozbité TCP/H2 spojenie — ďalší request vytvorí nové."""
+        self._login_ok = False
+        try:
+            await self._client.aclose()
+        except Exception:
+            pass
+        self._client = self._build_httpx_client()
 
     @property
     def login_ok(self) -> bool:
@@ -564,6 +569,10 @@ class FaboryHttpClient:
         uvádza ``unitNetPrice`` za ``unitQuantity`` ks (často 100) — pri menšom balení
         cenu proporcionálne prepočítame.
         """
+        async with self._lock:
+            return await self._fetch_product_price_and_stock_unlocked(code)
+
+    async def _fetch_product_price_and_stock_unlocked(self, code: str) -> dict[str, Any]:
         c = (code or "").strip()
         if not c:
             raise ValueError("Fabory price/stock: prázdny kód.")
@@ -574,12 +583,11 @@ class FaboryHttpClient:
             self._last_pdp_url = None
         ref = self._last_pdp_url
 
-        # Paralelný POST — Fabory front-end ich tiež strieľa naraz.
-        import asyncio as _asyncio
-
+        # Paralelné POST — Fabory front-end ich tiež strieľa naraz; lock vyššie bráni
+        # viacerým dopytom naraz na tom istom pooled klientovi (inquiry batch).
         price_task = self.fetch_prices([c], referer=ref)
         stock_task = self.fetch_stock([c], referer=ref)
-        price_map, stock_map = await _asyncio.gather(price_task, stock_task)
+        price_map, stock_map = await asyncio.gather(price_task, stock_task)
 
         if c not in price_map:
             raise RuntimeError(
