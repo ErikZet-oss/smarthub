@@ -19,6 +19,27 @@ function formatEur(value: number | null | undefined): string {
   return `${value.toFixed(4).replace(/\.?0+$/, "")} €`;
 }
 
+function priceUnitSuffix(
+  supplierName: string | null | undefined,
+  unit: string | null | undefined,
+): string {
+  const u = (unit || "").trim();
+  if (u === "per_1_ks") return " / 1 ks";
+  if (u === "per_100_ks" || u === "100") return " / 100 ks";
+  const name = (supplierName || "").toLowerCase();
+  if (name.includes("bmkco") || name.includes("bmk")) return "";
+  return " / 100 ks";
+}
+
+function formatScrapePrice(
+  price: number | null | undefined,
+  supplierName?: string | null,
+  priceUnit?: string | null,
+): string {
+  if (price == null || Number.isNaN(price)) return "—";
+  return `${formatEur(price).replace(" €", "")}${priceUnitSuffix(supplierName, priceUnit)}`;
+}
+
 function statusLabel(row: InquiryLineRunResult): string {
   if (row.error?.trim()) return row.error.trim();
   const labels: Record<InquiryLineRunResult["status"], string> = {
@@ -109,12 +130,16 @@ function OfferRow({
         <span className="text-xs text-red-600">{offer.error}</span>
       ) : (offer.stock ?? 0) <= 0 ? (
         <>
-          <span className="text-slate-600">{formatEur(offer.price_eur)}</span>
+          <span className="text-slate-600">
+            {formatScrapePrice(offer.price_eur, offer.supplier_name, offer.price_unit)}
+          </span>
           <span className="text-xs text-amber-700">Nie je skladom</span>
         </>
       ) : (
         <>
-          <span className="text-slate-600">{formatEur(offer.price_eur)}</span>
+          <span className="text-slate-600">
+            {formatScrapePrice(offer.price_eur, offer.supplier_name, offer.price_unit)}
+          </span>
           <span className="text-xs text-slate-500">sklad: {offer.stock}</span>
         </>
       )}
@@ -162,7 +187,9 @@ function ResultRow({ apiBase, row }: { apiBase: string; row: InquiryLineRunResul
           {best ? best.supplier_name : row.error ? "—" : "—"}
         </div>
         <div className="hidden text-sm font-medium text-slate-900 lg:block">
-          {best ? formatEur(best.price_eur) : "—"}
+          {best
+            ? formatScrapePrice(best.price_eur, best.supplier_name, best.price_unit)
+            : "—"}
         </div>
         <div className="hidden text-sm text-slate-600 lg:block">
           {row.line_total_eur != null ? formatEur(row.line_total_eur) : "—"}
@@ -186,7 +213,8 @@ function ResultRow({ apiBase, row }: { apiBase: string; row: InquiryLineRunResul
       <div className="px-3 pb-3 sm:pl-12 lg:hidden">
         {best ? (
           <p className="text-xs text-slate-600">
-            {best.supplier_name} · {formatEur(best.price_eur)} · spolu{" "}
+            {best.supplier_name} ·{" "}
+            {formatScrapePrice(best.price_eur, best.supplier_name, best.price_unit)} · spolu{" "}
             {formatEur(row.line_total_eur)}
           </p>
         ) : (
@@ -238,7 +266,7 @@ export function InquiryResultsTable({ apiBase, result }: Props) {
         <span />
         <span>Položka</span>
         <span>Dodávateľ</span>
-        <span>Cena / ks</span>
+        <span>Cena / 100</span>
         <span>Spolu</span>
         <span>Stav</span>
       </div>

@@ -133,6 +133,8 @@ class InquiryScrapedOffer(BaseModel):
     logo_url: Optional[str] = None
     supplier_product_url: Optional[str] = None
     price_eur: Optional[float] = None
+    price_unit: Optional[str] = None
+    pack_quantity: Optional[int] = None
     stock: Optional[int] = None
     error: Optional[str] = None
     logged_in: Optional[bool] = None

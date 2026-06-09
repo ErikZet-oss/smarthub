@@ -85,6 +85,8 @@ export type InquiryScrapedOffer = {
   logo_url: string | null;
   supplier_product_url: string | null;
   price_eur: number | null;
+  price_unit?: string | null;
+  pack_quantity?: number | null;
   stock: number | null;
   error: string | null;
   logged_in: boolean | null;
@@ -190,6 +192,11 @@ function normalizeInquiryScrapedOffer(raw: Record<string, unknown>): InquiryScra
       raw.price_eur === null || raw.price_eur === undefined
         ? null
         : Number(raw.price_eur),
+    price_unit: (raw.price_unit as string | null) ?? null,
+    pack_quantity:
+      raw.pack_quantity === null || raw.pack_quantity === undefined
+        ? null
+        : Number(raw.pack_quantity),
     stock:
       raw.stock === null || raw.stock === undefined ? null : Number(raw.stock),
     error: (raw.error as string | null) ?? null,

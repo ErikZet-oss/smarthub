@@ -16,6 +16,7 @@ from app.schemas.inquiry import (
     InquiryScrapedOffer,
 )
 from app.services.inquiry.catalog_match import find_catalog_products
+from app.services.inquiry.pricing import inquiry_line_total_eur
 from app.services.scraper_service import ScraperProductNotFoundError, ScraperService, load_scraper_config
 from app.services.supplier_logos import supplier_logo_public_url
 from app.services.user_credentials import effective_supplier_for_user
@@ -150,8 +151,12 @@ async def _scrape_supplier_offer(
 
     price_raw = data.get("price_eur")
     stock_raw = data.get("stock")
+    price_unit_raw = data.get("price_unit")
+    pack_qty_raw = data.get("pack_quantity")
     price_eur: float | None = None
     stock: int | None = None
+    price_unit: str | None = None
+    pack_quantity: int | None = None
     if price_raw is not None:
         try:
             price_eur = float(price_raw)
@@ -162,11 +167,20 @@ async def _scrape_supplier_offer(
             stock = int(stock_raw)
         except (TypeError, ValueError):
             stock = None
+    if isinstance(price_unit_raw, str) and price_unit_raw.strip():
+        price_unit = price_unit_raw.strip()
+    if pack_qty_raw is not None:
+        try:
+            pack_quantity = max(1, int(pack_qty_raw))
+        except (TypeError, ValueError):
+            pack_quantity = None
 
     logged_in = data.get("logged_in")
     return base.model_copy(
         update={
             "price_eur": price_eur,
+            "price_unit": price_unit,
+            "pack_quantity": pack_quantity,
             "stock": stock,
             "logged_in": logged_in if isinstance(logged_in, bool) else None,
             "error": None if price_eur and price_eur > 0 else "Cena nedostupná.",
@@ -253,7 +267,13 @@ async def _run_line_async(
         )
 
     qty = row.quantity or 1
-    line_total = round((best.price_eur or 0) * qty, 4)
+    line_total = inquiry_line_total_eur(
+        price_eur=best.price_eur or 0,
+        quantity=qty,
+        price_unit=best.price_unit,
+        pack_quantity=best.pack_quantity,
+        supplier_name=best.supplier_name,
+    )
     return result.model_copy(
         update={
             "status": "no_stock" if no_stock else "ok",
