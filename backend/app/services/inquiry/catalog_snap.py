@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+
 from sqlmodel import Session, select
 
 from app.models.entities import Product
 from app.schemas.common import ProductSearchFilters
 from app.schemas.inquiry import InquiryLineParsed
 from app.services.inquiry.norm_rules import norm_requires_length, search_key
-from app.services.inquiry.normalize import norm_display_candidates
+from app.services.inquiry.normalize import norm_display_candidates, normalize_diameter
 
 # Približné mapovanie povrchu na class v katalógu (matice DIN 934, …).
 _SURFACE_V_CLASS: tuple[tuple[str, str], ...] = (
@@ -23,6 +25,43 @@ _SURFACE_V_CLASS: tuple[tuple[str, str], ...] = (
 )
 
 
+@dataclass
+class CatalogSnapCache:
+    norma_values: list[str] = field(default_factory=list)
+    _filter_opts: dict[str, dict[str, list[str]]] = field(default_factory=dict)
+
+    @classmethod
+    def load(cls, session: Session) -> CatalogSnapCache:
+        rows = session.exec(
+            select(Product.norma).distinct().where(Product.norma.is_not(None))  # type: ignore[union-attr]
+        ).all()
+        norma_values = sorted({str(v).strip() for v in rows if v is not None and str(v).strip()})
+        return cls(norma_values=norma_values)
+
+    def filter_options(self, session: Session, filters: ProductSearchFilters) -> dict[str, list[str]]:
+        from app.api.routes import _build_conditional_filter_options
+
+        key = self._filters_key(filters)
+        cached = self._filter_opts.get(key)
+        if cached is not None:
+            return cached
+        result = _build_conditional_filter_options(session, filters)
+        self._filter_opts[key] = result
+        return result
+
+    @staticmethod
+    def _filters_key(filters: ProductSearchFilters) -> str:
+        return "|".join(
+            [
+                (filters.norma or "").strip(),
+                (filters.surface or "").strip(),
+                (filters.diameter or "").strip(),
+                (filters.length or "").strip(),
+                (filters.v_class or "").strip(),
+            ]
+        )
+
+
 def infer_v_class_from_surface(surface: str | None) -> str | None:
     if not surface:
         return None
@@ -33,19 +72,13 @@ def infer_v_class_from_surface(surface: str | None) -> str | None:
     return None
 
 
-def _distinct_norma_values(session: Session) -> list[str]:
-    rows = session.exec(
-        select(Product.norma).distinct().where(Product.norma.is_not(None))  # type: ignore[union-attr]
-    ).all()
-    return [str(v).strip() for v in rows if v is not None and str(v).strip()]
-
-
-def resolve_catalog_norma(session: Session, norma: str | None) -> str | None:
+def resolve_catalog_norma(norma: str | None, *, known: list[str] | None = None) -> str | None:
     """DIN934 → 934 podľa hodnôt v DB."""
     raw = (norma or "").strip()
     if not raw:
         return None
-    known = _distinct_norma_values(session)
+    if known is None:
+        return raw
     if raw in known:
         return raw
     key = search_key(raw)
@@ -82,9 +115,9 @@ def snap_value_to_options(value: str | None, options: list[str]) -> str | None:
     return value
 
 
-def _row_to_filters(row: InquiryLineParsed, *, norma: str | None = None) -> ProductSearchFilters:
+def _row_to_filters(row: InquiryLineParsed) -> ProductSearchFilters:
     return ProductSearchFilters(
-        norma=norma if norma is not None else row.norma,
+        norma=row.norma,
         surface=row.surface,
         diameter=row.diameter,
         length=row.length,
@@ -92,41 +125,70 @@ def _row_to_filters(row: InquiryLineParsed, *, norma: str | None = None) -> Prod
     )
 
 
-def _filter_options(session: Session, filters: ProductSearchFilters) -> dict[str, list[str]]:
-    from app.api.routes import _build_conditional_filter_options
+def _snap_fields_from_options(
+    data: dict[str, object],
+    opts: dict[str, list[str]],
+    *,
+    fields: tuple[str, ...] = ("norma", "surface", "diameter", "length", "v_class"),
+) -> None:
+    for name in fields:
+        current = data.get(name)
+        if current is None:
+            continue
+        snapped = snap_value_to_options(str(current), opts.get(name, []))
+        if snapped is not None:
+            data[name] = snapped
 
-    return _build_conditional_filter_options(session, filters)
 
-
-def snap_inquiry_line_to_catalog(session: Session, row: InquiryLineParsed) -> InquiryLineParsed:
+def snap_inquiry_line_to_catalog(
+    session: Session,
+    row: InquiryLineParsed,
+    *,
+    cache: CatalogSnapCache | None = None,
+) -> InquiryLineParsed:
     """Zosúladí parsované hodnoty s presnými hodnotami filtrov v DB."""
+    snap_cache = cache or CatalogSnapCache.load(session)
     data = row.model_dump()
-    catalog_norma = resolve_catalog_norma(session, row.norma)
+    data["diameter"] = normalize_diameter(row.diameter)
+
+    catalog_norma = resolve_catalog_norma(row.norma, known=snap_cache.norma_values)
     if catalog_norma:
         data["norma"] = catalog_norma
 
-    base = InquiryLineParsed.model_validate({**data, "raw_text": row.raw_text})
-    filters = _row_to_filters(base)
+    if not data.get("v_class"):
+        inferred = infer_v_class_from_surface(data.get("surface"))  # type: ignore[arg-type]
+        if inferred:
+            data["v_class"] = inferred
 
-    for field in ("norma", "surface", "diameter", "length", "v_class"):
-        opts = _filter_options(session, filters).get(field, [])
-        current = data.get(field)
-        snapped = snap_value_to_options(current, opts)
-        if snapped != current:
-            data[field] = snapped
-            base = InquiryLineParsed.model_validate({**data, "raw_text": row.raw_text})
-            filters = _row_to_filters(base)
+    if not norm_requires_length(catalog_norma or row.norma, row.raw_text) and not data.get("length"):
+        data["length"] = "0"
+
+    base = InquiryLineParsed.model_validate({**data, "raw_text": row.raw_text})
+    opts = snap_cache.filter_options(session, _row_to_filters(base))
+    _snap_fields_from_options(data, opts)
 
     if not data.get("v_class"):
-        inferred = infer_v_class_from_surface(data.get("surface"))
+        inferred = infer_v_class_from_surface(data.get("surface"))  # type: ignore[arg-type]
         if inferred:
-            v_opts = _filter_options(session, _row_to_filters(base)).get("v_class", [])
-            data["v_class"] = snap_value_to_options(inferred, v_opts) or inferred
+            data["v_class"] = snap_value_to_options(inferred, opts.get("v_class", [])) or inferred
 
-    if not norm_requires_length(base.norma, row.raw_text) and not data.get("length"):
-        len_opts = _filter_options(session, _row_to_filters(InquiryLineParsed.model_validate(data))).get(
-            "length", []
-        )
-        data["length"] = snap_value_to_options("0", len_opts) or "0"
+    if not norm_requires_length(data.get("norma"), row.raw_text):  # type: ignore[arg-type]
+        data["length"] = snap_value_to_options(str(data.get("length") or "0"), opts.get("length", [])) or "0"
 
     return InquiryLineParsed.model_validate({**data, "raw_text": row.raw_text})
+
+
+def snap_inquiry_batch_to_catalog(
+    session: Session,
+    rows: list[InquiryLineParsed],
+    *,
+    progress_cb=None,
+) -> list[InquiryLineParsed]:
+    cache = CatalogSnapCache.load(session)
+    out: list[InquiryLineParsed] = []
+    total = len(rows)
+    for i, row in enumerate(rows, start=1):
+        out.append(snap_inquiry_line_to_catalog(session, row, cache=cache))
+        if progress_cb is not None:
+            progress_cb(i, total)
+    return out

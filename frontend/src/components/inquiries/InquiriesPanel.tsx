@@ -125,6 +125,7 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
         if (!stParsed.ok) throw new Error(stParsed.detail);
         const st = stParsed.data as {
           state?: string;
+          phase?: string;
           progress_pct?: number;
           error?: string;
           result?: { rows?: Record<string, unknown>[]; source_filename?: string };
@@ -139,7 +140,11 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
         if (st.state === "error") {
           throw new Error(st.error || "Parsovanie zlyhalo.");
         }
-        setStatus(`AI parsuje riadky… ${st.progress_pct ?? 0} %`);
+        if (st.phase === "catalog_snap") {
+          setStatus(`Zosúladzujem s katalógom… ${st.progress_pct ?? 0} %`);
+        } else {
+          setStatus(`AI parsuje riadky… ${st.progress_pct ?? 0} %`);
+        }
       }
     } catch (e) {
       setStatus(e instanceof Error ? e.message : "Chyba pri parsovaní.");

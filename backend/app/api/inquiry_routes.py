@@ -12,7 +12,11 @@ from app.api.deps import AuthUserContext, get_current_user
 from app.db import get_session
 from app.schemas.common import ProductSearchFilters
 from app.schemas.inquiry import InquiryParseTaskResult
-from app.services.inquiry.catalog_snap import resolve_catalog_norma, snap_inquiry_line_to_catalog
+from app.services.inquiry.catalog_snap import (
+    CatalogSnapCache,
+    resolve_catalog_norma,
+    snap_inquiry_batch_to_catalog,
+)
 from app.services.inquiry.file_reader import MAX_INQUIRY_ROWS, read_inquiry_rows_from_bytes
 from app.services.inquiry.parser import parse_inquiry_batch
 
@@ -57,8 +61,13 @@ def _run_parse_task(task_id: str, file_bytes: bytes, filename: str) -> None:
         parsed = parse_inquiry_batch(batch, progress_cb=progress)
         from app.db import engine
 
+        _task_update(task_id, phase="catalog_snap", rows_scanned=total, total_rows=total)
+
+        def snap_progress(done: int, tot: int) -> None:
+            _task_update(task_id, phase="catalog_snap", rows_snapped=done, total_rows=tot)
+
         with Session(engine) as session:
-            parsed = [snap_inquiry_line_to_catalog(session, row) for row in parsed]
+            parsed = snap_inquiry_batch_to_catalog(session, parsed, progress_cb=snap_progress)
         result = InquiryParseTaskResult(
             rows=parsed,
             source_filename=filename,
@@ -67,7 +76,9 @@ def _run_parse_task(task_id: str, file_bytes: bytes, filename: str) -> None:
         _task_update(
             task_id,
             state="done",
+            phase="done",
             rows_scanned=total,
+            rows_snapped=total,
             total_rows=total,
             result=result.model_dump(mode="json"),
             finished_at=time.time(),
@@ -151,14 +162,21 @@ def inquiry_parse_status(
 
     total_rows = int(task.get("total_rows") or 0)
     rows_scanned = int(task.get("rows_scanned") or 0)
+    rows_snapped = int(task.get("rows_snapped") or 0)
+    phase = str(task.get("phase") or task.get("state") or "")
     progress_pct = 0
     if total_rows > 0:
-        progress_pct = min(100, int((rows_scanned / total_rows) * 100))
+        if phase == "catalog_snap":
+            progress_pct = min(99, int((rows_snapped / total_rows) * 100))
+        else:
+            progress_pct = min(100, int((rows_scanned / total_rows) * 100))
 
     return {
         "task_id": task_id,
         "state": task.get("state"),
+        "phase": phase,
         "rows_scanned": rows_scanned,
+        "rows_snapped": rows_snapped,
         "total_rows": total_rows,
         "progress_pct": progress_pct,
         "source_filename": task.get("source_filename"),
@@ -178,7 +196,10 @@ def inquiry_filter_options_conditional(
     from app.api.routes import _build_conditional_filter_options
 
     if filters.norma:
-        filters.norma = resolve_catalog_norma(session, filters.norma) or filters.norma
+        filters.norma = resolve_catalog_norma(
+            filters.norma,
+            known=CatalogSnapCache.load(session).norma_values,
+        ) or filters.norma
     return _build_conditional_filter_options(session, filters)
 
 
