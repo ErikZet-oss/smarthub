@@ -37,7 +37,7 @@ function statusBadge(row: InquiryLineRunResult) {
     );
   }
   return (
-    <Badge variant="outline" className="border-red-200 bg-red-50 text-red-700">
+    <Badge className="border-red-200 bg-red-50 text-red-700">
       Chyba
     </Badge>
   );
