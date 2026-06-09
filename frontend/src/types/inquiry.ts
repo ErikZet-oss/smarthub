@@ -34,10 +34,9 @@ export function inquiryMissingFields(row: InquiryLineParsed): InquiryFilterField
   const required = inquiryRequiredFields(row.norma, row.raw_text);
   const missing: InquiryFilterField[] = [];
   for (const field of required) {
-    const val = row[field];
     if (field === "quantity") {
-      if (val == null || val <= 0) missing.push(field);
-    } else if (!String(val ?? "").trim()) {
+      if (row.quantity == null || row.quantity <= 0) missing.push(field);
+    } else if (!String(row[field] ?? "").trim()) {
       missing.push(field);
     }
   }
