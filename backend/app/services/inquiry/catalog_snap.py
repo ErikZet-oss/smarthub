@@ -99,6 +99,36 @@ def infer_v_class_from_surface(surface: str | None) -> str | None:
     return None
 
 
+def infer_v_class_for_row(
+    *,
+    norma: str | None,
+    surface: str | None,
+    raw_text: str,
+) -> str | None:
+    """Matice/skrutky — mapovanie z povrchu; podložky DIN 125 majú iné class v DB."""
+    if _is_washer_norm(norma, raw_text):
+        return _infer_washer_v_class(surface, raw_text)
+    return infer_v_class_from_surface(surface)
+
+
+def _infer_washer_v_class(surface: str | None, raw_text: str) -> str | None:
+    low = (raw_text or "").casefold()
+    surf = (surface or "").casefold()
+    if "polyamid" in low or "nylon" in low or "plast" in low:
+        return "0"
+    if "nerez a4" in surf or ("nerez" in surf and "a4" in low):
+        return "A4-70"
+    if "nerez" in surf or "nerezoceľ" in low or "nerezocel" in low:
+        return "A2-50"
+    if "mosadz" in surf or "mosadz" in low:
+        return "0"
+    if "pozink" in surf or "pozink" in low or " zn " in f" {low} ":
+        return "0"
+    if "hliník" in surf or "hlinik" in low:
+        return "P40"
+    return infer_v_class_from_surface(surface)
+
+
 def resolve_catalog_norma(norma: str | None, *, known: list[str] | None = None) -> str | None:
     """DIN934 → 934, DIN125 → 125a podľa hodnôt v DB."""
     raw = (norma or "").strip()
@@ -152,6 +182,10 @@ def _is_washer_norm(norma: str | None, raw_text: str) -> bool:
         return True
     nk = search_key(norma)
     return nk.startswith("DIN125") or nk in ("125", "125A") or bool(re.match(r"^125A?$", nk))
+
+
+def is_washer_text(raw_text: str) -> bool:
+    return _is_washer_norm(None, raw_text)
 
 
 def resolve_washer_inner_diameter(bolt_m: str | None, options: list[str]) -> str | None:
@@ -283,7 +317,15 @@ def snap_inquiry_line_to_catalog(
     if catalog_norma:
         data["norma"] = catalog_norma
 
-    if not data.get("v_class"):
+    washer = _is_washer_norm(str(data.get("norma") or ""), row.raw_text)
+    washer_v_class = infer_v_class_for_row(
+        norma=str(data.get("norma") or ""),
+        surface=str(data.get("surface") or "") or None,
+        raw_text=row.raw_text,
+    )
+    if washer and washer_v_class:
+        data["v_class"] = washer_v_class
+    elif not data.get("v_class"):
         inferred = infer_v_class_from_surface(data.get("surface"))  # type: ignore[arg-type]
         if inferred:
             data["v_class"] = inferred
@@ -294,18 +336,26 @@ def snap_inquiry_line_to_catalog(
     base = InquiryLineParsed.model_validate({**data, "raw_text": row.raw_text})
     opts = snap_cache.filter_options(session, _row_to_filters(base))
 
-    if _is_washer_norm(str(data.get("norma") or ""), row.raw_text):
+    if washer:
         diam_opts = opts.get("diameter", [])
         current_d = str(data.get("diameter") or "")
         if current_d and current_d not in diam_opts:
             resolved = resolve_washer_inner_diameter(current_d, diam_opts)
             if resolved:
                 data["diameter"] = resolved
+        base = InquiryLineParsed.model_validate({**data, "raw_text": row.raw_text})
+        opts = snap_cache.filter_options(session, _row_to_filters(base))
 
     _snap_fields_from_options(data, opts)
 
-    if not data.get("v_class"):
-        inferred = infer_v_class_from_surface(data.get("surface"))  # type: ignore[arg-type]
+    if washer and washer_v_class:
+        data["v_class"] = snap_value_to_options(washer_v_class, opts.get("v_class", [])) or washer_v_class
+    elif not data.get("v_class"):
+        inferred = infer_v_class_for_row(
+            norma=str(data.get("norma") or ""),
+            surface=str(data.get("surface") or "") or None,
+            raw_text=row.raw_text,
+        )
         if inferred:
             data["v_class"] = snap_value_to_options(inferred, opts.get("v_class", [])) or inferred
 

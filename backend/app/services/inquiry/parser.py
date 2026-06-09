@@ -7,7 +7,7 @@ import re
 from typing import Callable
 
 from app.schemas.inquiry import InquiryLineAIOutput, InquiryLineParsed
-from app.services.inquiry.catalog_snap import infer_v_class_from_surface
+from app.services.inquiry.catalog_snap import infer_v_class_for_row, is_washer_text
 from app.services.inquiry.normalize import apply_normalization, infer_surface_from_text
 from app.services.inquiry.norm_rules import norm_requires_length
 from app.services.inquiry.product_norm_hints import (
@@ -199,8 +199,20 @@ def _heuristic_parse(raw_text: str) -> InquiryLineAIOutput | None:
         norma = infer_norma_from_text(t)
 
     v_class = None
-    m = re.search(r"\bA[24]\b", t, re.IGNORECASE)
-    if m:
+    if is_washer_text(t):
+        surface_guess = infer_surface_from_text(t)
+        if surface_guess is None:
+            low = t.casefold()
+            if "a4" in low and "nerez" in low:
+                surface_guess = "Nerez A4"
+            elif "a2" in low or "nerez" in low:
+                surface_guess = "Nerez A2"
+            elif "pozink" in low:
+                surface_guess = "Oceľ pozinkovaná"
+            elif "mosadz" in low:
+                surface_guess = "Mosadz"
+        v_class = infer_v_class_for_row(norma=norma, surface=surface_guess, raw_text=t)
+    elif re.search(r"\bA[24]\b", t, re.IGNORECASE):
         v_class = None  # A2/A4 ide do surface
     elif infer_surface_from_text(t) == "Polyamid":
         v_class = "0"
@@ -233,7 +245,7 @@ def _heuristic_parse(raw_text: str) -> InquiryLineAIOutput | None:
             surface = "Oceľ"
 
     if not v_class and surface:
-        v_class = infer_v_class_from_surface(surface)
+        v_class = infer_v_class_for_row(norma=norma, surface=surface, raw_text=t)
 
     if not norm_requires_length(norma, t):
         length = None

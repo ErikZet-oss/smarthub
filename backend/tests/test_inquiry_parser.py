@@ -89,6 +89,16 @@ def test_parse_polyamid_matica_heuristic_fallback(monkeypatch) -> None:
     assert parsed.diameter == "3"
 
 
+def test_heuristic_parse_nerez_washer() -> None:
+    ai = _heuristic_parse("Plochá podložka DIN 125-1A Nerezoceľ A2 140 HV M4")
+    assert ai is not None
+    assert ai.diameter == "4"
+    assert ai.norma == "DIN125"
+    assert ai.surface == "Nerez A2"
+    assert ai.v_class == "A2-50"
+    assert ai.length is None
+
+
 def test_heuristic_parse_skrutka() -> None:
     ai = _heuristic_parse("skrutka M10x50 DIN933 8.8 pozinkovaná")
     assert ai is not None
