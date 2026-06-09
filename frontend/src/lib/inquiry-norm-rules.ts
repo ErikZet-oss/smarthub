@@ -129,3 +129,57 @@ export function optionsWithCurrent(
   if (options.includes(val)) return options;
   return [val, ...options];
 }
+
+const CATALOG_FIELD_LABELS: Record<keyof InquiryFilterOptions, string> = {
+  norma: "Norma",
+  surface: "Povrch",
+  diameter: "Priemer",
+  length: "Dĺžka",
+  v_class: "Class",
+};
+
+export function inquiryCatalogMismatchMessages(
+  row: {
+    norma: string | null;
+    surface: string | null;
+    diameter: string | null;
+    length: string | null;
+    v_class: string | null;
+  },
+  opts: InquiryFilterOptions,
+): string[] {
+  const messages: string[] = [];
+  for (const field of Object.keys(CATALOG_FIELD_LABELS) as (keyof InquiryFilterOptions)[]) {
+    const val = String(row[field] ?? "").trim();
+    if (!val) continue;
+    const catalog = opts[field];
+    if (catalog.length === 0) continue;
+    if (!catalog.includes(val)) {
+      messages.push(
+        `${CATALOG_FIELD_LABELS[field]} „${val}" v katalógu pre túto kombináciu neexistuje`,
+      );
+    }
+  }
+  return messages;
+}
+
+export function catalogMismatchFields(
+  row: {
+    norma: string | null;
+    surface: string | null;
+    diameter: string | null;
+    length: string | null;
+    v_class: string | null;
+  },
+  opts: InquiryFilterOptions,
+): (keyof InquiryFilterOptions)[] {
+  const bad: (keyof InquiryFilterOptions)[] = [];
+  for (const field of Object.keys(CATALOG_FIELD_LABELS) as (keyof InquiryFilterOptions)[]) {
+    const val = String(row[field] ?? "").trim();
+    if (!val) continue;
+    const catalog = opts[field];
+    if (catalog.length === 0) continue;
+    if (!catalog.includes(val)) bad.push(field);
+  }
+  return bad;
+}

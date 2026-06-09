@@ -140,6 +140,56 @@ def _snap_fields_from_options(
             data[name] = snapped
 
 
+_FIELD_LABELS = {
+    "norma": "Norma",
+    "surface": "Povrch",
+    "diameter": "Priemer",
+    "length": "Dĺžka",
+    "v_class": "Class",
+}
+
+
+def _catalog_mismatch_warnings(
+    session: Session,
+    row: InquiryLineParsed,
+    cache: CatalogSnapCache,
+) -> list[str]:
+    warnings: list[str] = []
+    for field, label in _FIELD_LABELS.items():
+        val = getattr(row, field, None)
+        if not (val or "").strip():
+            continue
+        opts = cache.filter_options(session, _row_to_filters(row)).get(field, [])
+        if not opts:
+            continue
+        if str(val) not in opts:
+            warnings.append(f'{label} „{val}" v katalógu pre túto kombináciu neexistuje')
+    if warnings:
+        return warnings
+
+    required = [row.norma, row.diameter, row.quantity]
+    if not all(x is not None and str(x).strip() for x in required[:2]):
+        return warnings
+    if not _product_exists(session, row):
+        warnings.append("Táto kombinácia parametrov v katalógu neexistuje")
+    return warnings
+
+
+def _product_exists(session: Session, row: InquiryLineParsed) -> bool:
+    query = select(Product)
+    if row.norma:
+        query = query.where(Product.norma == row.norma)
+    if row.surface:
+        query = query.where(Product.surface == row.surface)
+    if row.diameter:
+        query = query.where(Product.diameter == row.diameter)
+    if row.length:
+        query = query.where(Product.length == row.length)
+    if row.v_class:
+        query = query.where(Product.v_class == row.v_class)
+    return session.exec(query.limit(1)).first() is not None
+
+
 def snap_inquiry_line_to_catalog(
     session: Session,
     row: InquiryLineParsed,
@@ -175,7 +225,9 @@ def snap_inquiry_line_to_catalog(
     if not norm_requires_length(data.get("norma"), row.raw_text):  # type: ignore[arg-type]
         data["length"] = snap_value_to_options(str(data.get("length") or "0"), opts.get("length", [])) or "0"
 
-    return InquiryLineParsed.model_validate({**data, "raw_text": row.raw_text})
+    snapped = InquiryLineParsed.model_validate({**data, "raw_text": row.raw_text})
+    warnings = _catalog_mismatch_warnings(session, snapped, snap_cache)
+    return snapped.model_copy(update={"catalog_warnings": warnings or None})
 
 
 def snap_inquiry_batch_to_catalog(

@@ -68,6 +68,7 @@ class InquiryLineParsed(BaseModel):
     )
     quantity: Optional[int] = None
     parse_error: Optional[str] = None
+    catalog_warnings: Optional[list[str]] = None
 
     @classmethod
     def from_ai(cls, row_index: int, raw_text: str, ai: InquiryLineAIOutput) -> InquiryLineParsed:

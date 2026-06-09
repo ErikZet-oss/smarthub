@@ -8,6 +8,7 @@ export type InquiryLineParsed = {
   v_class: string | null;
   quantity: number | null;
   parse_error: string | null;
+  catalog_warnings: string[] | null;
 };
 
 export type InquiryDraft = {
@@ -41,7 +42,11 @@ export function inquiryMissingFields(row: InquiryLineParsed): InquiryFilterField
 }
 
 export function inquiryRowIsValid(row: InquiryLineParsed): boolean {
-  return !row.parse_error && inquiryMissingFields(row).length === 0;
+  return (
+    !row.parse_error &&
+    inquiryMissingFields(row).length === 0 &&
+    !(row.catalog_warnings && row.catalog_warnings.length > 0)
+  );
 }
 
 export function normalizeInquiryRowFromApi(raw: Record<string, unknown>): InquiryLineParsed {
@@ -66,5 +71,8 @@ export function normalizeInquiryRowFromApi(raw: Record<string, unknown>): Inquir
         ? null
         : Number(raw.quantity),
     parse_error: (raw.parse_error as string | null) ?? null,
+    catalog_warnings: Array.isArray(raw.catalog_warnings)
+      ? (raw.catalog_warnings as string[])
+      : null,
   };
 }

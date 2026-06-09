@@ -1,11 +1,13 @@
 "use client";
 
+import { X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { SearchableSelect } from "@/components/SearchableSelect";
 import {
+  catalogMismatchFields,
+  inquiryCatalogMismatchMessages,
   inquiryRequiredFields,
-  optionsWithCurrent,
   type InquiryFilterField,
   type InquiryFilterOptions,
 } from "@/lib/inquiry-norm-rules";
@@ -43,6 +45,7 @@ type RowProps = {
   apiBase: string;
   apiFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   onChange: (row: InquiryLineParsed) => void;
+  onDelete: () => void;
 };
 
 function updateRowField(
@@ -50,7 +53,7 @@ function updateRowField(
   field: keyof InquiryLineParsed,
   value: string,
 ): InquiryLineParsed {
-  const next = { ...row, parse_error: null as string | null };
+  const next = { ...row, parse_error: null as string | null, catalog_warnings: null };
   if (field === "quantity") {
     const n = value.trim() ? Number(value.replace(",", ".")) : null;
     next.quantity = n != null && !Number.isNaN(n) ? Math.max(0, Math.round(n)) : null;
@@ -60,11 +63,23 @@ function updateRowField(
   return next;
 }
 
-function InquiryEditorRow({ row, apiBase, apiFetch, onChange }: RowProps) {
+function warningsEqual(a: string[] | null | undefined, b: string[] | null | undefined): boolean {
+  const left = a ?? [];
+  const right = b ?? [];
+  if (left.length !== right.length) return false;
+  return left.every((msg, i) => msg === right[i]);
+}
+
+function InquiryEditorRow({ row, apiBase, apiFetch, onChange, onDelete }: RowProps) {
   const [opts, setOpts] = useState<InquiryFilterOptions>(EMPTY_OPTS);
   const required = new Set(inquiryRequiredFields(row.norma, row.raw_text));
   const missing = new Set(inquiryMissingFields(row));
-  const hasError = Boolean(row.parse_error) || missing.size > 0;
+  const catalogBad = new Set(catalogMismatchFields(row, opts));
+  const catalogMessages = inquiryCatalogMismatchMessages(row, opts);
+  const hasError =
+    Boolean(row.parse_error) ||
+    missing.size > 0 ||
+    catalogMessages.length > 0;
 
   useEffect(() => {
     let cancelled = false;
@@ -103,9 +118,22 @@ function InquiryEditorRow({ row, apiBase, apiFetch, onChange }: RowProps) {
     };
   }, [apiBase, apiFetch, row.norma, row.surface, row.diameter, row.length, row.v_class]);
 
+  useEffect(() => {
+    const nextWarnings = catalogMessages.length ? catalogMessages : null;
+    if (!warningsEqual(row.catalog_warnings, nextWarnings)) {
+      onChange({ ...row, catalog_warnings: nextWarnings });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sync warnings when catalog opts change
+  }, [catalogMessages.join("|"), row.row_index]);
+
   const handleField = (field: keyof InquiryLineParsed, value: string) => {
     onChange(updateRowField(row, field, value));
   };
+
+  const statusMessage =
+    row.parse_error ??
+    (catalogMessages[0] ?? null) ??
+    (hasError ? "Doplniť" : null);
 
   return (
     <tr className="border-t border-slate-100">
@@ -115,26 +143,29 @@ function InquiryEditorRow({ row, apiBase, apiFetch, onChange }: RowProps) {
       </td>
       {SELECT_FIELDS.map((field) => {
         const isRequired = required.has(field);
-        const isBad = isRequired && missing.has(field);
+        const isMissing = isRequired && missing.has(field);
+        const isCatalogBad = catalogBad.has(field);
         const cell = row[field];
-        const options = optionsWithCurrent(
-          cell == null ? null : String(cell),
-          opts[field],
-        );
         return (
           <td key={field} className="px-1 py-1">
             <SearchableSelect
               value={cell == null ? "" : String(cell)}
               onChange={(v) => handleField(field, v)}
-              options={options}
+              options={opts[field]}
               emptyLabel={isRequired ? "Vyber…" : "—"}
               placeholder="Hľadať…"
               className={cn(
                 "h-8 min-w-[80px] text-xs",
-                isBad && "[&_button]:border-red-400 [&_button]:bg-red-50",
-                !isRequired && "[&_button]:bg-slate-50/80",
+                (isMissing || isCatalogBad) &&
+                  "[&_button]:border-amber-500 [&_button]:bg-amber-50",
+                !isRequired && !isCatalogBad && "[&_button]:bg-slate-50/80",
               )}
             />
+            {isCatalogBad ? (
+              <p className="mt-0.5 line-clamp-2 text-[10px] text-amber-700" title={catalogMessages.find((m) => m.includes(FIELD_LABELS[field as InquiryFilterField]))}>
+                Nie je v katalógu
+              </p>
+            ) : null}
           </td>
         );
       })}
@@ -152,18 +183,31 @@ function InquiryEditorRow({ row, apiBase, apiFetch, onChange }: RowProps) {
           )}
         />
       </td>
-      <td className="max-w-[140px] px-2 py-1.5">
-        {row.parse_error ? (
-          <span className="line-clamp-2 text-red-600" title={row.parse_error}>
-            {row.parse_error.length > 48
-              ? `${row.parse_error.slice(0, 48)}…`
-              : row.parse_error}
+      <td className="max-w-[160px] px-2 py-1.5">
+        {statusMessage ? (
+          <span
+            className={cn(
+              "line-clamp-3",
+              row.parse_error || catalogMessages.length ? "text-amber-700" : "text-red-600",
+            )}
+            title={catalogMessages.join("\n") || statusMessage}
+          >
+            {statusMessage.length > 56 ? `${statusMessage.slice(0, 56)}…` : statusMessage}
           </span>
-        ) : hasError ? (
-          <span className="text-red-600">Doplniť</span>
         ) : (
           <span className="text-emerald-600">OK</span>
         )}
+      </td>
+      <td className="px-1 py-1 text-center">
+        <button
+          type="button"
+          onClick={onDelete}
+          className="inline-flex h-7 w-7 items-center justify-center rounded text-slate-400 hover:bg-red-50 hover:text-red-600"
+          title="Odstrániť riadok"
+          aria-label="Odstrániť riadok"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
       </td>
     </tr>
   );
@@ -199,6 +243,10 @@ export function InquiryEditorTable({ rows, apiBase, apiFetch, onChange }: Props)
     emitChange(next);
   };
 
+  const handleDelete = (rowIndex: number) => {
+    onChange(rows.filter((r) => r.row_index !== rowIndex));
+  };
+
   const headerFields: Array<InquiryFilterField | "quantity"> = [
     ...SELECT_FIELDS,
     "quantity",
@@ -217,6 +265,7 @@ export function InquiryEditorTable({ rows, apiBase, apiFetch, onChange }: Props)
               </th>
             ))}
             <th className="px-2 py-2">Stav</th>
+            <th className="w-8 px-1 py-2" aria-label="Odstrániť" />
           </tr>
         </thead>
         <tbody>
@@ -227,6 +276,7 @@ export function InquiryEditorTable({ rows, apiBase, apiFetch, onChange }: Props)
               apiBase={apiBase}
               apiFetch={apiFetch}
               onChange={handleRowChange}
+              onDelete={() => handleDelete(row.row_index)}
             />
           ))}
         </tbody>
