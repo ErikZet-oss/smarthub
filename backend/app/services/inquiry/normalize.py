@@ -43,8 +43,8 @@ def normalize_diameter(value: str | None) -> str | None:
         return None
     s = str(value).strip().upper().replace(",", ".")
     s = re.sub(r"\s+", "", s)
-    if s and not s.startswith("M") and re.fullmatch(r"\d+(?:\.\d+)?", s):
-        s = f"M{s}"
+    if s.startswith("M"):
+        s = s[1:]
     return s or None
 
 

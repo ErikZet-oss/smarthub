@@ -88,14 +88,19 @@ def norm_requires_length(norma: str | None, raw_text: str = "") -> bool:
 
 
 def norm_requires_v_class(norma: str | None, raw_text: str = "") -> bool:
-    if not norm_requires_length(norma, raw_text):
-        return False
-    return True
+    key = norm_key(norma)
+    if key in NORMS_WITHOUT_LENGTH_KEYS:
+        return True
+    if key.startswith("DIN") and key[3:] in NORMS_WITHOUT_LENGTH_KEYS:
+        return True
+    if _NO_LENGTH_TEXT.search(raw_text or ""):
+        return True
+    return norm_requires_length(norma, raw_text)
 
 
 def inquiry_required_field_names(norma: str | None, raw_text: str = "") -> list[str]:
-    """Povinné polia zladené s vyhľadávaním (norma, priemer, ks + podmienene dĺžka/trieda)."""
-    required = ["norma", "diameter", "quantity"]
+    """Povinné polia zladené s vyhľadávaním."""
+    required = ["norma", "surface", "diameter", "quantity"]
     if norm_requires_length(norma, raw_text):
         required.append("length")
     if norm_requires_v_class(norma, raw_text):

@@ -7,6 +7,7 @@ from app.schemas.inquiry import InquiryLineParsed
 from app.services.inquiry.norm_rules import (
     inquiry_required_field_names,
     norm_requires_length,
+    norm_requires_v_class,
 )
 from app.services.inquiry.parser import (
     _gemini_inquiry_response_schema,
@@ -31,40 +32,45 @@ def test_norm_requires_length_matica() -> None:
     assert norm_requires_length("DIN933", "skrutka M10x50 DIN933") is True
 
 
+def test_norm_requires_v_class_matica() -> None:
+    assert norm_requires_v_class("DIN934", "matica M3") is True
+
+
 def test_inquiry_required_fields_matica() -> None:
     fields = inquiry_required_field_names("DIN934", "matica M3")
     assert "length" not in fields
-    assert "v_class" not in fields
-    assert "norma" in fields
-    assert "diameter" in fields
+    assert "v_class" in fields
+    assert "surface" in fields
 
 
 def test_matica_parsed_not_missing_length() -> None:
     parsed = InquiryLineParsed(
         row_index=1,
         raw_text="Šesťhranná matica DIN 934 Oceľ Pozinkované M3",
-        norma="DIN934",
-        diameter="M3",
+        norma="934",
+        diameter="3",
         surface="Oceľ pozinkovaná",
+        v_class="8.8",
         length="0",
         quantity=1,
     )
-    assert "length" not in parsed.missing_required_fields()
+    assert parsed.missing_required_fields() == []
 
 
 def test_heuristic_parse_matica() -> None:
     ai = _heuristic_parse("Šesťhranná matica DIN 934 Oceľ Pozinkované M3")
     assert ai is not None
-    assert ai.diameter == "M3"
+    assert ai.diameter == "3"
     assert ai.norma == "DIN934"
     assert ai.surface == "Oceľ pozinkovaná"
+    assert ai.v_class == "8.8"
     assert ai.length is None
 
 
 def test_heuristic_parse_skrutka() -> None:
     ai = _heuristic_parse("skrutka M10x50 DIN933 8.8 pozinkovaná")
     assert ai is not None
-    assert ai.diameter == "M10"
+    assert ai.diameter == "10"
     assert ai.length == "50"
     assert ai.norma == "DIN933"
     assert ai.v_class == "8.8"
@@ -74,17 +80,17 @@ def test_parse_inquiry_line_heuristic_fallback(monkeypatch) -> None:
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     parsed = parse_inquiry_line("Šesťhranná matica DIN 934 Nerezoceľ A2 M4", row_index=1)
     assert parsed.parse_error is None
-    assert parsed.diameter == "M4"
+    assert parsed.diameter == "4"
     assert parsed.norma == "DIN934"
     assert parsed.surface == "Nerez A2"
-    assert "length" not in parsed.missing_required_fields()
+    assert parsed.v_class == "A2-70"
 
 
 def test_parse_inquiry_line_with_mock_model() -> None:
     mock_response = MagicMock()
     mock_response.text = json.dumps(
         {
-            "diameter": "M10",
+            "diameter": "10",
             "length": "50",
             "norma": "DIN933",
             "v_class": "8.8",

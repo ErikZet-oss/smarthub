@@ -6,9 +6,13 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from sqlmodel import Session
 
 from app.api.deps import AuthUserContext, get_current_user
+from app.db import get_session
+from app.schemas.common import ProductSearchFilters
 from app.schemas.inquiry import InquiryParseTaskResult
+from app.services.inquiry.catalog_snap import resolve_catalog_norma, snap_inquiry_line_to_catalog
 from app.services.inquiry.file_reader import MAX_INQUIRY_ROWS, read_inquiry_rows_from_bytes
 from app.services.inquiry.parser import parse_inquiry_batch
 
@@ -51,6 +55,10 @@ def _run_parse_task(task_id: str, file_bytes: bytes, filename: str) -> None:
             _task_update(task_id, rows_scanned=done, total_rows=tot)
 
         parsed = parse_inquiry_batch(batch, progress_cb=progress)
+        from app.db import engine
+
+        with Session(engine) as session:
+            parsed = [snap_inquiry_line_to_catalog(session, row) for row in parsed]
         result = InquiryParseTaskResult(
             rows=parsed,
             source_filename=filename,
@@ -158,6 +166,20 @@ def inquiry_parse_status(
         "error": task.get("error"),
         "error_code": task.get("error_code"),
     }
+
+
+@router.post("/inquiries/filter-options/conditional")
+def inquiry_filter_options_conditional(
+    filters: ProductSearchFilters,
+    session: Session = Depends(get_session),
+    _: AuthUserContext = Depends(get_current_user),
+):
+    """Kaskádové možnosti filtrov pre riadok dopytu — rovnaká logika ako vyhľadávanie."""
+    from app.api.routes import _build_conditional_filter_options
+
+    if filters.norma:
+        filters.norma = resolve_catalog_norma(session, filters.norma) or filters.norma
+    return _build_conditional_filter_options(session, filters)
 
 
 @router.post("/inquiries/parse/preview-row")

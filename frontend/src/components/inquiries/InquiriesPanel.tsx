@@ -221,7 +221,12 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
 
       {rows.length > 0 ? (
         <>
-          <InquiryEditorTable rows={rows} onChange={persistRows} />
+          <InquiryEditorTable
+            rows={rows}
+            apiBase={apiBase}
+            apiFetch={apiFetch}
+            onChange={persistRows}
+          />
           <div className="flex items-center gap-3">
             <Button type="button" disabled={!allValid} title={allValid ? "" : "Doplň všetky červené bunky"}>
               Spustiť dopyt

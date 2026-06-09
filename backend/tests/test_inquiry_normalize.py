@@ -22,9 +22,9 @@ def test_norm_display_candidates_variants() -> None:
     assert "933" in cands
 
 
-def test_normalize_diameter_adds_m_prefix() -> None:
-    assert normalize_diameter("10") == "M10"
-    assert normalize_diameter("M10") == "M10"
+def test_normalize_diameter_strips_m_prefix() -> None:
+    assert normalize_diameter("M10") == "10"
+    assert normalize_diameter("10") == "10"
 
 
 def test_normalize_length_mm() -> None:

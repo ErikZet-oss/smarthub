@@ -7,6 +7,7 @@ import re
 from typing import Callable
 
 from app.schemas.inquiry import InquiryLineAIOutput, InquiryLineParsed
+from app.services.inquiry.catalog_snap import infer_v_class_from_surface
 from app.services.inquiry.normalize import apply_normalization
 from app.services.inquiry.norm_rules import norm_requires_length
 from app.services.inquiry.product_norm_hints import (
@@ -172,12 +173,12 @@ def _heuristic_parse(raw_text: str) -> InquiryLineAIOutput | None:
         re.IGNORECASE,
     )
     if m:
-        diameter = f"M{m.group(1).replace(',', '.')}"
+        diameter = m.group(1).replace(",", ".")
         length = m.group(2).replace(",", ".")
     else:
         m = re.search(r"\bM\s*(\d+(?:[,.]\d+)?)\b", t, re.IGNORECASE)
         if m:
-            diameter = f"M{m.group(1).replace(',', '.')}"
+            diameter = m.group(1).replace(",", ".")
 
     if length is None:
         m = re.search(r"\b(\d+(?:[,.]\d+)?)\s*mm\b", t, re.IGNORECASE)
@@ -221,6 +222,9 @@ def _heuristic_parse(raw_text: str) -> InquiryLineAIOutput | None:
         surface = "Mosadz"
     elif "ocel" in low or "oceľ" in low:
         surface = "Oceľ"
+
+    if not v_class and surface:
+        v_class = infer_v_class_from_surface(surface)
 
     if not norm_requires_length(norma, t):
         length = None

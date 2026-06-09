@@ -19,16 +19,13 @@ export type InquiryDraft = {
 
 export const INQUIRY_DRAFT_STORAGE_KEY = "smarthub_inquiry_draft_v1";
 
-export {
-  inquiryRequiredFields,
-  normRequiresLength,
-  type InquiryFilterField,
-} from "@/lib/inquiry-norm-rules";
-
 import {
   inquiryRequiredFields,
   type InquiryFilterField,
 } from "@/lib/inquiry-norm-rules";
+
+export { inquiryRequiredFields, normRequiresLength, normRequiresVClass } from "@/lib/inquiry-norm-rules";
+export type { InquiryFilterField } from "@/lib/inquiry-norm-rules";
 
 export function inquiryMissingFields(row: InquiryLineParsed): InquiryFilterField[] {
   const required = inquiryRequiredFields(row.norma, row.raw_text);
