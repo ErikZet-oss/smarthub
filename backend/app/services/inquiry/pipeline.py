@@ -236,12 +236,12 @@ async def _run_line_async(
     line_total = round((best.price_eur or 0) * qty, 4)
     return result.model_copy(
         update={
-            "status": "ok",
+            "status": "no_stock" if no_stock else "ok",
             "no_stock": no_stock,
             "best_offer": best,
             "offers": offers,
             "line_total_eur": line_total,
-            "error": "Bez skladu u všetkých dodávateľov." if no_stock else None,
+            "error": "Nie je skladom." if no_stock else None,
         },
     )
 
@@ -294,8 +294,10 @@ def run_inquiry_batch(
             progress_cb=progress_cb,
         )
     )
-    rows_with_offer = sum(1 for r in line_results if r.status == "ok" and r.best_offer)
-    rows_no_stock = sum(1 for r in line_results if r.status == "ok" and r.no_stock)
+    rows_with_offer = sum(
+        1 for r in line_results if r.best_offer and r.status in ("ok", "no_stock")
+    )
+    rows_no_stock = sum(1 for r in line_results if r.status == "no_stock")
     totals = [r.line_total_eur for r in line_results if r.line_total_eur is not None]
     total_eur = round(sum(totals), 4) if totals else None
     return InquiryRunTaskResult(

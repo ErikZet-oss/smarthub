@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2, Store, Truck } from "lucide-react";
+import { Loader2, Truck } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -9,7 +9,6 @@ import { Card } from "@/components/ui/card";
 import { readApiJsonOrText } from "@/lib/api-errors";
 import {
   loadInquirySupplierPrefs,
-  publicInquiryAssetUrl,
   saveInquirySupplierPrefs,
   type InquirySupplierOption,
 } from "@/lib/inquiry-suppliers";
@@ -22,13 +21,6 @@ type Props = {
   selectedIds: number[];
   onChange: (ids: number[]) => void;
 };
-
-function supplierInitials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
-  return `${parts[0]![0] ?? ""}${parts[1]![0] ?? ""}`.toUpperCase();
-}
 
 export function InquirySupplierPicker({
   apiBase,
@@ -54,7 +46,6 @@ export function InquirySupplierPicker({
         const data = parsed.data as Array<{
           id: number;
           name: string;
-          logo_url?: string | null;
           is_connected?: boolean;
         }>;
         if (cancelled) return;
@@ -63,7 +54,7 @@ export function InquirySupplierPicker({
           .map((s) => ({
             id: s.id,
             name: s.name.trim(),
-            logoUrl: s.logo_url ?? null,
+            logoUrl: null,
             isConnected: Boolean(s.is_connected),
           }));
         setSuppliers(list);
@@ -113,30 +104,25 @@ export function InquirySupplierPicker({
 
   return (
     <Card className="overflow-hidden border-slate-200/80 shadow-sm">
-      <div className="border-b border-sky-100/80 bg-gradient-to-r from-sky-50 via-white to-slate-50 px-4 py-3 sm:px-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="flex min-w-0 items-start gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-100 text-sky-700 ring-1 ring-sky-200/60">
-              <Truck className="h-5 w-5" aria-hidden />
-            </div>
+      <div className="border-b border-sky-100/80 bg-gradient-to-r from-sky-50 via-white to-slate-50 px-4 py-2.5 sm:px-5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <Truck className="h-4 w-4 shrink-0 text-sky-600" aria-hidden />
             <div className="min-w-0">
               <h2 className="text-sm font-semibold text-slate-900">
                 Dodávatelia pre vyhľadávanie
               </h2>
-              <p className="mt-0.5 text-xs text-slate-600">
-                Vyber e-shopy, u ktorých sa majú pri dopyte hľadať ceny a sklad.
-              </p>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Badge className="bg-white text-slate-700">
-              {selectedCount} / {suppliers.length || "—"} vybraných
+              {selectedCount} / {suppliers.length || "—"}
             </Badge>
             <Button
               type="button"
               size="sm"
               variant="outline"
-              className="h-8 bg-white text-xs"
+              className="h-7 bg-white px-2 text-xs"
               onClick={selectAll}
               disabled={loading || suppliers.length === 0}
             >
@@ -146,7 +132,7 @@ export function InquirySupplierPicker({
               type="button"
               size="sm"
               variant="outline"
-              className="h-8 bg-white text-xs"
+              className="h-7 bg-white px-2 text-xs"
               onClick={selectNone}
               disabled={loading || suppliers.length === 0}
             >
@@ -156,7 +142,7 @@ export function InquirySupplierPicker({
         </div>
       </div>
 
-      <div className="p-4 sm:p-5">
+      <div className="px-4 py-3 sm:px-5">
         {loading ? (
           <div className="flex items-center gap-2 text-sm text-slate-500">
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -169,49 +155,26 @@ export function InquirySupplierPicker({
             Zatiaľ nemáte nastavených dodávateľov. Pridajte ich v sekcii Dodávatelia.
           </p>
         ) : (
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="flex flex-wrap gap-1.5">
             {suppliers.map((supplier) => {
               const checked = selectedSet.has(supplier.id);
-              const logoSrc = publicInquiryAssetUrl(apiBase, supplier.logoUrl);
               return (
                 <label
                   key={supplier.id}
                   className={cn(
-                    "group flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2.5 transition-all",
+                    "inline-flex cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-1.5 text-sm transition-colors",
                     checked
-                      ? "border-sky-300 bg-sky-50/70 shadow-sm ring-1 ring-sky-200/70"
-                      : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/80",
+                      ? "border-sky-300 bg-sky-50 text-sky-900"
+                      : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50",
                   )}
                 >
                   <input
                     type="checkbox"
                     checked={checked}
                     onChange={() => toggleSupplier(supplier.id)}
-                    className="h-4 w-4 shrink-0 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                    className="h-3.5 w-3.5 shrink-0 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
                   />
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200/90 bg-white shadow-sm">
-                    {logoSrc ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={logoSrc}
-                        alt=""
-                        className="h-full w-full object-contain p-1"
-                      />
-                    ) : (
-                      <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                        {supplierInitials(supplier.name)}
-                      </span>
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-slate-900">
-                      {supplier.name}
-                    </p>
-                    <p className="flex items-center gap-1 text-[11px] text-slate-500">
-                      <Store className="h-3 w-3 shrink-0" aria-hidden />
-                      {supplier.isConnected ? "Prihlásený" : "Bez prihlásenia"}
-                    </p>
-                  </div>
+                  <span className="whitespace-nowrap font-medium">{supplier.name}</span>
                 </label>
               );
             })}
@@ -219,7 +182,7 @@ export function InquirySupplierPicker({
         )}
 
         {selectedCount === 0 && !loading && suppliers.length > 0 ? (
-          <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-900">
             Vyber aspoň jedného dodávateľa, inak nebude možné spustiť dopyt.
           </p>
         ) : null}

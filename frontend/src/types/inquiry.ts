@@ -101,7 +101,7 @@ export type InquiryLineRunResult = {
   v_class: string | null;
   product_id: number | null;
   internal_code: string | null;
-  status: "ok" | "no_product" | "no_mapping" | "no_price" | "error";
+  status: "ok" | "no_stock" | "no_product" | "no_mapping" | "no_price" | "error";
   no_stock: boolean;
   best_offer: InquiryScrapedOffer | null;
   offers: InquiryScrapedOffer[];

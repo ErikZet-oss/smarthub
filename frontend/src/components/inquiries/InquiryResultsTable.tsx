@@ -20,7 +20,7 @@ function formatEur(value: number | null | undefined): string {
 }
 
 function statusBadge(row: InquiryLineRunResult) {
-  if (row.status === "ok" && !row.no_stock) {
+  if (row.status === "ok") {
     return (
       <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">
         <CheckCircle2 className="mr-1 h-3 w-3" />
@@ -28,17 +28,28 @@ function statusBadge(row: InquiryLineRunResult) {
       </Badge>
     );
   }
-  if (row.status === "ok" && row.no_stock) {
+  if (row.status === "no_stock" || (row.no_stock && row.best_offer)) {
     return (
       <Badge className="bg-amber-100 text-amber-900 hover:bg-amber-100">
         <AlertTriangle className="mr-1 h-3 w-3" />
-        Bez skladu
+        Nie je skladom
       </Badge>
     );
   }
+
+  const labels: Record<InquiryLineRunResult["status"], string> = {
+    ok: "OK",
+    no_stock: "Nie je skladom",
+    no_product: "Produkt nenájdený",
+    no_mapping: "Bez mapovania",
+    no_price: "Cena nedostupná",
+    error: "Chyba",
+  };
+  const text = row.error?.trim() || labels[row.status] || "Chyba";
+
   return (
-    <Badge className="border-red-200 bg-red-50 text-red-700">
-      Chyba
+    <Badge className="border-red-200 bg-red-50 text-red-700" title={row.error ?? undefined}>
+      {text}
     </Badge>
   );
 }
@@ -73,12 +84,15 @@ function OfferRow({
       <span className="font-medium text-slate-800">{offer.supplier_name}</span>
       {offer.error ? (
         <span className="text-xs text-red-600">{offer.error}</span>
+      ) : (offer.stock ?? 0) <= 0 ? (
+        <>
+          <span className="text-slate-600">{formatEur(offer.price_eur)}</span>
+          <span className="text-xs text-amber-700">Nie je skladom</span>
+        </>
       ) : (
         <>
           <span className="text-slate-600">{formatEur(offer.price_eur)}</span>
-          <span className="text-xs text-slate-500">
-            sklad: {offer.stock != null ? offer.stock : "—"}
-          </span>
+          <span className="text-xs text-slate-500">sklad: {offer.stock}</span>
         </>
       )}
       {offer.supplier_product_url ? (
@@ -149,7 +163,10 @@ function ResultRow({ apiBase, row }: { apiBase: string; row: InquiryLineRunResul
             {formatEur(row.line_total_eur)}
           </p>
         ) : (
-          <p className="text-xs text-red-600">{row.error ?? "Bez ponuky"}</p>
+          <p className="text-xs text-red-600">
+            {row.error ??
+              (row.status === "no_stock" ? "Nie je skladom." : "Bez ponuky")}
+          </p>
         )}
       </div>
 
@@ -179,7 +196,7 @@ export function InquiryResultsTable({ apiBase, result }: Props) {
             <p className="mt-0.5 text-xs text-slate-600">
               {result.rows_with_offer} / {result.total_rows} riadkov s cenou
               {result.rows_no_stock > 0
-                ? ` · ${result.rows_no_stock} bez skladu`
+                ? ` · ${result.rows_no_stock} nie je skladom`
                 : ""}
             </p>
           </div>

@@ -148,7 +148,7 @@ class InquiryLineRunResult(BaseModel):
     v_class: Optional[str] = None
     product_id: Optional[int] = None
     internal_code: Optional[str] = None
-    status: Literal["ok", "no_product", "no_mapping", "no_price", "error"] = "error"
+    status: Literal["ok", "no_stock", "no_product", "no_mapping", "no_price", "error"] = "error"
     no_stock: bool = False
     best_offer: Optional[InquiryScrapedOffer] = None
     offers: list[InquiryScrapedOffer] = Field(default_factory=list)
