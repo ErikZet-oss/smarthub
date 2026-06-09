@@ -1,18 +1,29 @@
 "use client";
 
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, ExternalLink } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import {
+  applyMarginPercent,
+  effectiveRowMarginPercent,
+  inquiryLineTotalEur,
+  isSelectableInquiryOffer,
+  parseMarginPercentInput,
+  resolveActiveOffer,
+} from "@/lib/inquiry-margin";
 import { publicInquiryAssetUrl } from "@/lib/inquiry-suppliers";
 import { cn } from "@/lib/utils";
-import type { InquiryLineRunResult, InquiryRunTaskResult } from "@/types/inquiry";
+import type { InquiryLineRunResult, InquiryRunTaskResult, InquiryScrapedOffer } from "@/types/inquiry";
 
 type Props = {
   apiBase: string;
   result: InquiryRunTaskResult;
 };
+
+const GRID_COLS =
+  "lg:grid-cols-[2.5rem_minmax(0,1.4fr)_minmax(0,0.65fr)_minmax(0,0.75fr)_minmax(0,0.55fr)_3.5rem_minmax(0,0.55fr)_auto]";
 
 function formatEur(value: number | null | undefined): string {
   if (value == null || Number.isNaN(value)) return "—";
@@ -38,6 +49,14 @@ function formatScrapePrice(
 ): string {
   if (price == null || Number.isNaN(price)) return "—";
   return `${formatEur(price).replace(" €", "")}${priceUnitSuffix(supplierName, priceUnit)}`;
+}
+
+function marginInputClassName(focused?: boolean): string {
+  return cn(
+    "h-7 w-full min-w-[2.75rem] max-w-[3.25rem] rounded border border-slate-200 bg-white px-1.5 text-right text-xs tabular-nums text-slate-800",
+    "placeholder:text-slate-400 focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-200",
+    focused && "border-sky-300",
+  );
 }
 
 function statusLabel(row: InquiryLineRunResult): string {
@@ -101,19 +120,42 @@ function statusBadge(row: InquiryLineRunResult) {
 function OfferRow({
   apiBase,
   offer,
-  highlight,
+  selected,
+  onSelect,
 }: {
   apiBase: string;
-  offer: InquiryLineRunResult["offers"][number];
-  highlight?: boolean;
+  offer: InquiryScrapedOffer;
+  selected?: boolean;
+  onSelect?: () => void;
 }) {
   const logoSrc = publicInquiryAssetUrl(apiBase, offer.logo_url);
+  const selectable = isSelectableInquiryOffer(offer);
+  const code = (offer.supplier_code || "").trim();
+
   return (
     <div
+      role={selectable ? "button" : undefined}
+      tabIndex={selectable ? 0 : undefined}
+      onClick={selectable ? onSelect : undefined}
+      onKeyDown={
+        selectable
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onSelect?.();
+              }
+            }
+          : undefined
+      }
       className={cn(
-        "flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm",
-        highlight ? "border-sky-200 bg-sky-50/80" : "border-slate-100 bg-slate-50/50",
+        "flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors",
+        selected
+          ? "border-sky-300 bg-sky-50/90 ring-1 ring-sky-200"
+          : "border-slate-100 bg-slate-50/50",
+        selectable && !selected && "cursor-pointer hover:border-sky-200 hover:bg-sky-50/50",
+        !selectable && "opacity-80",
       )}
+      title={selectable ? "Klikni pre výber tejto ponuky vo výsledku" : undefined}
     >
       <div className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded border bg-white">
         {logoSrc ? (
@@ -126,6 +168,11 @@ function OfferRow({
         )}
       </div>
       <span className="font-medium text-slate-800">{offer.supplier_name}</span>
+      {code ? (
+        <span className="font-mono text-xs text-slate-500" title="Kód dodávateľa">
+          {code}
+        </span>
+      ) : null}
       {offer.error ? (
         <span className="text-xs text-red-600">{offer.error}</span>
       ) : (offer.stock ?? 0) <= 0 ? (
@@ -143,11 +190,15 @@ function OfferRow({
           <span className="text-xs text-slate-500">sklad: {offer.stock}</span>
         </>
       )}
+      {selected ? (
+        <span className="text-xs font-medium text-sky-700">Vybrané</span>
+      ) : null}
       {offer.supplier_product_url ? (
         <a
           href={offer.supplier_product_url}
           target="_blank"
           rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
           className="ml-auto inline-flex items-center gap-1 text-xs text-sky-700 hover:underline"
         >
           Otvoriť
@@ -158,13 +209,53 @@ function OfferRow({
   );
 }
 
-function ResultRow({ apiBase, row }: { apiBase: string; row: InquiryLineRunResult }) {
+function ResultRow({
+  apiBase,
+  row,
+  globalMargin,
+  rowMargin,
+  onRowMarginChange,
+  selectedSupplierId,
+  onSelectSupplier,
+}: {
+  apiBase: string;
+  row: InquiryLineRunResult;
+  globalMargin: string;
+  rowMargin: string;
+  onRowMarginChange: (value: string) => void;
+  selectedSupplierId: number | null;
+  onSelectSupplier: (supplierId: number) => void;
+}) {
   const [open, setOpen] = useState(false);
-  const best = row.best_offer;
+  const active = resolveActiveOffer(row, selectedSupplierId);
+  const marginPct = effectiveRowMarginPercent(row.row_index, globalMargin, {
+    [row.row_index]: rowMargin,
+  });
+  const showWithMargin = marginPct !== null;
+
+  const purchaseLineTotal =
+    active?.price_eur != null && active.price_eur > 0
+      ? inquiryLineTotalEur(active.price_eur, row.quantity, active)
+      : row.line_total_eur;
+
+  const unitPrice =
+    active?.price_eur != null && showWithMargin
+      ? applyMarginPercent(active.price_eur, marginPct)
+      : active?.price_eur ?? null;
+
+  const lineTotal =
+    purchaseLineTotal != null && showWithMargin
+      ? applyMarginPercent(purchaseLineTotal, marginPct)
+      : purchaseLineTotal;
 
   return (
     <div className="border-b border-slate-100 last:border-b-0">
-      <div className="grid grid-cols-1 gap-2 px-3 py-3 sm:grid-cols-[2.5rem_1fr_auto] sm:items-center lg:grid-cols-[2.5rem_minmax(0,1.4fr)_minmax(0,0.7fr)_minmax(0,0.8fr)_minmax(0,0.5fr)_auto]">
+      <div
+        className={cn(
+          "grid grid-cols-1 gap-2 px-3 py-3 sm:grid-cols-[2.5rem_1fr_auto] sm:items-center",
+          GRID_COLS,
+        )}
+      >
         <button
           type="button"
           className="hidden text-slate-400 hover:text-slate-600 sm:inline-flex"
@@ -184,15 +275,59 @@ function ResultRow({ apiBase, row }: { apiBase: string; row: InquiryLineRunResul
           </p>
         </div>
         <div className="hidden text-sm text-slate-700 lg:block">
-          {best ? best.supplier_name : row.error ? "—" : "—"}
+          {active ? active.supplier_name : "—"}
         </div>
-        <div className="hidden text-sm font-medium text-slate-900 lg:block">
-          {best
-            ? formatScrapePrice(best.price_eur, best.supplier_name, best.price_unit)
-            : "—"}
+        <div className="hidden lg:block">
+          {active ? (
+            <div>
+              <p
+                className={cn(
+                  "text-sm font-medium tabular-nums",
+                  showWithMargin ? "text-sky-900" : "text-slate-900",
+                )}
+              >
+                {formatScrapePrice(unitPrice, active.supplier_name, active.price_unit)}
+              </p>
+              {showWithMargin ? (
+                <p className="text-[10px] text-slate-400 line-through">
+                  {formatScrapePrice(active.price_eur, active.supplier_name, active.price_unit)}
+                </p>
+              ) : null}
+            </div>
+          ) : (
+            <span className="text-sm text-slate-400">—</span>
+          )}
         </div>
-        <div className="hidden text-sm text-slate-600 lg:block">
-          {row.line_total_eur != null ? formatEur(row.line_total_eur) : "—"}
+        <div className="hidden lg:flex lg:justify-end">
+          <input
+            type="text"
+            inputMode="decimal"
+            placeholder="%"
+            value={rowMargin}
+            onChange={(e) => onRowMarginChange(e.target.value)}
+            className={marginInputClassName(parseMarginPercentInput(rowMargin) !== null)}
+            title="Marža pre tento riadok (prepíše celkovú maržu)"
+            aria-label={`Marža % riadok ${row.row_index}`}
+          />
+        </div>
+        <div className="hidden lg:block">
+          {lineTotal != null ? (
+            <div>
+              <p
+                className={cn(
+                  "text-sm tabular-nums",
+                  showWithMargin ? "font-medium text-sky-900" : "text-slate-600",
+                )}
+              >
+                {formatEur(lineTotal)}
+              </p>
+              {showWithMargin && purchaseLineTotal != null ? (
+                <p className="text-[10px] text-slate-400 line-through">{formatEur(purchaseLineTotal)}</p>
+              ) : null}
+            </div>
+          ) : (
+            <span className="text-sm text-slate-400">—</span>
+          )}
         </div>
         <div className="flex min-w-0 items-center gap-2">
           {statusBadge(row)}
@@ -206,16 +341,28 @@ function ResultRow({ apiBase, row }: { apiBase: string; row: InquiryLineRunResul
         </div>
       </div>
 
-      {!best && row.error ? (
+      {!active && row.error ? (
         <p className="px-3 pb-2 text-xs text-slate-600 sm:pl-12">{row.error}</p>
       ) : null}
 
-      <div className="px-3 pb-3 sm:pl-12 lg:hidden">
-        {best ? (
+      <div className="flex flex-wrap items-center gap-2 px-3 pb-2 sm:pl-12 lg:hidden">
+        <label className="flex items-center gap-1.5 text-xs text-slate-500">
+          Marža %
+          <input
+            type="text"
+            inputMode="decimal"
+            placeholder="%"
+            value={rowMargin}
+            onChange={(e) => onRowMarginChange(e.target.value)}
+            className={marginInputClassName(parseMarginPercentInput(rowMargin) !== null)}
+          />
+        </label>
+        {active ? (
           <p className="text-xs text-slate-600">
-            {best.supplier_name} ·{" "}
-            {formatScrapePrice(best.price_eur, best.supplier_name, best.price_unit)} · spolu{" "}
-            {formatEur(row.line_total_eur)}
+            {active.supplier_name} ·{" "}
+            {formatScrapePrice(unitPrice, active.supplier_name, active.price_unit)}
+            {showWithMargin ? " · " : " · spolu "}
+            {formatEur(lineTotal)}
           </p>
         ) : (
           <p className="text-xs text-red-600">{statusLabel(row)}</p>
@@ -224,12 +371,18 @@ function ResultRow({ apiBase, row }: { apiBase: string; row: InquiryLineRunResul
 
       {open && row.offers.length > 0 ? (
         <div className="space-y-1.5 px-3 pb-3 sm:pl-12">
+          <p className="text-[10px] text-slate-500">Klikni na dodávateľa pre výber do výsledku riadku.</p>
           {row.offers.map((offer) => (
             <OfferRow
               key={`${offer.supplier_id}-${offer.supplier_code}`}
               apiBase={apiBase}
               offer={offer}
-              highlight={best?.supplier_id === offer.supplier_id}
+              selected={active?.supplier_id === offer.supplier_id}
+              onSelect={
+                isSelectableInquiryOffer(offer)
+                  ? () => onSelectSupplier(offer.supplier_id)
+                  : undefined
+              }
             />
           ))}
         </div>
@@ -239,41 +392,128 @@ function ResultRow({ apiBase, row }: { apiBase: string; row: InquiryLineRunResul
 }
 
 export function InquiryResultsTable({ apiBase, result }: Props) {
+  const [globalMargin, setGlobalMargin] = useState("");
+  const [rowMargins, setRowMargins] = useState<Record<number, string>>({});
+  const [selectedSupplierByRow, setSelectedSupplierByRow] = useState<Record<number, number>>({});
+
+  const globalMarginPct = parseMarginPercentInput(globalMargin);
+
+  const { purchaseTotal, displayTotal, hasAnyMargin } = useMemo(() => {
+    let purchase = 0;
+    let display = 0;
+    let pricedRows = 0;
+    let anyMargin = globalMarginPct !== null;
+
+    for (const row of result.rows) {
+      const rowMarginVal = parseMarginPercentInput(rowMargins[row.row_index] ?? "");
+      if (rowMarginVal !== null) anyMargin = true;
+
+      const active = resolveActiveOffer(row, selectedSupplierByRow[row.row_index] ?? null);
+      const linePurchase =
+        active?.price_eur != null && active.price_eur > 0
+          ? inquiryLineTotalEur(active.price_eur, row.quantity, active)
+          : row.line_total_eur;
+
+      if (linePurchase == null || !Number.isFinite(linePurchase)) continue;
+      pricedRows += 1;
+      purchase += linePurchase;
+
+      const m = effectiveRowMarginPercent(row.row_index, globalMargin, rowMargins);
+      display += m !== null ? applyMarginPercent(linePurchase, m) : linePurchase;
+    }
+
+    return {
+      purchaseTotal: pricedRows > 0 ? purchase : null,
+      displayTotal: pricedRows > 0 ? display : null,
+      hasAnyMargin: anyMargin,
+    };
+  }, [result.rows, globalMargin, rowMargins, globalMarginPct, selectedSupplierByRow]);
+
+  const hasManualSelection = Object.keys(selectedSupplierByRow).length > 0;
+  const headerTotal =
+    hasAnyMargin || hasManualSelection
+      ? displayTotal
+      : result.total_eur ?? purchaseTotal;
+
   return (
     <Card className="overflow-hidden border-slate-200/80 shadow-sm">
       <div className="border-b border-emerald-100/80 bg-gradient-to-r from-emerald-50 via-white to-slate-50 px-4 py-3 sm:px-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h2 className="text-sm font-semibold text-slate-900">Výsledok dopytu</h2>
             <p className="mt-0.5 text-xs text-slate-600">
               {result.rows_with_offer} / {result.total_rows} riadkov s cenou
-              {result.rows_no_stock > 0
-                ? ` · ${result.rows_no_stock} nie je skladom`
-                : ""}
+              {result.rows_no_stock > 0 ? ` · ${result.rows_no_stock} nie je skladom` : ""}
               {result.rows_failed > 0 ? ` · ${result.rows_failed} neúspešných` : ""}
             </p>
           </div>
-          <div className="text-right">
-            <p className="text-xs text-slate-500">Spolu</p>
-            <p className="text-lg font-semibold text-emerald-800">
-              {formatEur(result.total_eur)}
-            </p>
+          <div className="flex flex-wrap items-end gap-4">
+            <label className="flex flex-col items-end gap-1">
+              <span className="text-xs text-slate-500">Marža %</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder="%"
+                value={globalMargin}
+                onChange={(e) => setGlobalMargin(e.target.value)}
+                className={cn(marginInputClassName(globalMarginPct !== null), "h-8 max-w-[4rem]")}
+                title="Marža pre všetky riadky (riadok môže prepísať)"
+                aria-label="Celková marža percent"
+              />
+            </label>
+            <div className="text-right">
+              <p className="text-xs text-slate-500">
+                {hasAnyMargin ? "Spolu s maržou" : "Spolu"}
+              </p>
+              <p
+                className={cn(
+                  "text-lg font-semibold tabular-nums",
+                  hasAnyMargin ? "text-sky-900" : "text-emerald-800",
+                )}
+              >
+                {formatEur(headerTotal)}
+              </p>
+              {hasAnyMargin && purchaseTotal != null ? (
+                <p className="text-[10px] text-slate-400">
+                  nákup {formatEur(purchaseTotal)}
+                </p>
+              ) : null}
+            </div>
           </div>
         </div>
       </div>
 
-      <div className="hidden border-b border-slate-100 bg-slate-50/80 px-3 py-2 text-xs font-medium uppercase tracking-wide text-slate-500 lg:grid lg:grid-cols-[2.5rem_minmax(0,1.4fr)_minmax(0,0.7fr)_minmax(0,0.8fr)_minmax(0,0.5fr)_auto]">
+      <div
+        className={cn(
+          "hidden border-b border-slate-100 bg-slate-50/80 px-3 py-2 text-xs font-medium uppercase tracking-wide text-slate-500 lg:grid",
+          GRID_COLS,
+        )}
+      >
         <span />
         <span>Položka</span>
         <span>Dodávateľ</span>
         <span>Cena / 100</span>
+        <span className="text-right">Marža</span>
         <span>Spolu</span>
         <span>Stav</span>
       </div>
 
       <div>
         {result.rows.map((row) => (
-          <ResultRow key={row.row_index} apiBase={apiBase} row={row} />
+          <ResultRow
+            key={row.row_index}
+            apiBase={apiBase}
+            row={row}
+            globalMargin={globalMargin}
+            rowMargin={rowMargins[row.row_index] ?? ""}
+            onRowMarginChange={(value) =>
+              setRowMargins((prev) => ({ ...prev, [row.row_index]: value }))
+            }
+            selectedSupplierId={selectedSupplierByRow[row.row_index] ?? null}
+            onSelectSupplier={(supplierId) =>
+              setSelectedSupplierByRow((prev) => ({ ...prev, [row.row_index]: supplierId }))
+            }
+          />
         ))}
       </div>
     </Card>
