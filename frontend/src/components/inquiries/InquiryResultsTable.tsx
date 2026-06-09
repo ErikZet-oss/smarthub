@@ -62,7 +62,7 @@ function marginInputClassName(focused?: boolean, mobile?: boolean): string {
     "rounded border border-slate-200 bg-white text-right tabular-nums text-slate-800",
     "placeholder:text-slate-400 focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-200",
     mobile
-      ? "h-9 w-14 px-2 text-sm"
+      ? "h-7 w-11 px-1.5 text-xs md:h-9 md:w-14 md:px-2 md:text-sm"
       : "h-7 w-full min-w-[2.75rem] max-w-[3.25rem] px-1.5 text-xs",
     focused && "border-sky-300",
   );
@@ -157,7 +157,7 @@ function OfferRow({
           : undefined
       }
       className={cn(
-        "flex flex-col gap-2 rounded-lg border px-3 py-3 text-sm transition-colors sm:flex-row sm:flex-wrap sm:items-center sm:gap-2 sm:py-2",
+        "flex flex-col gap-1.5 rounded-md border px-2 py-1.5 text-xs transition-colors sm:flex-row sm:flex-wrap sm:items-center sm:gap-2 sm:rounded-lg sm:px-3 sm:py-2 sm:text-sm",
         selected
           ? "border-sky-300 bg-sky-50/90 ring-1 ring-sky-200"
           : "border-slate-100 bg-slate-50/50",
@@ -270,17 +270,17 @@ function ResultRow({
       <div className="lg:hidden">
         <button
           type="button"
-          className="flex w-full items-start gap-2 px-3 py-3 text-left active:bg-slate-50"
+          className="flex w-full items-start gap-1.5 px-2 py-2 text-left active:bg-slate-50 md:gap-2 md:px-3 md:py-3"
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
         >
           <span className="mt-0.5 shrink-0 text-slate-400">
-            {open ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
+            {open ? <ChevronDown className="h-4 w-4 md:h-5 md:w-5" /> : <ChevronRight className="h-4 w-4 md:h-5 md:w-5" />}
           </span>
-          <div className="min-w-0 flex-1 space-y-2">
+          <div className="min-w-0 flex-1 space-y-1 md:space-y-2">
             <div>
-              <p className="text-sm font-medium leading-snug text-slate-900">{row.raw_text}</p>
-              <p className="mt-0.5 text-xs text-slate-500">
+              <p className="text-[11px] font-medium leading-snug text-slate-900 md:text-sm">{row.raw_text}</p>
+              <p className="mt-0.5 text-[10px] text-slate-500 md:text-xs">
                 #{row.row_index}
                 {row.internal_code ? ` · ${row.internal_code}` : ""}
                 {row.quantity != null ? ` · ${row.quantity} ks` : ""}
@@ -292,7 +292,7 @@ function ResultRow({
                   <p className="text-xs text-slate-500">{active.supplier_name}</p>
                   <p
                     className={cn(
-                      "text-sm font-semibold tabular-nums",
+                      "text-xs font-semibold tabular-nums md:text-sm",
                       showWithMargin ? "text-sky-900" : "text-slate-900",
                     )}
                   >
@@ -308,7 +308,7 @@ function ResultRow({
                   <p className="text-[10px] uppercase tracking-wide text-slate-400">Spolu</p>
                   <p
                     className={cn(
-                      "text-base font-semibold tabular-nums",
+                      "text-sm font-semibold tabular-nums md:text-base",
                       showWithMargin ? "text-sky-900" : "text-slate-800",
                     )}
                   >
@@ -323,8 +323,8 @@ function ResultRow({
           </div>
         </button>
 
-        <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 px-3 py-2">
-          <label className="flex items-center gap-2 text-xs text-slate-600">
+        <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 px-2 py-1.5 md:gap-3 md:px-3 md:py-2">
+          <label className="flex items-center gap-1 text-[10px] text-slate-600 md:gap-2 md:text-xs">
             Marža %
             <input
               type="text"
@@ -337,19 +337,19 @@ function ResultRow({
             />
           </label>
           {row.offers.length > 0 ? (
-            <span className="text-[11px] text-slate-500">
+            <span className="text-[10px] text-slate-500 md:text-[11px]">
               {open ? "Skryť" : "Zobraziť"} {row.offers.length} ponúk
             </span>
           ) : null}
         </div>
 
         {!active && row.error ? (
-          <p className="px-3 pb-2 text-xs leading-relaxed text-slate-600">{row.error}</p>
+          <p className="px-2 pb-1.5 text-[10px] leading-snug text-slate-600 md:px-3 md:pb-2 md:text-xs">{row.error}</p>
         ) : null}
 
         {open && row.offers.length > 0 ? (
-          <div className="space-y-2 bg-slate-50/80 px-3 pb-3 pt-1">
-            <p className="text-[11px] text-slate-500">Klikni na dodávateľa pre výber do výsledku.</p>
+          <div className="space-y-1.5 bg-slate-50/80 px-2 pb-2 pt-0.5 md:space-y-2 md:px-3 md:pb-3">
+            <p className="text-[10px] text-slate-500">Klikni na dodávateľa pre výber.</p>
             {row.offers.map((offer) => (
               <OfferRow
                 key={`${offer.supplier_id}-${offer.supplier_code}`}
@@ -538,30 +538,30 @@ export function InquiryResultsTable({ apiBase, result }: Props) {
 
   return (
     <Card className="overflow-hidden border-slate-200/80 shadow-sm">
-      <div className="border-b border-emerald-100/80 bg-gradient-to-r from-emerald-50 via-white to-slate-50 px-4 py-4 sm:px-5">
-        <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
+      <div className="border-b border-emerald-100/80 bg-gradient-to-r from-emerald-50 via-white to-slate-50 px-2.5 py-2 md:px-5 md:py-4">
+        <div className="flex flex-col gap-2 md:gap-4 lg:flex-row lg:flex-wrap lg:items-start lg:justify-between">
           <div className="min-w-0">
-            <h2 className="text-sm font-semibold text-slate-900">Výsledok dopytu</h2>
-            <p className="mt-0.5 text-xs leading-relaxed text-slate-600">
+            <h2 className="text-xs font-semibold text-slate-900 md:text-sm">Výsledok dopytu</h2>
+            <p className="mt-0.5 text-[10px] leading-snug text-slate-600 md:text-xs">
               {result.rows_with_offer} / {result.total_rows} riadkov s cenou
               {result.rows_no_stock > 0 ? ` · ${result.rows_no_stock} nie je skladom` : ""}
               {result.rows_failed > 0 ? ` · ${result.rows_failed} neúspešných` : ""}
             </p>
           </div>
-          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-end">
+          <div className="flex items-end justify-between gap-2 md:gap-3 lg:justify-end">
             <Button
               type="button"
               variant="outline"
               size="sm"
-              className="h-10 w-full gap-2 bg-white sm:h-9 sm:w-auto"
+              className="h-7 gap-1 bg-white px-2 text-[10px] md:h-9 md:gap-2 md:px-3 md:text-sm"
               onClick={handleExportCsv}
             >
-              <Download className="h-4 w-4" />
-              Export CSV
+              <Download className="h-3 w-3 md:h-4 md:w-4" />
+              CSV
             </Button>
-            <div className="flex items-end justify-between gap-4 rounded-xl border border-emerald-100/80 bg-white/80 p-3 sm:border-0 sm:bg-transparent sm:p-0">
-            <label className="flex flex-col gap-1">
-              <span className="text-xs text-slate-500">Marža %</span>
+            <div className="flex items-end gap-2 rounded-lg border border-emerald-100/80 bg-white/80 px-2 py-1.5 md:gap-4 md:border-0 md:bg-transparent md:p-0">
+            <label className="flex flex-col gap-0.5 md:gap-1">
+              <span className="text-[10px] text-slate-500 md:text-xs">Marža %</span>
               <input
                 type="text"
                 inputMode="decimal"
@@ -574,12 +574,12 @@ export function InquiryResultsTable({ apiBase, result }: Props) {
               />
             </label>
             <div className="text-right">
-              <p className="text-xs text-slate-500">
+              <p className="text-[10px] text-slate-500 md:text-xs">
                 {hasAnyMargin ? "Spolu s maržou" : "Spolu"}
               </p>
               <p
                 className={cn(
-                  "text-xl font-semibold tabular-nums sm:text-lg",
+                  "text-base font-semibold tabular-nums md:text-lg",
                   hasAnyMargin ? "text-sky-900" : "text-emerald-800",
                 )}
               >

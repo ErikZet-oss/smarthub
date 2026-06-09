@@ -104,26 +104,25 @@ export function InquirySupplierPicker({
 
   return (
     <Card className="overflow-hidden border-slate-200/80 shadow-sm">
-      <div className="border-b border-sky-100/80 bg-gradient-to-r from-sky-50 via-white to-slate-50 px-4 py-3 sm:px-5">
-        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-          <div className="flex min-w-0 items-center gap-2">
-            <Truck className="h-4 w-4 shrink-0 text-sky-600" aria-hidden />
+      <div className="border-b border-sky-100/80 bg-gradient-to-r from-sky-50 via-white to-slate-50 px-2.5 py-2 md:px-5 md:py-3">
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between md:gap-3">
+          <div className="flex min-w-0 items-center gap-1.5 md:gap-2">
+            <Truck className="h-3.5 w-3.5 shrink-0 text-sky-600 md:h-4 md:w-4" aria-hidden />
             <div className="min-w-0">
-              <h2 className="text-sm font-semibold text-slate-900">
-                Dodávatelia pre vyhľadávanie
+              <h2 className="text-xs font-semibold text-slate-900 md:text-sm">
+                Dodávatelia
               </h2>
-              <p className="text-xs text-slate-500 sm:hidden">Klikni pre výber / zrušenie</p>
             </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge className="bg-white text-slate-700">
-              {selectedCount} / {suppliers.length || "—"}
+            <Badge className="ml-auto bg-white px-1.5 py-0 text-[10px] text-slate-700 md:text-xs">
+              {selectedCount}/{suppliers.length || "—"}
             </Badge>
+          </div>
+          <div className="flex items-center gap-1.5">
             <Button
               type="button"
               size="sm"
               variant="outline"
-              className="h-9 flex-1 bg-white px-2 text-xs sm:h-7 sm:flex-none"
+              className="h-7 flex-1 bg-white px-2 text-[10px] md:h-7 md:flex-none md:text-xs"
               onClick={selectAll}
               disabled={loading || suppliers.length === 0}
             >
@@ -133,7 +132,7 @@ export function InquirySupplierPicker({
               type="button"
               size="sm"
               variant="outline"
-              className="h-9 flex-1 bg-white px-2 text-xs sm:h-7 sm:flex-none"
+              className="h-7 flex-1 bg-white px-2 text-[10px] md:h-7 md:flex-none md:text-xs"
               onClick={selectNone}
               disabled={loading || suppliers.length === 0}
             >
@@ -143,27 +142,27 @@ export function InquirySupplierPicker({
         </div>
       </div>
 
-      <div className="px-4 py-3 sm:px-5">
+      <div className="px-2.5 py-2 md:px-5 md:py-3">
         {loading ? (
-          <div className="flex items-center gap-2 text-sm text-slate-500">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Načítavam dodávateľov…
+          <div className="flex items-center gap-1.5 text-xs text-slate-500 md:text-sm">
+            <Loader2 className="h-3.5 w-3.5 animate-spin md:h-4 md:w-4" />
+            Načítavam…
           </div>
         ) : error ? (
-          <p className="text-sm text-red-600">{error}</p>
+          <p className="text-xs text-red-600 md:text-sm">{error}</p>
         ) : suppliers.length === 0 ? (
-          <p className="text-sm text-slate-500">
-            Zatiaľ nemáte nastavených dodávateľov. Pridajte ich v sekcii Dodávatelia.
+          <p className="text-xs text-slate-500 md:text-sm">
+            Zatiaľ nemáte nastavených dodávateľov.
           </p>
         ) : (
-          <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:gap-1.5">
+          <div className="grid grid-cols-3 gap-1 sm:grid-cols-2 sm:gap-2 md:flex md:flex-wrap md:gap-1.5">
             {suppliers.map((supplier) => {
               const checked = selectedSet.has(supplier.id);
               return (
                 <label
                   key={supplier.id}
                   className={cn(
-                    "inline-flex min-h-[44px] cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-2 text-sm transition-colors sm:min-h-0 sm:py-1.5",
+                    "inline-flex min-h-[32px] cursor-pointer items-center gap-1 rounded-md border px-1.5 py-1 text-[10px] transition-colors sm:min-h-[36px] sm:gap-1.5 sm:px-2 sm:text-xs md:min-h-0 md:rounded-lg md:py-1.5 md:text-sm",
                     checked
                       ? "border-sky-300 bg-sky-50 text-sky-900"
                       : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 active:bg-slate-100",
@@ -173,9 +172,9 @@ export function InquirySupplierPicker({
                     type="checkbox"
                     checked={checked}
                     onChange={() => toggleSupplier(supplier.id)}
-                    className="h-4 w-4 shrink-0 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                    className="h-3 w-3 shrink-0 rounded border-slate-300 text-sky-600 focus:ring-sky-500 md:h-3.5 md:w-3.5"
                   />
-                  <span className="min-w-0 truncate font-medium">{supplier.name}</span>
+                  <span className="min-w-0 truncate font-medium leading-tight">{supplier.name}</span>
                 </label>
               );
             })}
@@ -183,8 +182,8 @@ export function InquirySupplierPicker({
         )}
 
         {selectedCount === 0 && !loading && suppliers.length > 0 ? (
-          <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-900">
-            Vyber aspoň jedného dodávateľa, inak nebude možné spustiť dopyt.
+          <p className="mt-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] text-amber-900 md:mt-2 md:rounded-lg md:px-3 md:py-1.5 md:text-xs">
+            Vyber aspoň jedného dodávateľa.
           </p>
         ) : null}
       </div>

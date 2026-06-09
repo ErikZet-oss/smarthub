@@ -56,6 +56,9 @@ function clearDraft(userId: number | null) {
   localStorage.removeItem(draftStorageKey(userId));
 }
 
+/** Výška spodného mobilného menu v page.tsx — panel „Spustiť dopyt“ musí sedieť nad ním. */
+const MOBILE_TAB_BAR_OFFSET = "3.25rem";
+
 export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId }: Props) {
   const [status, setStatus] = useState<string | null>(null);
   const [parsing, setParsing] = useState(false);
@@ -283,13 +286,18 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
   }
 
   return (
-    <div className={cn("space-y-4", rows.length > 0 && "pb-32 md:pb-0")}>
-      <div className="flex items-center gap-2">
-        <ClipboardList className="h-5 w-5 shrink-0 text-sky-600" />
+    <div
+      className={cn(
+        "space-y-2 md:space-y-4",
+        rows.length > 0 && "pb-[calc(7rem+env(safe-area-inset-bottom))] md:pb-0",
+      )}
+    >
+      <div className="flex items-center gap-1.5 md:gap-2">
+        <ClipboardList className="h-4 w-4 shrink-0 text-sky-600 md:h-5 md:w-5" />
         <div className="min-w-0">
-          <h1 className="text-lg font-semibold text-slate-900">Import dopytov</h1>
-          <p className="text-xs text-slate-500 md:hidden">
-            Nahraj Excel, skontroluj riadky a spusti vyhľadávanie u dodávateľov.
+          <h1 className="text-base font-semibold text-slate-900 md:text-lg">Import dopytov</h1>
+          <p className="hidden text-xs text-slate-500 sm:block md:hidden">
+            Nahraj Excel, skontroluj riadky a spusti vyhľadávanie.
           </p>
         </div>
       </div>
@@ -303,20 +311,31 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
       />
 
       {draftPrompt ? (
-        <Card className="border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+        <Card className="border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-900 md:p-4 md:text-sm">
           <p>
-            Máte rozpracovaný dopyt ({draftPrompt.rows.length} riadkov,{" "}
-            {new Date(draftPrompt.savedAt).toLocaleString("sk-SK")}).
+            Rozpracovaný dopyt ({draftPrompt.rows.length} riadkov,{" "}
+            {new Date(draftPrompt.savedAt).toLocaleString("sk-SK", {
+              day: "2-digit",
+              month: "2-digit",
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
+            ).
           </p>
-          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-            <Button type="button" size="sm" className="w-full sm:w-auto" onClick={restoreDraft}>
+          <div className="mt-2 flex gap-2">
+            <Button
+              type="button"
+              size="sm"
+              className="h-7 flex-1 px-2 text-xs md:h-8 md:flex-none md:text-sm"
+              onClick={restoreDraft}
+            >
               Obnoviť
             </Button>
             <Button
               type="button"
               size="sm"
               variant="outline"
-              className="w-full bg-white sm:w-auto"
+              className="h-7 flex-1 bg-white px-2 text-xs md:h-8 md:flex-none md:text-sm"
               onClick={discardDraft}
             >
               Zahodiť
@@ -325,10 +344,13 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
         </Card>
       ) : null}
 
-      <Card className="space-y-3 p-4">
-        <p className="text-sm leading-relaxed text-slate-600">
+      <Card className="space-y-2 p-2.5 md:space-y-3 md:p-4">
+        <p className="hidden text-sm leading-relaxed text-slate-600 md:block">
           Nahraj XLSX alebo CSV s textom položiek (jeden popis na riadok). AI rozloží parametre;
           chýbajúce polia označíme červeno — doplň ich ručne.
+        </p>
+        <p className="text-[11px] leading-snug text-slate-500 md:hidden">
+          XLSX/CSV — jeden popis na riadok. Chýbajúce polia doplníš ručne.
         </p>
         <label className="flex w-full cursor-pointer md:inline-flex md:w-auto">
           <input
@@ -340,27 +362,29 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
           />
           <span
             className={cn(
-              "inline-flex h-11 w-full items-center justify-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium md:h-9 md:w-auto",
+              "inline-flex h-8 w-full items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-xs font-medium md:h-9 md:w-auto md:rounded-lg md:px-4 md:text-sm",
               parsing ? "cursor-not-allowed opacity-60" : "hover:bg-slate-50 active:bg-slate-100",
             )}
           >
             {parsing ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin md:mr-2 md:h-4 md:w-4" />
             ) : (
-              <Upload className="mr-2 h-4 w-4" />
+              <Upload className="mr-1.5 h-3.5 w-3.5 md:mr-2 md:h-4 md:w-4" />
             )}
             {parsing ? "Parsujem…" : "Nahrať a parsovať"}
           </span>
         </label>
         {progressPct != null && parsing ? (
-          <div className="h-2 w-full overflow-hidden rounded bg-slate-100">
+          <div className="h-1 w-full overflow-hidden rounded bg-slate-100 md:h-2">
             <div
               className="h-full bg-sky-500 transition-all"
               style={{ width: `${progressPct}%` }}
             />
           </div>
         ) : null}
-        {status ? <p className="text-xs leading-relaxed text-slate-500">{status}</p> : null}
+        {status ? (
+          <p className="text-[10px] leading-snug text-slate-500 md:text-xs">{status}</p>
+        ) : null}
       </Card>
 
       {rows.length > 0 ? (
@@ -431,45 +455,46 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
             ) : null}
           </div>
 
-          {/* Mobil: fixný panel dole */}
-          <div className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 px-3 py-3 shadow-[0_-4px_24px_rgba(15,23,42,0.08)] backdrop-blur-md md:hidden">
-            <div className="mx-auto max-w-lg space-y-2">
+          {/* Mobil: kompaktný panel nad spodným menu */}
+          <div
+            className="fixed inset-x-0 z-30 border-t border-slate-200 bg-white/95 px-2 py-1.5 shadow-[0_-2px_12px_rgba(15,23,42,0.06)] backdrop-blur-md md:hidden"
+            style={{ bottom: `calc(${MOBILE_TAB_BAR_OFFSET} + env(safe-area-inset-bottom, 0px))` }}
+          >
+            <div className="mx-auto max-w-lg space-y-1">
               {running && runProgressPct != null ? (
-                <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+                <div className="h-1 w-full overflow-hidden rounded-full bg-slate-100">
                   <div
                     className="h-full bg-emerald-500 transition-all"
                     style={{ width: `${runProgressPct}%` }}
                   />
                 </div>
               ) : null}
-              <p className="text-center text-[11px] text-slate-500">
-                {!canRun
-                  ? !inquirySuppliersReady(selectedSupplierIds)
-                    ? "Vyber aspoň jedného dodávateľa."
-                    : "Doplň riadky alebo zapni „Ignorovať chyby“."
-                  : allValid
-                    ? `${selectedSupplierIds.length} dodávateľov · ${rows.length} riadkov`
-                    : `Spustí sa aj ${invalidRowCount} riadkov s chybami`}
-              </p>
-              <div className="flex items-center gap-2">
-                <label className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs text-slate-700">
+              <div className="flex items-center gap-1.5">
+                <label className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded border border-slate-200 bg-slate-50 px-1.5 py-1 text-[10px] text-slate-600">
                   <input
                     type="checkbox"
                     checked={ignoreErrors}
                     onChange={(e) => setIgnoreErrors(e.target.checked)}
-                    className="h-3.5 w-3.5 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                    className="h-3 w-3 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
                   />
-                  Ignorovať chyby
+                  Ignor. chyby
                 </label>
                 <Button
                   type="button"
-                  className="h-11 flex-1 text-sm"
+                  className="h-8 flex-1 px-2 text-xs"
                   disabled={!canRun || running || parsing}
                   onClick={() => void onRunInquiry()}
+                  title={
+                    !canRun
+                      ? !inquirySuppliersReady(selectedSupplierIds)
+                        ? "Vyber dodávateľa"
+                        : "Doplň riadky"
+                      : `${selectedSupplierIds.length} dodáv. · ${rows.length} riadkov`
+                  }
                 >
                   {running ? (
                     <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
                       Hľadám…
                     </>
                   ) : (

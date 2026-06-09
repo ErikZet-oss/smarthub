@@ -147,7 +147,7 @@ function useInquiryEditorRowState({
     return (
       <div key={field} className={compact ? "min-w-0" : undefined}>
         {compact ? (
-          <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-slate-500">
+          <label className="mb-0.5 block text-[9px] font-medium uppercase tracking-wide text-slate-500">
             {FIELD_LABELS[field]}
           </label>
         ) : null}
@@ -158,7 +158,7 @@ function useInquiryEditorRowState({
           emptyLabel={isRequired ? "Vyber…" : "—"}
           placeholder="Hľadať…"
           className={cn(
-            compact ? "h-10 w-full text-sm" : "h-8 min-w-[80px] text-xs",
+            compact ? "h-7 w-full text-[11px] md:h-10 md:text-sm" : "h-8 min-w-[80px] text-xs",
             (isMissing || isCatalogBad) &&
               "[&_button]:border-amber-500 [&_button]:bg-amber-50",
             !isRequired && !isCatalogBad && "[&_button]:bg-slate-50/80",
@@ -200,7 +200,7 @@ function InquiryEditorRow({ row, apiBase, apiFetch, onChange, onDelete, variant 
     return (
       <article
         className={cn(
-          "rounded-xl border bg-white p-3 shadow-sm",
+          "rounded-lg border bg-white p-2 shadow-sm md:rounded-xl md:p-3",
           statusMessage && !row.parse_error && catalogMessages.length === 0
             ? "border-red-200"
             : statusMessage
@@ -208,29 +208,29 @@ function InquiryEditorRow({ row, apiBase, apiFetch, onChange, onDelete, variant 
               : "border-slate-200",
         )}
       >
-        <div className="mb-3 flex items-start gap-2">
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-semibold text-slate-600">
+        <div className="mb-2 flex items-start gap-1.5 md:mb-3 md:gap-2">
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-slate-100 text-[10px] font-semibold text-slate-600 md:h-7 md:w-7 md:text-xs">
             {row.row_index}
           </span>
-          <p className="min-w-0 flex-1 text-sm leading-snug text-slate-800">{row.raw_text}</p>
+          <p className="min-w-0 flex-1 text-[11px] leading-snug text-slate-800 md:text-sm">{row.raw_text}</p>
           <button
             type="button"
             onClick={onDelete}
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600"
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-red-50 hover:text-red-600 md:h-9 md:w-9 md:rounded-lg"
             title="Odstrániť riadok"
             aria-label="Odstrániť riadok"
           >
-            <X className="h-4 w-4" />
+            <X className="h-3.5 w-3.5 md:h-4 md:w-4" />
           </button>
         </div>
 
-        <div className="grid grid-cols-2 gap-2.5">
+        <div className="grid grid-cols-2 gap-1.5 md:gap-2.5">
           {SELECT_FIELDS.map((field) => renderSelect(field, true))}
         </div>
 
-        <div className="mt-3 grid grid-cols-[minmax(0,1fr)_auto] items-end gap-3">
+        <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] items-end gap-2 md:mt-3 md:gap-3">
           <div>
-            <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-slate-500">
+            <label className="mb-0.5 block text-[9px] font-medium uppercase tracking-wide text-slate-500">
               {FIELD_LABELS.quantity}
             </label>
             <input
@@ -240,7 +240,7 @@ function InquiryEditorRow({ row, apiBase, apiFetch, onChange, onDelete, variant 
               value={row.quantity ?? ""}
               onChange={(e) => handleField("quantity", e.target.value)}
               className={cn(
-                "h-10 w-full rounded-lg border px-3 text-sm",
+                "h-7 w-full rounded-md border px-2 text-xs md:h-10 md:rounded-lg md:px-3 md:text-sm",
                 missing.has("quantity")
                   ? "border-red-400 bg-red-50 text-red-900"
                   : "border-slate-200 bg-white",
@@ -248,21 +248,21 @@ function InquiryEditorRow({ row, apiBase, apiFetch, onChange, onDelete, variant 
             />
           </div>
           <div className="text-right">
-            <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-slate-500">
+            <p className="mb-0.5 text-[9px] font-medium uppercase tracking-wide text-slate-500">
               Stav
             </p>
             {statusMessage ? (
               <span
                 className={cn(
-                  "inline-block max-w-[9rem] text-xs leading-snug",
+                  "inline-block max-w-[7rem] text-[10px] leading-snug md:max-w-[9rem] md:text-xs",
                   row.parse_error || catalogMessages.length ? "text-amber-700" : "text-red-600",
                 )}
                 title={catalogMessages.join("\n") || statusMessage}
               >
-                {statusMessage.length > 48 ? `${statusMessage.slice(0, 48)}…` : statusMessage}
+                {statusMessage.length > 40 ? `${statusMessage.slice(0, 40)}…` : statusMessage}
               </span>
             ) : (
-              <span className="text-sm font-medium text-emerald-600">OK</span>
+              <span className="text-xs font-medium text-emerald-600 md:text-sm">OK</span>
             )}
           </div>
         </div>
@@ -375,12 +375,10 @@ export function InquiryEditorTable({ rows, apiBase, apiFetch, onChange }: Props)
   return (
     <>
       {/* Mobil: karty */}
-      <div className="space-y-3 md:hidden">
-        <div className="flex items-center justify-between px-0.5">
-          <p className="text-sm font-medium text-slate-800">
-            Riadky dopytu <span className="text-slate-500">({rows.length})</span>
-          </p>
-        </div>
+      <div className="space-y-2 md:hidden">
+        <p className="px-0.5 text-xs font-medium text-slate-800">
+          Riadky <span className="font-normal text-slate-500">({rows.length})</span>
+        </p>
         {rows.map((row) => (
           <InquiryEditorRow key={row.row_index} {...rowProps(row)} variant="card" />
         ))}
