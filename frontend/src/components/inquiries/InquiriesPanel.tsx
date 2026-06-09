@@ -4,6 +4,10 @@ import { ClipboardList, Loader2, Upload } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { InquiryEditorTable } from "@/components/inquiries/InquiryEditorTable";
+import {
+  InquirySupplierPicker,
+  inquirySuppliersReady,
+} from "@/components/inquiries/InquirySupplierPicker";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { readApiJsonOrText } from "@/lib/api-errors";
@@ -56,6 +60,7 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
   const [rows, setRows] = useState<InquiryLineParsed[]>([]);
   const [sourceFileName, setSourceFileName] = useState("");
   const [draftPrompt, setDraftPrompt] = useState<InquiryDraft | null>(null);
+  const [selectedSupplierIds, setSelectedSupplierIds] = useState<number[]>([]);
 
   useEffect(() => {
     if (!authReady) return;
@@ -63,30 +68,63 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
     if (existing?.rows?.length) {
       setDraftPrompt(existing);
     }
+    if (existing?.selectedSupplierIds?.length) {
+      setSelectedSupplierIds(existing.selectedSupplierIds);
+    }
   }, [authReady, userId]);
 
   const allValid = useMemo(
-    () => rows.length > 0 && rows.every(inquiryRowIsValid),
-    [rows],
+    () =>
+      rows.length > 0 &&
+      rows.every(inquiryRowIsValid) &&
+      inquirySuppliersReady(selectedSupplierIds),
+    [rows, selectedSupplierIds],
   );
 
-  const persistRows = useCallback(
-    (nextRows: InquiryLineParsed[], fileName?: string) => {
+  const persistDraft = useCallback(
+    (nextRows: InquiryLineParsed[], fileName?: string, supplierIds?: number[]) => {
+      const ids = supplierIds ?? selectedSupplierIds;
       setRows(nextRows);
-      if (!nextRows.length) return;
+      if (!nextRows.length && !ids.length) return;
       saveDraft(userId, {
         savedAt: new Date().toISOString(),
         sourceFileName: fileName ?? sourceFileName,
         rows: nextRows,
+        selectedSupplierIds: ids,
       });
     },
-    [sourceFileName, userId],
+    [selectedSupplierIds, sourceFileName, userId],
+  );
+
+  const persistRows = useCallback(
+    (nextRows: InquiryLineParsed[], fileName?: string) => {
+      persistDraft(nextRows, fileName);
+    },
+    [persistDraft],
+  );
+
+  const handleSupplierChange = useCallback(
+    (ids: number[]) => {
+      setSelectedSupplierIds(ids);
+      if (rows.length > 0 || ids.length > 0) {
+        saveDraft(userId, {
+          savedAt: new Date().toISOString(),
+          sourceFileName,
+          rows,
+          selectedSupplierIds: ids,
+        });
+      }
+    },
+    [rows, sourceFileName, userId],
   );
 
   const restoreDraft = () => {
     if (!draftPrompt) return;
     setRows(draftPrompt.rows);
     setSourceFileName(draftPrompt.sourceFileName);
+    if (draftPrompt.selectedSupplierIds?.length) {
+      setSelectedSupplierIds(draftPrompt.selectedSupplierIds);
+    }
     setDraftPrompt(null);
     setStatus(`Obnovený rozpracovaný dopyt (${draftPrompt.rows.length} riadkov).`);
   };
@@ -133,7 +171,7 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
         setProgressPct(typeof st.progress_pct === "number" ? st.progress_pct : null);
         if (st.state === "done" && st.result?.rows) {
           const parsed = st.result.rows.map(normalizeInquiryRowFromApi);
-          persistRows(parsed, st.result.source_filename ?? file.name);
+          persistDraft(parsed, st.result.source_filename ?? file.name);
           setStatus(`Parsovanie hotové — ${parsed.length} riadkov. Skontroluj červené bunky.`);
           break;
         }
@@ -168,6 +206,14 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
         <ClipboardList className="h-5 w-5 text-sky-600" />
         <h1 className="text-lg font-semibold text-slate-900">Import dopytov</h1>
       </div>
+
+      <InquirySupplierPicker
+        apiBase={apiBase}
+        apiFetch={apiFetch}
+        userId={userId}
+        selectedIds={selectedSupplierIds}
+        onChange={handleSupplierChange}
+      />
 
       {draftPrompt ? (
         <Card className="border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
@@ -232,17 +278,29 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
             apiFetch={apiFetch}
             onChange={persistRows}
           />
-          <div className="flex items-center gap-3">
-            <Button type="button" disabled={!allValid} title={allValid ? "" : "Doplň všetky červené bunky"}>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              type="button"
+              disabled={!allValid}
+              title={
+                allValid
+                  ? ""
+                  : !inquirySuppliersReady(selectedSupplierIds)
+                    ? "Vyber aspoň jedného dodávateľa"
+                    : "Doplň všetky riadky bez chýb"
+              }
+            >
               Spustiť dopyt
             </Button>
             {!allValid ? (
               <span className="text-xs text-slate-500">
-                Tlačidlo bude aktívne, keď budú všetky riadky bez chýbajúcich polí.
+                {!inquirySuppliersReady(selectedSupplierIds)
+                  ? "Vyber aspoň jedného dodávateľa hore."
+                  : "Tlačidlo bude aktívne, keď budú všetky riadky bez chýb."}
               </span>
             ) : (
               <span className="text-xs text-emerald-700">
-                Všetky riadky sú pripravené (pipeline dodávateľov bude v ďalšom kroku).
+                Pripravené — {selectedSupplierIds.length} dodávateľov, {rows.length} riadkov.
               </span>
             )}
           </div>

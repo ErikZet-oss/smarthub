@@ -16,6 +16,7 @@ export type InquiryDraft = {
   sourceFileName: string;
   rows: InquiryLineParsed[];
   parseTaskId?: string;
+  selectedSupplierIds?: number[];
 };
 
 export const INQUIRY_DRAFT_STORAGE_KEY = "smarthub_inquiry_draft_v1";
