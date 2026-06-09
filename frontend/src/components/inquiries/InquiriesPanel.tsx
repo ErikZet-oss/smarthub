@@ -67,6 +67,7 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
   const [running, setRunning] = useState(false);
   const [runProgressPct, setRunProgressPct] = useState<number | null>(null);
   const [runResult, setRunResult] = useState<InquiryRunTaskResult | null>(null);
+  const [ignoreErrors, setIgnoreErrors] = useState(false);
 
   useEffect(() => {
     if (!authReady) return;
@@ -80,11 +81,21 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
   }, [authReady, userId]);
 
   const allValid = useMemo(
+    () => rows.length > 0 && rows.every(inquiryRowIsValid),
+    [rows],
+  );
+
+  const canRun = useMemo(
     () =>
       rows.length > 0 &&
-      rows.every(inquiryRowIsValid) &&
-      inquirySuppliersReady(selectedSupplierIds),
-    [rows, selectedSupplierIds],
+      inquirySuppliersReady(selectedSupplierIds) &&
+      (allValid || ignoreErrors),
+    [rows.length, selectedSupplierIds, allValid, ignoreErrors],
+  );
+
+  const invalidRowCount = useMemo(
+    () => rows.filter((r) => !inquiryRowIsValid(r)).length,
+    [rows],
   );
 
   const persistDraft = useCallback(
@@ -200,7 +211,7 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
   };
 
   const onRunInquiry = async () => {
-    if (!apiToken || !allValid) return;
+    if (!apiToken || !canRun) return;
     setRunning(true);
     setRunProgressPct(0);
     setRunResult(null);
@@ -213,6 +224,7 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
           rows,
           supplier_ids: selectedSupplierIds,
           source_filename: sourceFileName,
+          ignore_errors: ignoreErrors,
         }),
       });
       const startParsed = await readApiJsonOrText(startRes);
@@ -239,7 +251,9 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
           const result = normalizeInquiryRunResult(st.result);
           setRunResult(result);
           setStatus(
-            `Dopyt hotový — ${result.rows_with_offer}/${result.total_rows} riadkov s cenou.`,
+            `Dopyt hotový — ${result.rows_with_offer}/${result.total_rows} s cenou` +
+              (result.rows_failed > 0 ? `, ${result.rows_failed} preskočených/chybných` : "") +
+              ".",
           );
           break;
         }
@@ -342,16 +356,27 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
             onChange={persistRows}
           />
           <div className="flex flex-wrap items-center gap-3">
+            <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={ignoreErrors}
+                onChange={(e) => setIgnoreErrors(e.target.checked)}
+                className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+              />
+              Ignorovať chyby
+            </label>
             <Button
               type="button"
-              disabled={!allValid || running || parsing}
+              disabled={!canRun || running || parsing}
               onClick={() => void onRunInquiry()}
               title={
-                allValid
-                  ? ""
+                canRun
+                  ? ignoreErrors && invalidRowCount > 0
+                    ? `Spustí aj ${invalidRowCount} riadkov s chybami`
+                    : ""
                   : !inquirySuppliersReady(selectedSupplierIds)
                     ? "Vyber aspoň jedného dodávateľa"
-                    : "Doplň všetky riadky bez chýb"
+                    : "Doplň riadky alebo zapni Ignorovať chyby"
               }
             >
               {running ? (
@@ -363,15 +388,19 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
                 "Spustiť dopyt"
               )}
             </Button>
-            {!allValid ? (
+            {!canRun ? (
               <span className="text-xs text-slate-500">
                 {!inquirySuppliersReady(selectedSupplierIds)
                   ? "Vyber aspoň jedného dodávateľa hore."
-                  : "Tlačidlo bude aktívne, keď budú všetky riadky bez chýb."}
+                  : "Doplň riadky alebo zapni „Ignorovať chyby“."}
               </span>
-            ) : (
+            ) : allValid ? (
               <span className="text-xs text-emerald-700">
                 Pripravené — {selectedSupplierIds.length} dodávateľov, {rows.length} riadkov.
+              </span>
+            ) : (
+              <span className="text-xs text-amber-800">
+                Spustí sa aj {invalidRowCount} riadkov s chybami — vo výsledku uvidíš dôvod.
               </span>
             )}
             {running && runProgressPct != null ? (

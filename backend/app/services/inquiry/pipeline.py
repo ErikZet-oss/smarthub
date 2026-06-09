@@ -24,6 +24,30 @@ ProgressCb = Callable[[int, int], None]
 
 _SUPPLIER_SCRAPE_CONCURRENCY = 6
 
+_FIELD_LABELS = {
+    "norma": "norma",
+    "surface": "povrch",
+    "diameter": "priemer",
+    "length": "dĺžka",
+    "v_class": "class",
+    "quantity": "množstvo",
+}
+
+
+def _row_prevalidation_error(row: InquiryLineParsed) -> tuple[str, str] | None:
+    if row.parse_error:
+        return "invalid_row", f"Chyba parsovania: {row.parse_error}"
+    if row.catalog_warnings:
+        detail = "; ".join(w.strip() for w in row.catalog_warnings if w and str(w).strip())
+        if detail:
+            return "catalog_mismatch", f"Nie je v katalógu: {detail}"
+        return "catalog_mismatch", "Položka nie je v katalógu."
+    missing = row.missing_required_fields()
+    if missing:
+        names = ", ".join(_FIELD_LABELS.get(field, field) for field in missing)
+        return "invalid_row", f"Chýbajúce polia: {names}."
+    return None
+
 
 def _supplier_product_url(supplier: Supplier, supplier_code: str) -> str | None:
     code = (supplier_code or "").strip()
@@ -159,14 +183,10 @@ async def _run_line_async(
     semaphore: asyncio.Semaphore,
 ) -> InquiryLineRunResult:
     result = _line_from_parsed(row)
-    if row.parse_error:
-        return result.model_copy(
-            update={"status": "error", "error": row.parse_error},
-        )
-    if row.missing_required_fields():
-        return result.model_copy(
-            update={"status": "error", "error": "Neúplný riadok dopytu."},
-        )
+    prevalidation = _row_prevalidation_error(row)
+    if prevalidation is not None:
+        status, message = prevalidation
+        return result.model_copy(update={"status": status, "error": message})
 
     products = find_catalog_products(session, row, limit=1)
     if not products:
@@ -298,6 +318,7 @@ def run_inquiry_batch(
         1 for r in line_results if r.best_offer and r.status in ("ok", "no_stock")
     )
     rows_no_stock = sum(1 for r in line_results if r.status == "no_stock")
+    rows_failed = sum(1 for r in line_results if r.status not in ("ok", "no_stock"))
     totals = [r.line_total_eur for r in line_results if r.line_total_eur is not None]
     total_eur = round(sum(totals), 4) if totals else None
     return InquiryRunTaskResult(
@@ -307,15 +328,23 @@ def run_inquiry_batch(
         total_rows=len(line_results),
         rows_with_offer=rows_with_offer,
         rows_no_stock=rows_no_stock,
+        rows_failed=rows_failed,
         total_eur=total_eur,
     )
 
 
-def validate_run_request(rows: list[InquiryLineParsed], supplier_ids: list[int]) -> None:
+def validate_run_request(
+    rows: list[InquiryLineParsed],
+    supplier_ids: list[int],
+    *,
+    ignore_errors: bool = False,
+) -> None:
     if not supplier_ids:
         raise HTTPException(status_code=400, detail="Vyber aspoň jedného dodávateľa.")
     if not rows:
         raise HTTPException(status_code=400, detail="Dopyt neobsahuje žiadne riadky.")
+    if ignore_errors:
+        return
     invalid = [
         r.row_index
         for r in rows
@@ -324,5 +353,5 @@ def validate_run_request(rows: list[InquiryLineParsed], supplier_ids: list[int])
     if invalid:
         raise HTTPException(
             status_code=400,
-            detail=f"Riadky {invalid[:5]} nie sú kompletné — doplň chýbajúce polia.",
+            detail=f"Riadky {invalid[:5]} nie sú kompletné — doplň chýbajúce polia alebo zapni „Ignorovať chyby“.",
         )

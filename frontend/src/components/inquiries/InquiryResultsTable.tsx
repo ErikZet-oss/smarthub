@@ -19,6 +19,21 @@ function formatEur(value: number | null | undefined): string {
   return `${value.toFixed(4).replace(/\.?0+$/, "")} €`;
 }
 
+function statusLabel(row: InquiryLineRunResult): string {
+  if (row.error?.trim()) return row.error.trim();
+  const labels: Record<InquiryLineRunResult["status"], string> = {
+    ok: "OK",
+    no_stock: "Nie je skladom",
+    no_product: "Produkt v katalógu nenájdený",
+    no_mapping: "Bez mapovania u dodávateľov",
+    no_price: "Cena nedostupná",
+    invalid_row: "Neúplný riadok",
+    catalog_mismatch: "Nie je v katalógu",
+    error: "Chyba",
+  };
+  return labels[row.status] ?? "Chyba";
+}
+
 function statusBadge(row: InquiryLineRunResult) {
   if (row.status === "ok") {
     return (
@@ -37,19 +52,27 @@ function statusBadge(row: InquiryLineRunResult) {
     );
   }
 
-  const labels: Record<InquiryLineRunResult["status"], string> = {
-    ok: "OK",
-    no_stock: "Nie je skladom",
-    no_product: "Produkt nenájdený",
-    no_mapping: "Bez mapovania",
-    no_price: "Cena nedostupná",
-    error: "Chyba",
-  };
-  const text = row.error?.trim() || labels[row.status] || "Chyba";
+  if (row.status === "catalog_mismatch") {
+    return (
+      <Badge className="border-amber-200 bg-amber-50 text-amber-900" title={row.error ?? undefined}>
+        {statusLabel(row)}
+      </Badge>
+    );
+  }
+
+  const text = statusLabel(row);
+  const isSoftFail = row.status === "invalid_row";
 
   return (
-    <Badge className="border-red-200 bg-red-50 text-red-700" title={row.error ?? undefined}>
-      {text}
+    <Badge
+      className={
+        isSoftFail
+          ? "border-orange-200 bg-orange-50 text-orange-800"
+          : "border-red-200 bg-red-50 text-red-700"
+      }
+      title={row.error ?? undefined}
+    >
+      {text.length > 48 ? `${text.slice(0, 45)}…` : text}
     </Badge>
   );
 }
@@ -136,7 +159,7 @@ function ResultRow({ apiBase, row }: { apiBase: string; row: InquiryLineRunResul
           </p>
         </div>
         <div className="hidden text-sm text-slate-700 lg:block">
-          {best ? best.supplier_name : "—"}
+          {best ? best.supplier_name : row.error ? "—" : "—"}
         </div>
         <div className="hidden text-sm font-medium text-slate-900 lg:block">
           {best ? formatEur(best.price_eur) : "—"}
@@ -144,7 +167,7 @@ function ResultRow({ apiBase, row }: { apiBase: string; row: InquiryLineRunResul
         <div className="hidden text-sm text-slate-600 lg:block">
           {row.line_total_eur != null ? formatEur(row.line_total_eur) : "—"}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           {statusBadge(row)}
           <button
             type="button"
@@ -156,6 +179,10 @@ function ResultRow({ apiBase, row }: { apiBase: string; row: InquiryLineRunResul
         </div>
       </div>
 
+      {!best && row.error ? (
+        <p className="px-3 pb-2 text-xs text-slate-600 sm:pl-12">{row.error}</p>
+      ) : null}
+
       <div className="px-3 pb-3 sm:pl-12 lg:hidden">
         {best ? (
           <p className="text-xs text-slate-600">
@@ -163,10 +190,7 @@ function ResultRow({ apiBase, row }: { apiBase: string; row: InquiryLineRunResul
             {formatEur(row.line_total_eur)}
           </p>
         ) : (
-          <p className="text-xs text-red-600">
-            {row.error ??
-              (row.status === "no_stock" ? "Nie je skladom." : "Bez ponuky")}
-          </p>
+          <p className="text-xs text-red-600">{statusLabel(row)}</p>
         )}
       </div>
 
@@ -198,6 +222,7 @@ export function InquiryResultsTable({ apiBase, result }: Props) {
               {result.rows_no_stock > 0
                 ? ` · ${result.rows_no_stock} nie je skladom`
                 : ""}
+              {result.rows_failed > 0 ? ` · ${result.rows_failed} neúspešných` : ""}
             </p>
           </div>
           <div className="text-right">

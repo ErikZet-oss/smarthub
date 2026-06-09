@@ -123,6 +123,7 @@ class InquiryRunRequest(BaseModel):
     rows: list[InquiryLineParsed]
     supplier_ids: list[int]
     source_filename: str = ""
+    ignore_errors: bool = False
 
 
 class InquiryScrapedOffer(BaseModel):
@@ -148,7 +149,16 @@ class InquiryLineRunResult(BaseModel):
     v_class: Optional[str] = None
     product_id: Optional[int] = None
     internal_code: Optional[str] = None
-    status: Literal["ok", "no_stock", "no_product", "no_mapping", "no_price", "error"] = "error"
+    status: Literal[
+        "ok",
+        "no_stock",
+        "no_product",
+        "no_mapping",
+        "no_price",
+        "invalid_row",
+        "catalog_mismatch",
+        "error",
+    ] = "error"
     no_stock: bool = False
     best_offer: Optional[InquiryScrapedOffer] = None
     offers: list[InquiryScrapedOffer] = Field(default_factory=list)
@@ -163,4 +173,5 @@ class InquiryRunTaskResult(BaseModel):
     total_rows: int
     rows_with_offer: int
     rows_no_stock: int
+    rows_failed: int = 0
     total_eur: Optional[float] = None

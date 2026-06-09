@@ -101,7 +101,15 @@ export type InquiryLineRunResult = {
   v_class: string | null;
   product_id: number | null;
   internal_code: string | null;
-  status: "ok" | "no_stock" | "no_product" | "no_mapping" | "no_price" | "error";
+  status:
+    | "ok"
+    | "no_stock"
+    | "no_product"
+    | "no_mapping"
+    | "no_price"
+    | "invalid_row"
+    | "catalog_mismatch"
+    | "error";
   no_stock: boolean;
   best_offer: InquiryScrapedOffer | null;
   offers: InquiryScrapedOffer[];
@@ -116,6 +124,7 @@ export type InquiryRunTaskResult = {
   total_rows: number;
   rows_with_offer: number;
   rows_no_stock: number;
+  rows_failed: number;
   total_eur: number | null;
 };
 
@@ -130,6 +139,7 @@ export function normalizeInquiryRunResult(raw: Record<string, unknown>): Inquiry
     total_rows: Number(raw.total_rows ?? rowsRaw.length),
     rows_with_offer: Number(raw.rows_with_offer ?? 0),
     rows_no_stock: Number(raw.rows_no_stock ?? 0),
+    rows_failed: Number(raw.rows_failed ?? 0),
     total_eur:
       raw.total_eur === null || raw.total_eur === undefined
         ? null

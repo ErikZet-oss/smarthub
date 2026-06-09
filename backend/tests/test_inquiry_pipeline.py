@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from app.schemas.inquiry import InquiryScrapedOffer
-from app.services.inquiry.pipeline import pick_best_offer
+from app.schemas.inquiry import InquiryLineParsed, InquiryScrapedOffer
+from app.services.inquiry.pipeline import _row_prevalidation_error, pick_best_offer
 
 
 def test_pick_best_offer_prefers_stock() -> None:
@@ -93,3 +93,29 @@ def test_pick_best_offer_skips_errors() -> None:
     assert best is not None
     assert best.supplier_id == 2
     assert no_stock is False
+
+
+def test_row_prevalidation_catalog_mismatch() -> None:
+    row = InquiryLineParsed(
+        row_index=1,
+        raw_text="matica M99",
+        norma="934",
+        diameter="99",
+        surface="pozink",
+        quantity=1,
+        catalog_warnings=["Priemer M99 nie je v katalógu."],
+    )
+    result = _row_prevalidation_error(row)
+    assert result is not None
+    status, msg = result
+    assert status == "catalog_mismatch"
+    assert "Nie je v katalógu" in msg
+
+
+def test_row_prevalidation_missing_fields() -> None:
+    row = InquiryLineParsed(row_index=2, raw_text="matica", norma="934", quantity=1)
+    result = _row_prevalidation_error(row)
+    assert result is not None
+    status, msg = result
+    assert status == "invalid_row"
+    assert "Chýbajúce polia" in msg

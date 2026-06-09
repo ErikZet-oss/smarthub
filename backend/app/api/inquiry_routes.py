@@ -275,7 +275,11 @@ async def inquiry_run_start(
     payload: InquiryRunRequest,
     user: AuthUserContext = Depends(get_current_user),
 ):
-    validate_run_request(payload.rows, payload.supplier_ids)
+    validate_run_request(
+        payload.rows,
+        payload.supplier_ids,
+        ignore_errors=payload.ignore_errors,
+    )
     if len(payload.rows) > MAX_INQUIRY_ROWS:
         raise HTTPException(
             status_code=400,
