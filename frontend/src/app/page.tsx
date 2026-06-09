@@ -10517,8 +10517,8 @@ export default function Home() {
             { id: "vyhladavanie" as const, label: "Hľadať", icon: PackageSearch },
             { id: "zoznamy" as const, label: "Zoznamy", icon: List },
             { id: "kosik" as const, label: "Košík", icon: ShoppingCart },
+            { id: "dopyty" as const, label: "Dopyty", icon: ClipboardList },
             { id: "ponuky" as const, label: "Ponuky", icon: FileText },
-            { id: "historia" as const, label: "História", icon: History },
           ].map((item) => {
             const Icon = item.icon;
             const active = activeView === item.id;
@@ -10561,6 +10561,7 @@ export default function Home() {
           >
             <div className="grid grid-cols-2 gap-2">
               {[
+                { id: "historia" as const, label: "História", icon: History },
                 { id: "dodavatelia" as const, label: "Dodávatelia", icon: Truck },
                 { id: "parovanie" as const, label: "Párovanie", icon: Link2 },
                 ...(isAppAdmin
