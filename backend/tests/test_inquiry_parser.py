@@ -67,6 +67,28 @@ def test_heuristic_parse_matica() -> None:
     assert ai.length is None
 
 
+def test_heuristic_parse_polyamid_matica() -> None:
+    ai = _heuristic_parse("Šesťhranná matica DIN 934 Plast Polyamid (nylon) 6.6 M3")
+    assert ai is not None
+    assert ai.diameter == "3"
+    assert ai.norma == "DIN934"
+    assert ai.surface == "Polyamid"
+    assert ai.v_class == "0"
+    assert ai.length is None
+
+
+def test_parse_polyamid_matica_heuristic_fallback(monkeypatch) -> None:
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    parsed = parse_inquiry_line(
+        "Šesťhranná matica DIN 934 Plast Polyamid (nylon) 6.6 M3",
+        row_index=1,
+    )
+    assert parsed.parse_error is None
+    assert parsed.surface == "Polyamid"
+    assert parsed.v_class == "0"
+    assert parsed.diameter == "3"
+
+
 def test_heuristic_parse_skrutka() -> None:
     ai = _heuristic_parse("skrutka M10x50 DIN933 8.8 pozinkovaná")
     assert ai is not None

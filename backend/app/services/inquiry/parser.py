@@ -8,7 +8,7 @@ from typing import Callable
 
 from app.schemas.inquiry import InquiryLineAIOutput, InquiryLineParsed
 from app.services.inquiry.catalog_snap import infer_v_class_from_surface
-from app.services.inquiry.normalize import apply_normalization
+from app.services.inquiry.normalize import apply_normalization, infer_surface_from_text
 from app.services.inquiry.norm_rules import norm_requires_length
 from app.services.inquiry.product_norm_hints import (
     infer_norma_from_text,
@@ -31,6 +31,7 @@ Dôležité pravidlá:
 - Závitová tyč má normu DIN 976 (v katalógu aj „976“) a VŽDY má dĺžku (napr. M10x1000)
 - Pri skrutke M10x50 je diameter M10 a length 50
 - A2/A4 pri nerezi daj do surface (Nerez A2), nie do v_class
+- Plast / Polyamid / Nylon (aj „6.6“ v Polyamid (nylon) 6.6): surface = Polyamid, v_class = 0 — „6.6“ NIE JE trieda pevnosti
 - Ak hodnotu nevieš určiť, použi null
 
 {product_norm_hints_for_prompt()}
@@ -38,6 +39,7 @@ Dôležité pravidlá:
 Príklady:
 - "skrutka M10x50 DIN933 8.8 pozinkovaná" → norma DIN933, diameter M10, length 50, v_class 8.8, surface Oceľ pozinkovaná
 - "Šesťhranná matica DIN 934 Oceľ Pozinkované M3" → norma DIN934, diameter M3, surface Oceľ pozinkovaná, length null
+- "Šesťhranná matica DIN 934 Plast Polyamid (nylon) 6.6 M3" → norma DIN934, diameter M3, surface Polyamid, v_class 0, length null
 - "6x matica M8 DIN934" → norma DIN934, diameter M8, quantity 6, length null
 - "Závitová tyč M10x1000 pozinkovaná" → norma DIN976, diameter M10, length 1000, surface Oceľ pozinkovaná
 """
@@ -196,6 +198,8 @@ def _heuristic_parse(raw_text: str) -> InquiryLineAIOutput | None:
     m = re.search(r"\bA[24]\b", t, re.IGNORECASE)
     if m:
         v_class = None  # A2/A4 ide do surface
+    elif infer_surface_from_text(t) == "Polyamid":
+        v_class = "0"
     else:
         norm_digits = ""
         if norma:
@@ -210,18 +214,19 @@ def _heuristic_parse(raw_text: str) -> InquiryLineAIOutput | None:
                 v_class = val
                 break
 
-    surface = None
-    low = t.casefold()
-    if "a4" in low and "nerez" in low:
-        surface = "Nerez A4"
-    elif "a2" in low or "nerez" in low:
-        surface = "Nerez A2"
-    elif "pozink" in low:
-        surface = "Oceľ pozinkovaná"
-    elif "mosadz" in low:
-        surface = "Mosadz"
-    elif "ocel" in low or "oceľ" in low:
-        surface = "Oceľ"
+    surface = infer_surface_from_text(t)
+    if surface is None:
+        low = t.casefold()
+        if "a4" in low and "nerez" in low:
+            surface = "Nerez A4"
+        elif "a2" in low or "nerez" in low:
+            surface = "Nerez A2"
+        elif "pozink" in low:
+            surface = "Oceľ pozinkovaná"
+        elif "mosadz" in low:
+            surface = "Mosadz"
+        elif "ocel" in low or "oceľ" in low:
+            surface = "Oceľ"
 
     if not v_class and surface:
         v_class = infer_v_class_from_surface(surface)

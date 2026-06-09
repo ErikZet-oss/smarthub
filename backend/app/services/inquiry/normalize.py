@@ -81,6 +81,8 @@ def normalize_surface(value: str | None) -> str | None:
         ("nerez a2", "Nerez A2"),
         ("nerez", "Nerez A2"),
         ("mosadz", "Mosadz"),
+        ("polyamid", "Polyamid"),
+        ("nylon", "Polyamid"),
         ("oceľ", "Oceľ"),
         ("ocel", "Oceľ"),
     )
@@ -90,6 +92,38 @@ def normalize_surface(value: str | None) -> str | None:
     return s
 
 
+def infer_surface_from_text(text: str) -> str | None:
+    """Materiál z voľného textu — keď AI/heuristika nevyplní surface."""
+    low = (text or "").casefold()
+    if not low.strip():
+        return None
+    if "polyamid" in low or "nylon" in low or re.search(r"\bplast\b", low):
+        return "Polyamid"
+    if "hliník" in low or "hlinik" in low or "alumini" in low:
+        return "Hliník"
+    if "a4" in low and "nerez" in low:
+        return "Nerez A4"
+    if "a2" in low or "nerez" in low:
+        return "Nerez A2"
+    if "pozink" in low:
+        return "Oceľ pozinkovaná"
+    if "mosadz" in low:
+        return "Mosadz"
+    if "ocel" in low or "oceľ" in low:
+        return "Oceľ"
+    return None
+
+
+def apply_plastic_material_rules(data: dict[str, object], raw_text: str) -> None:
+    """
+    Polyamid (nylon) 6.6 — „6.6“ je stupeň materiálu, nie class v katalógu (matice majú class 0).
+    """
+    if infer_surface_from_text(raw_text) != "Polyamid":
+        return
+    data["surface"] = "Polyamid"
+    data["v_class"] = "0"
+
+
 def apply_normalization(parsed: InquiryLineParsed) -> InquiryLineParsed:
     """Po AI alebo manuálnej editácii — zjednotí formát polí."""
     data = parsed.model_dump()
@@ -97,6 +131,11 @@ def apply_normalization(parsed: InquiryLineParsed) -> InquiryLineParsed:
     data["length"] = normalize_length_mm(parsed.length)
     data["v_class"] = normalize_v_class(parsed.v_class)
     data["surface"] = normalize_surface(parsed.surface)
+    if not data.get("surface"):
+        inferred = infer_surface_from_text(parsed.raw_text)
+        if inferred:
+            data["surface"] = inferred
+    apply_plastic_material_rules(data, parsed.raw_text)
     if parsed.norma:
         data["norma"] = parsed.norma.strip().upper().replace("  ", " ")
     else:

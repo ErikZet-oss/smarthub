@@ -8,7 +8,12 @@ from app.models.entities import Product
 from app.schemas.common import ProductSearchFilters
 from app.schemas.inquiry import InquiryLineParsed
 from app.services.inquiry.norm_rules import norm_requires_length, search_key
-from app.services.inquiry.normalize import norm_display_candidates, normalize_diameter
+from app.services.inquiry.normalize import (
+    apply_plastic_material_rules,
+    infer_surface_from_text,
+    norm_display_candidates,
+    normalize_diameter,
+)
 
 # Približné mapovanie povrchu na class v katalógu (matice DIN 934, …).
 _SURFACE_V_CLASS: tuple[tuple[str, str], ...] = (
@@ -200,6 +205,11 @@ def snap_inquiry_line_to_catalog(
     snap_cache = cache or CatalogSnapCache.load(session)
     data = row.model_dump()
     data["diameter"] = normalize_diameter(row.diameter)
+    apply_plastic_material_rules(data, row.raw_text)
+    if not data.get("surface"):
+        inferred_surface = infer_surface_from_text(row.raw_text)
+        if inferred_surface:
+            data["surface"] = inferred_surface
 
     catalog_norma = resolve_catalog_norma(row.norma, known=snap_cache.norma_values)
     if catalog_norma:
