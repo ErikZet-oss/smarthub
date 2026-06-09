@@ -1303,6 +1303,7 @@ def _hopefix_narrow_catalog_paths(product_code: str, enc: str) -> list[str]:
     if re.match(r"^D12[0-9]", k) or k.startswith("D9021"):
         _extend(
             [
+                "podlozky-ploche-kruhove",
                 "podlozky-ploche-kruhove-nerez-a2",
                 "podlozky",
             ]
@@ -2191,6 +2192,7 @@ async def _hopefix_get_supplier_data_via_http(
     run_label: str,
     run_id: str,
     automation_user_id: int = 0,
+    bulk_inquiry: bool = False,
 ) -> dict[str, Any]:
     """Katalógová stránka + parsovanie riadku line-<kód> po prihlásení (httpx)."""
     code = (product_code or "").strip()
@@ -2323,6 +2325,8 @@ async def _hopefix_get_supplier_data_via_http(
                 # Skúsime všetky podstránky paralelne — server zvládne 5-10 paralelných GET-ov bez problémov
                 # a šetríme tým 2-5 s pri ne-trefe v hlavnej URL.
                 segs = _hopefix_fallback_category_segments(code)
+                if bulk_inquiry:
+                    segs = segs[:3]
                 fallback_urls: list[str] = []
                 for seg in segs:
                     for rel in (f"/sortiment/{seg}?_ref={enc}", f"/sortiment/{seg}"):
@@ -2413,12 +2417,16 @@ async def _hopefix_get_supplier_data_via_http(
         for u in try_urls_pub:
             if u not in pub_candidates:
                 pub_candidates.append(u)
-        for seg in _hopefix_fallback_category_segments(code):
+        pub_segs = _hopefix_fallback_category_segments(code)
+        if bulk_inquiry:
+            pub_segs = pub_segs[:3]
+        for seg in pub_segs:
             for rel in (f"/sortiment/{seg}?_ref={enc}", f"/sortiment/{seg}"):
                 abs_u = urljoin("https://www.hopefix.cz/", rel.lstrip("/"))
                 if abs_u not in pub_candidates:
                     pub_candidates.append(abs_u)
-        for pub_u in pub_candidates[:48]:
+        pub_limit = 12 if bulk_inquiry else 48
+        for pub_u in pub_candidates[:pub_limit]:
             try:
                 html_pub = await hopefix_fetch_html_anonymous(pub_u)
                 ln_pub = len(html_pub or "")
@@ -6826,6 +6834,7 @@ class ScraperService:
         config: ScraperConfig,
         *,
         automation_user_id: int = 0,
+        bulk_inquiry: bool = False,
     ) -> dict[str, Any]:
         """Prihlási sa, vyhľadá produkt, vráti cenu a sklad (ak sú v JSON selektory)."""
         if _dry_run():
@@ -6883,6 +6892,7 @@ class ScraperService:
                     run_label=run_label,
                     run_id=run_id,
                     automation_user_id=automation_user_id,
+                    bulk_inquiry=bulk_inquiry,
                 )
                 _log(
                     run_label,

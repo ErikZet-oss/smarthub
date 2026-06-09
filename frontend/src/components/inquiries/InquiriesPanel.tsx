@@ -242,6 +242,7 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
         if (!stParsed.ok) throw new Error(stParsed.detail);
         const st = stParsed.data as {
           state?: string;
+          phase?: string;
           progress_pct?: number;
           error?: string;
           result?: Record<string, unknown>;
@@ -260,7 +261,11 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
         if (st.state === "error") {
           throw new Error(st.error || "Dopyt zlyhal.");
         }
-        setStatus(`Hľadám ceny… ${st.progress_pct ?? 0} %`);
+        setStatus(
+          st.phase === "catalog_snap"
+            ? `Pripravujem katalóg… ${st.progress_pct ?? 0} %`
+            : `Hľadám ceny… ${st.progress_pct ?? 0} %`,
+        );
       }
     } catch (e) {
       setStatus(e instanceof Error ? e.message : "Chyba pri spúšťaní dopytu.");

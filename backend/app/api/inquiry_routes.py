@@ -239,7 +239,17 @@ def _run_inquiry_task(
         _task_update(task_id, run=True, total_rows=total, rows_done=0)
 
         def progress(done: int, tot: int) -> None:
-            _task_update(task_id, run=True, rows_done=done, total_rows=tot)
+            _task_update(task_id, run=True, rows_done=done, total_rows=tot, phase="scrape")
+
+        def snap_progress(done: int, tot: int) -> None:
+            _task_update(
+                task_id,
+                run=True,
+                phase="catalog_snap",
+                rows_snapped=done,
+                total_rows=tot,
+                rows_done=0,
+            )
 
         with Session(engine) as session:
             result = run_inquiry_batch(
@@ -248,6 +258,7 @@ def _run_inquiry_task(
                 supplier_ids=supplier_ids,
                 user_id=user_id,
                 progress_cb=progress,
+                snap_progress_cb=snap_progress,
             )
         result = result.model_copy(update={"source_filename": source_filename})
         _task_update(
@@ -292,7 +303,9 @@ async def inquiry_run_start(
         _INQUIRY_RUN_TASKS[task_id] = {
             "task_id": task_id,
             "state": "queued",
+            "phase": "queued",
             "rows_done": 0,
+            "rows_snapped": 0,
             "total_rows": len(payload.rows),
             "result": None,
             "error": None,
@@ -334,14 +347,21 @@ def inquiry_run_status(
 
     total_rows = int(task.get("total_rows") or 0)
     rows_done = int(task.get("rows_done") or 0)
+    rows_snapped = int(task.get("rows_snapped") or 0)
+    phase = str(task.get("phase") or task.get("state") or "")
     progress_pct = 0
     if total_rows > 0:
-        progress_pct = min(100, int((rows_done / total_rows) * 100))
+        if phase == "catalog_snap":
+            progress_pct = min(99, int((rows_snapped / total_rows) * 100))
+        else:
+            progress_pct = min(100, int((rows_done / total_rows) * 100))
 
     return {
         "task_id": task_id,
         "state": task.get("state"),
+        "phase": phase,
         "rows_done": rows_done,
+        "rows_snapped": rows_snapped,
         "total_rows": total_rows,
         "progress_pct": progress_pct,
         "source_filename": task.get("source_filename"),

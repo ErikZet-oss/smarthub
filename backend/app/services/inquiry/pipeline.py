@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from typing import Callable, Optional
 from urllib.parse import quote
 
@@ -25,6 +26,10 @@ from app.services.user_credentials import effective_supplier_for_user
 ProgressCb = Callable[[int, int], None]
 
 _SUPPLIER_SCRAPE_CONCURRENCY = 6
+_INQUIRY_ROW_CONCURRENCY = max(
+    1,
+    min(12, int(os.environ.get("INQUIRY_ROW_CONCURRENCY", "4") or "4")),
+)
 
 _FIELD_LABELS = {
     "norma": "norma",
@@ -120,6 +125,7 @@ async def _scrape_supplier_offer(
     supplier_code: str,
     user_id: int,
     semaphore: asyncio.Semaphore,
+    bulk_inquiry: bool = False,
 ) -> InquiryScrapedOffer:
     base = InquiryScrapedOffer(
         supplier_id=int(supplier.id),
@@ -143,6 +149,7 @@ async def _scrape_supplier_offer(
                 supplier_code,
                 config,
                 automation_user_id=user_id,
+                bulk_inquiry=bulk_inquiry,
             )
         except ScraperProductNotFoundError as exc:
             return base.model_copy(update={"error": str(exc)})
@@ -196,6 +203,7 @@ async def _run_line_async(
     supplier_ids: list[int],
     user_id: int,
     semaphore: asyncio.Semaphore,
+    bulk_inquiry: bool = True,
 ) -> InquiryLineRunResult:
     result = _line_from_parsed(row)
     prevalidation = _row_prevalidation_error(row)
@@ -248,6 +256,7 @@ async def _run_line_async(
                 supplier_code=code,
                 user_id=user_id,
                 semaphore=semaphore,
+                bulk_inquiry=bulk_inquiry,
             )
         )
 
@@ -294,30 +303,48 @@ async def run_inquiry_batch_async(
     supplier_ids: list[int],
     user_id: int,
     progress_cb: ProgressCb | None = None,
+    snap_progress_cb: ProgressCb | None = None,
 ) -> list[InquiryLineRunResult]:
     if not supplier_ids:
         raise ValueError("Vyber aspoň jedného dodávateľa.")
     if not rows:
         raise ValueError("Dopyt neobsahuje žiadne riadky.")
 
-    rows = snap_inquiry_batch_to_catalog(session, rows)
+    rows = snap_inquiry_batch_to_catalog(
+        session,
+        rows,
+        progress_cb=snap_progress_cb,
+    )
 
-    semaphore = asyncio.Semaphore(_SUPPLIER_SCRAPE_CONCURRENCY)
-    results: list[InquiryLineRunResult] = []
+    from app.db import engine
+
     total = len(rows)
-    for idx, row in enumerate(rows, start=1):
-        results.append(
-            await _run_line_async(
-                session,
-                row=row,
-                supplier_ids=supplier_ids,
-                user_id=user_id,
-                semaphore=semaphore,
-            )
-        )
-        if progress_cb:
-            progress_cb(idx, total)
-    return results
+    row_semaphore = asyncio.Semaphore(_INQUIRY_ROW_CONCURRENCY)
+    results: list[InquiryLineRunResult | None] = [None] * total
+    supplier_semaphore = asyncio.Semaphore(_SUPPLIER_SCRAPE_CONCURRENCY)
+    progress_lock = asyncio.Lock()
+    done_count = 0
+
+    async def _process_row(idx: int, row: InquiryLineParsed) -> None:
+        nonlocal done_count
+        async with row_semaphore:
+            with Session(engine) as row_session:
+                result = await _run_line_async(
+                    row_session,
+                    row=row,
+                    supplier_ids=supplier_ids,
+                    user_id=user_id,
+                    semaphore=supplier_semaphore,
+                    bulk_inquiry=True,
+                )
+            results[idx] = result
+        async with progress_lock:
+            done_count += 1
+            if progress_cb:
+                progress_cb(done_count, total)
+
+    await asyncio.gather(*(_process_row(i, row) for i, row in enumerate(rows)))
+    return [r for r in results if r is not None]
 
 
 def run_inquiry_batch(
@@ -327,6 +354,7 @@ def run_inquiry_batch(
     supplier_ids: list[int],
     user_id: int,
     progress_cb: ProgressCb | None = None,
+    snap_progress_cb: ProgressCb | None = None,
 ) -> InquiryRunTaskResult:
     line_results = asyncio.run(
         run_inquiry_batch_async(
@@ -335,6 +363,7 @@ def run_inquiry_batch(
             supplier_ids=supplier_ids,
             user_id=user_id,
             progress_cb=progress_cb,
+            snap_progress_cb=snap_progress_cb,
         )
     )
     rows_with_offer = sum(
