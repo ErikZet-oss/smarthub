@@ -15,7 +15,7 @@ def test_search_key_strips_spaces_and_dashes() -> None:
 
 
 def test_norm_display_candidates_variants() -> None:
-    parsed = InquiryLineParsed(row_index=1, raw_text="x", norm="DIN933")
+    parsed = InquiryLineParsed(row_index=1, raw_text="x", norma="DIN933")
     cands = norm_display_candidates(parsed)
     assert "DIN933" in cands
     assert "DIN 933" in cands

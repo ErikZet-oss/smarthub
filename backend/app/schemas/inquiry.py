@@ -4,22 +4,30 @@ from typing import Optional
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
+from app.services.inquiry.norm_rules import inquiry_required_field_names
+
 
 class InquiryLineAIOutput(BaseModel):
-    """Schéma pre Gemini structured output (bez raw_text)."""
+    """Schéma pre Gemini structured output — polia zladené s vyhľadávaním."""
 
     model_config = ConfigDict(populate_by_name=True)
 
     diameter: Optional[str] = None
     length: Optional[str] = None
-    norm: Optional[str] = None
-    class_: Optional[str] = Field(
+    norma: Optional[str] = Field(
         default=None,
-        validation_alias=AliasChoices("class", "class_", "product_class"),
-        serialization_alias="product_class",
+        validation_alias=AliasChoices("norma", "norm", "leading_standard"),
     )
-    leading_standard: Optional[str] = None
-    material: Optional[str] = None
+    v_class: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("v_class", "class", "class_", "product_class"),
+        serialization_alias="v_class",
+    )
+    surface: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("surface", "material"),
+        serialization_alias="surface",
+    )
     quantity: Optional[int] = None
 
     @field_validator("quantity", mode="before")
@@ -35,7 +43,7 @@ class InquiryLineAIOutput(BaseModel):
 
 
 class InquiryLineParsed(BaseModel):
-    """Parsovaný riadok dopytu — AI + manuálne opravy."""
+    """Parsovaný riadok dopytu — rovnaké filtre ako vyhľadávanie produktov."""
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -43,14 +51,21 @@ class InquiryLineParsed(BaseModel):
     raw_text: str = ""
     diameter: Optional[str] = None
     length: Optional[str] = None
-    norm: Optional[str] = None
-    class_: Optional[str] = Field(
+    norma: Optional[str] = Field(
         default=None,
-        validation_alias=AliasChoices("class", "class_"),
-        serialization_alias="class",
+        validation_alias=AliasChoices("norma", "norm", "leading_standard"),
+        serialization_alias="norma",
     )
-    leading_standard: Optional[str] = None
-    material: Optional[str] = None
+    v_class: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("v_class", "class", "class_"),
+        serialization_alias="v_class",
+    )
+    surface: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("surface", "material"),
+        serialization_alias="surface",
+    )
     quantity: Optional[int] = None
     parse_error: Optional[str] = None
 
@@ -62,25 +77,21 @@ class InquiryLineParsed(BaseModel):
             raw_text=raw_text,
             diameter=_clean(ai.diameter),
             length=_clean(ai.length),
-            norm=_clean(ai.norm),
-            class_=_clean(ai.class_),
-            leading_standard=_clean(ai.leading_standard),
-            material=_clean(ai.material),
+            norma=_clean(ai.norma),
+            v_class=_clean(ai.v_class),
+            surface=_clean(ai.surface),
             quantity=qty,
         )
 
     def missing_required_fields(self) -> list[str]:
         missing: list[str] = []
-        if not (self.diameter or "").strip():
-            missing.append("diameter")
-        if not (self.length or "").strip():
-            missing.append("length")
-        if not (self.norm or "").strip():
-            missing.append("norm")
-        if not (self.class_ or "").strip():
-            missing.append("class")
-        if self.quantity is None or self.quantity <= 0:
-            missing.append("quantity")
+        for field in inquiry_required_field_names(self.norma, self.raw_text):
+            val = getattr(self, field, None)
+            if field == "quantity":
+                if val is None or val <= 0:
+                    missing.append(field)
+            elif not str(val or "").strip():
+                missing.append(field)
         return missing
 
     @property

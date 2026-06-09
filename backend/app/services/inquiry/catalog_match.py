@@ -27,7 +27,8 @@ def find_catalog_products(
 
     diameter = normalize_diameter(parsed.diameter)
     length = normalize_length_mm(parsed.length)
-    v_class = (parsed.class_ or "").strip() or None
+    v_class = (parsed.v_class or "").strip() or None
+    surface = (parsed.surface or "").strip() or None
 
     for norm in norm_display_candidates(parsed):
         products = _query_products(
@@ -36,12 +37,13 @@ def find_catalog_products(
             diameter=diameter,
             length=length,
             v_class=v_class,
+            surface=surface,
             limit=limit,
         )
         if products:
             return products
 
-    target_norm = search_key(parsed.norm or parsed.leading_standard)
+    target_norm = search_key(parsed.norma)
     if not target_norm:
         return []
 
@@ -51,6 +53,7 @@ def find_catalog_products(
         diameter=diameter,
         length=length,
         v_class=v_class,
+        surface=surface,
         limit=limit,
     )
 
@@ -62,6 +65,7 @@ def _query_products(
     diameter: str | None,
     length: str | None,
     v_class: str | None,
+    surface: str | None,
     limit: int,
 ) -> list[Product]:
     query = select(Product)
@@ -73,6 +77,8 @@ def _query_products(
         query = query.where(Product.length == length)
     if v_class:
         query = query.where(Product.v_class == v_class)
+    if surface:
+        query = query.where(Product.surface == surface)
     return list(session.exec(query.limit(limit)).all())
 
 
@@ -83,6 +89,7 @@ def _normalized_norm_fallback(
     diameter: str | None,
     length: str | None,
     v_class: str | None,
+    surface: str | None,
     limit: int,
 ) -> list[Product]:
     query = select(Product).where(Product.norma.is_not(None))  # type: ignore[union-attr]
@@ -92,6 +99,8 @@ def _normalized_norm_fallback(
         query = query.where(Product.length == length)
     if v_class:
         query = query.where(Product.v_class == v_class)
+    if surface:
+        query = query.where(Product.surface == surface)
 
     batch = list(session.exec(query.limit(3000)).all())
     matched = [p for p in batch if search_key(p.norma) == target_norm_key]

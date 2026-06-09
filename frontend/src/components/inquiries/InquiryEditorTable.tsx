@@ -3,10 +3,10 @@
 import { useCallback, useEffect, useRef } from "react";
 
 import {
-  INQUIRY_REQUIRED_FIELDS,
-  type InquiryLineParsed,
-  type InquiryRequiredField,
   inquiryMissingFields,
+  inquiryRequiredFields,
+  type InquiryFilterField,
+  type InquiryLineParsed,
 } from "@/types/inquiry";
 import { cn } from "@/lib/utils";
 
@@ -15,14 +15,16 @@ type Props = {
   onChange: (rows: InquiryLineParsed[]) => void;
 };
 
-const FIELD_LABELS: Record<InquiryRequiredField | "material" | "leading_standard" | "raw_text", string> = {
+const FIELD_LABELS: Record<
+  InquiryFilterField | "raw_text",
+  string
+> = {
   raw_text: "Text dopytu",
+  norma: "Norma",
+  surface: "Povrchová úprava",
   diameter: "Priemer",
   length: "Dĺžka",
-  norm: "Norma",
-  class: "Trieda",
-  material: "Materiál",
-  leading_standard: "Leading standard",
+  v_class: "Class",
   quantity: "Ks",
 };
 
@@ -73,12 +75,11 @@ export function InquiryEditorTable({ rows, onChange }: Props) {
   };
 
   const editableFields: Array<keyof InquiryLineParsed> = [
+    "norma",
+    "surface",
     "diameter",
     "length",
-    "norm",
-    "class",
-    "leading_standard",
-    "material",
+    "v_class",
     "quantity",
   ];
 
@@ -91,7 +92,7 @@ export function InquiryEditorTable({ rows, onChange }: Props) {
             <th className="min-w-[180px] px-2 py-2">{FIELD_LABELS.raw_text}</th>
             {editableFields.map((f) => (
               <th key={f} className="min-w-[88px] px-2 py-2">
-                {FIELD_LABELS[f as keyof typeof FIELD_LABELS] ?? f}
+                {FIELD_LABELS[f as InquiryFilterField] ?? f}
               </th>
             ))}
             <th className="px-2 py-2">Stav</th>
@@ -99,6 +100,7 @@ export function InquiryEditorTable({ rows, onChange }: Props) {
         </thead>
         <tbody>
           {rows.map((row) => {
+            const required = new Set(inquiryRequiredFields(row.norma, row.raw_text));
             const missing = new Set(inquiryMissingFields(row));
             const hasError = Boolean(row.parse_error) || missing.size > 0;
             return (
@@ -108,10 +110,8 @@ export function InquiryEditorTable({ rows, onChange }: Props) {
                   <span className="line-clamp-2">{row.raw_text}</span>
                 </td>
                 {editableFields.map((field) => {
-                  const isRequired = (INQUIRY_REQUIRED_FIELDS as readonly string[]).includes(
-                    field,
-                  );
-                  const isBad = isRequired && missing.has(field as InquiryRequiredField);
+                  const isRequired = required.has(field as InquiryFilterField);
+                  const isBad = isRequired && missing.has(field as InquiryFilterField);
                   return (
                     <td key={field} className="px-1 py-1">
                       <input
@@ -124,8 +124,10 @@ export function InquiryEditorTable({ rows, onChange }: Props) {
                           isBad
                             ? "border-red-400 bg-red-50 text-red-900"
                             : "border-slate-200 bg-white",
+                          !isRequired && "bg-slate-50/80",
                         )}
                         aria-invalid={isBad}
+                        placeholder={isRequired ? "" : "—"}
                       />
                     </td>
                   );

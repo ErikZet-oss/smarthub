@@ -1,12 +1,11 @@
 export type InquiryLineParsed = {
   row_index: number;
   raw_text: string;
+  norma: string | null;
+  surface: string | null;
   diameter: string | null;
   length: string | null;
-  norm: string | null;
-  class: string | null;
-  leading_standard: string | null;
-  material: string | null;
+  v_class: string | null;
   quantity: number | null;
   parse_error: string | null;
 };
@@ -20,23 +19,28 @@ export type InquiryDraft = {
 
 export const INQUIRY_DRAFT_STORAGE_KEY = "smarthub_inquiry_draft_v1";
 
-export const INQUIRY_REQUIRED_FIELDS = [
-  "diameter",
-  "length",
-  "norm",
-  "class",
-  "quantity",
-] as const;
+export {
+  inquiryRequiredFields,
+  normRequiresLength,
+  type InquiryFilterField,
+} from "@/lib/inquiry-norm-rules";
 
-export type InquiryRequiredField = (typeof INQUIRY_REQUIRED_FIELDS)[number];
+import {
+  inquiryRequiredFields,
+  type InquiryFilterField,
+} from "@/lib/inquiry-norm-rules";
 
-export function inquiryMissingFields(row: InquiryLineParsed): InquiryRequiredField[] {
-  const missing: InquiryRequiredField[] = [];
-  if (!row.diameter?.trim()) missing.push("diameter");
-  if (!row.length?.trim()) missing.push("length");
-  if (!row.norm?.trim()) missing.push("norm");
-  if (!row.class?.trim()) missing.push("class");
-  if (row.quantity == null || row.quantity <= 0) missing.push("quantity");
+export function inquiryMissingFields(row: InquiryLineParsed): InquiryFilterField[] {
+  const required = inquiryRequiredFields(row.norma, row.raw_text);
+  const missing: InquiryFilterField[] = [];
+  for (const field of required) {
+    const val = row[field];
+    if (field === "quantity") {
+      if (val == null || val <= 0) missing.push(field);
+    } else if (!String(val ?? "").trim()) {
+      missing.push(field);
+    }
+  }
   return missing;
 }
 
@@ -48,12 +52,19 @@ export function normalizeInquiryRowFromApi(raw: Record<string, unknown>): Inquir
   return {
     row_index: Number(raw.row_index ?? 0),
     raw_text: String(raw.raw_text ?? ""),
+    norma:
+      (raw.norma as string | null) ??
+      (raw.norm as string | null) ??
+      (raw.leading_standard as string | null) ??
+      null,
+    surface:
+      (raw.surface as string | null) ?? (raw.material as string | null) ?? null,
     diameter: (raw.diameter as string | null) ?? null,
     length: (raw.length as string | null) ?? null,
-    norm: (raw.norm as string | null) ?? null,
-    class: (raw.class as string | null) ?? null,
-    leading_standard: (raw.leading_standard as string | null) ?? null,
-    material: (raw.material as string | null) ?? null,
+    v_class:
+      (raw.v_class as string | null) ??
+      (raw.class as string | null) ??
+      null,
     quantity:
       raw.quantity === null || raw.quantity === undefined
         ? null

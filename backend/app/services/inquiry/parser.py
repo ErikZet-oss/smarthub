@@ -8,22 +8,33 @@ from typing import Callable
 
 from app.schemas.inquiry import InquiryLineAIOutput, InquiryLineParsed
 from app.services.inquiry.normalize import apply_normalization
+from app.services.inquiry.norm_rules import norm_requires_length
 
 logger = logging.getLogger(__name__)
 
-_SYSTEM_PROMPT = """Si parser dopytov na spojovací materiál (skrutky, matice, podložky).
-Z voľného textu extrahuj štruktúrované polia. Ak hodnotu nevieš určiť, použi null.
-quantity: ak nie je uvedené, daj 1.
-Pre matice bez dĺžky nech length je null.
+_SYSTEM_PROMPT = """Si parser dopytov na spojovací materiál. Extrahuj polia zladené s katalógom SmartHub:
+
+- norma: leading standard (napr. DIN 933, DIN 934, 934, DIN 125)
+- surface: povrchová úprava / materiál (napr. Oceľ pozinkovaná, Nerez A2, Mosadz)
+- diameter: priemer (M3, M10, …)
+- length: dĺžka v mm — LEN pre skrutky, zvary a pod. s dĺžkou
+- v_class: trieda pevnosti (8.8, 10.9, …) — typicky len pri skrutkách
+- quantity: počet ks (predvolene 1)
+
+Dôležité pravidlá:
+- Matice (DIN 934, DIN 985, …), podložky (DIN 125, DIN 127, …) NEMAJÚ dĺžku → length = null
+- Pri skrutke M10x50 je diameter M10 a length 50
+- A2/A4 pri nerezi daj do surface (Nerez A2), nie do v_class
+- Ak hodnotu nevieš určiť, použi null
 
 Príklady:
-- "skrutka M10x50 DIN933 8.8 pozinkovaná" → diameter M10, length 50, norm DIN933, product_class 8.8, material pozinkovaná
-- "Šesťhranná matica DIN 934 Oceľ Pozinkované M3" → diameter M3, norm DIN934, material pozinkované, length null
-- "6x matica M8 DIN934 8" → diameter M8, norm DIN934, product_class 8, quantity 6
+- "skrutka M10x50 DIN933 8.8 pozinkovaná" → norma DIN933, diameter M10, length 50, v_class 8.8, surface Oceľ pozinkovaná
+- "Šesťhranná matica DIN 934 Oceľ Pozinkované M3" → norma DIN934, diameter M3, surface Oceľ pozinkovaná, length null
+- "6x matica M8 DIN934" → norma DIN934, diameter M8, quantity 6, length null
 """
 
 _JSON_KEYS_HINT = (
-    "Vráť JSON s kľúčmi: diameter, length, norm, product_class, leading_standard, material, quantity. "
+    "Vráť JSON s kľúčmi: norma, surface, diameter, length, v_class, quantity. "
     "Použi null pre neznáme hodnoty."
 )
 
@@ -40,12 +51,11 @@ def _gemini_inquiry_response_schema() -> dict[str, object]:
     return {
         "type": "object",
         "properties": {
+            "norma": {"type": "string"},
+            "surface": {"type": "string"},
             "diameter": {"type": "string"},
             "length": {"type": "string"},
-            "norm": {"type": "string"},
-            "product_class": {"type": "string"},
-            "leading_standard": {"type": "string"},
-            "material": {"type": "string"},
+            "v_class": {"type": "string"},
             "quantity": {"type": "integer"},
         },
     }
@@ -116,12 +126,20 @@ def _response_text(response) -> str:
 
 
 def _normalize_ai_payload(payload: dict[str, object]) -> dict[str, object]:
-    """Mapovanie kľúčov z API na Pydantic (class → product_class)."""
+    """Mapovanie starších kľúčov z AI odpovede."""
     out = dict(payload)
-    if "class" in out and "product_class" not in out:
-        out["product_class"] = out.pop("class")
-    if "class_" in out and "product_class" not in out:
-        out["product_class"] = out.pop("class_")
+    if "norm" in out and "norma" not in out:
+        out["norma"] = out.pop("norm")
+    if "leading_standard" in out and "norma" not in out:
+        out["norma"] = out.pop("leading_standard")
+    if "material" in out and "surface" not in out:
+        out["surface"] = out.pop("material")
+    if "product_class" in out and "v_class" not in out:
+        out["v_class"] = out.pop("product_class")
+    if "class" in out and "v_class" not in out:
+        out["v_class"] = out.pop("class")
+    if "class_" in out and "v_class" not in out:
+        out["v_class"] = out.pop("class_")
     return out
 
 
@@ -158,56 +176,59 @@ def _heuristic_parse(raw_text: str) -> InquiryLineAIOutput | None:
         if m:
             length = m.group(1).replace(",", ".")
 
-    norm = None
+    norma = None
     m = re.search(r"\bDIN\s*[-]?\s*(\d+)\b", t, re.IGNORECASE)
     if m:
-        norm = f"DIN{m.group(1)}"
+        norma = f"DIN{m.group(1)}"
 
-    product_class = None
+    v_class = None
     m = re.search(r"\bA[24]\b", t, re.IGNORECASE)
     if m:
-        product_class = m.group(0).upper()
+        v_class = None  # A2/A4 ide do surface
     else:
         norm_digits = ""
-        if norm:
-            m_norm = re.search(r"\d+", norm)
+        if norma:
+            m_norm = re.search(r"\d+", norma)
             if m_norm:
                 norm_digits = m_norm.group(0)
         for m in re.finditer(r"\b(\d+(?:[,.]\d+)?)\b", t):
             val = m.group(1).replace(",", ".")
             if norm_digits and val in norm_digits:
                 continue
-            product_class = val
-            break
+            if re.fullmatch(r"\d+(?:\.\d+)?", val):
+                v_class = val
+                break
 
-    material = None
+    surface = None
     low = t.casefold()
-    for key, label in (
-        ("pozink", "pozinkované"),
-        ("nerez", "nerez"),
-        ("ocel", "oceľ"),
-        ("mosadz", "mosadz"),
-        ("a2", "A2"),
-        ("a4", "A4"),
-    ):
-        if key in low:
-            material = label
-            break
+    if "a4" in low and "nerez" in low:
+        surface = "Nerez A4"
+    elif "a2" in low or "nerez" in low:
+        surface = "Nerez A2"
+    elif "pozink" in low:
+        surface = "Oceľ pozinkovaná"
+    elif "mosadz" in low:
+        surface = "Mosadz"
+    elif "ocel" in low or "oceľ" in low:
+        surface = "Oceľ"
+
+    if not norm_requires_length(norma, t):
+        length = None
 
     qty = 1
     m = re.match(r"^\s*(\d+)\s*[x×]\s*", t, re.IGNORECASE)
     if m:
         qty = int(m.group(1))
 
-    if not any([diameter, norm, length, product_class, material]):
+    if not any([diameter, norma, length, v_class, surface]):
         return None
 
     return InquiryLineAIOutput(
         diameter=diameter,
         length=length,
-        norm=norm,
-        class_=product_class,
-        material=material,
+        norma=norma,
+        v_class=v_class,
+        surface=surface,
         quantity=qty,
     )
 
