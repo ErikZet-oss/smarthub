@@ -16,6 +16,7 @@ from app.schemas.inquiry import (
     InquiryScrapedOffer,
 )
 from app.services.inquiry.catalog_match import find_catalog_products
+from app.services.inquiry.catalog_snap import snap_inquiry_batch_to_catalog
 from app.services.inquiry.pricing import inquiry_line_total_eur
 from app.services.scraper_service import ScraperProductNotFoundError, ScraperService, load_scraper_config
 from app.services.supplier_logos import supplier_logo_public_url
@@ -202,7 +203,7 @@ async def _run_line_async(
         status, message = prevalidation
         return result.model_copy(update={"status": status, "error": message})
 
-    products = find_catalog_products(session, row, limit=1)
+    products = find_catalog_products(session, row, limit=5, supplier_ids=supplier_ids)
     if not products:
         return result.model_copy(update={"status": "no_product", "error": "Produkt v katalógu nenájdený."})
 
@@ -298,6 +299,8 @@ async def run_inquiry_batch_async(
         raise ValueError("Vyber aspoň jedného dodávateľa.")
     if not rows:
         raise ValueError("Dopyt neobsahuje žiadne riadky.")
+
+    rows = snap_inquiry_batch_to_catalog(session, rows)
 
     semaphore = asyncio.Semaphore(_SUPPLIER_SCRAPE_CONCURRENCY)
     results: list[InquiryLineRunResult] = []
