@@ -15,8 +15,8 @@ class InquiryLineAIOutput(BaseModel):
     norm: Optional[str] = None
     class_: Optional[str] = Field(
         default=None,
-        validation_alias=AliasChoices("class", "class_"),
-        serialization_alias="class",
+        validation_alias=AliasChoices("class", "class_", "product_class"),
+        serialization_alias="product_class",
     )
     leading_standard: Optional[str] = None
     material: Optional[str] = None

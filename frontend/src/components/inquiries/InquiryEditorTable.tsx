@@ -130,10 +130,15 @@ export function InquiryEditorTable({ rows, onChange }: Props) {
                     </td>
                   );
                 })}
-                <td className="px-2 py-1.5">
+                <td className="max-w-[140px] px-2 py-1.5">
                   {row.parse_error ? (
-                    <span className="text-red-600" title={row.parse_error}>
-                      Chyba AI
+                    <span
+                      className="line-clamp-2 text-red-600"
+                      title={row.parse_error}
+                    >
+                      {row.parse_error.length > 48
+                        ? `${row.parse_error.slice(0, 48)}…`
+                        : row.parse_error}
                     </span>
                   ) : hasError ? (
                     <span className="text-red-600">Doplniť</span>
