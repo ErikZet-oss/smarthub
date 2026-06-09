@@ -4,6 +4,7 @@ import re
 
 from app.schemas.inquiry import InquiryLineParsed
 from app.services.inquiry.norm_rules import norm_requires_length, search_key
+from app.services.inquiry.product_norm_hints import infer_norma_from_text
 
 
 def norm_display_candidates(parsed: InquiryLineParsed) -> list[str]:
@@ -98,6 +99,10 @@ def apply_normalization(parsed: InquiryLineParsed) -> InquiryLineParsed:
     data["surface"] = normalize_surface(parsed.surface)
     if parsed.norma:
         data["norma"] = parsed.norma.strip().upper().replace("  ", " ")
+    else:
+        inferred = infer_norma_from_text(parsed.raw_text)
+        if inferred:
+            data["norma"] = inferred
     if not norm_requires_length(parsed.norma, parsed.raw_text) and not data.get("length"):
         data["length"] = "0"
     return InquiryLineParsed.model_validate(data)

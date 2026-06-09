@@ -9,10 +9,14 @@ from typing import Callable
 from app.schemas.inquiry import InquiryLineAIOutput, InquiryLineParsed
 from app.services.inquiry.normalize import apply_normalization
 from app.services.inquiry.norm_rules import norm_requires_length
+from app.services.inquiry.product_norm_hints import (
+    infer_norma_from_text,
+    product_norm_hints_for_prompt,
+)
 
 logger = logging.getLogger(__name__)
 
-_SYSTEM_PROMPT = """Si parser dopytov na spojovací materiál. Extrahuj polia zladené s katalógom SmartHub:
+_SYSTEM_PROMPT = f"""Si parser dopytov na spojovací materiál. Extrahuj polia zladené s katalógom SmartHub:
 
 - norma: leading standard (napr. DIN 933, DIN 934, 934, DIN 125)
 - surface: povrchová úprava / materiál (napr. Oceľ pozinkovaná, Nerez A2, Mosadz)
@@ -23,14 +27,18 @@ _SYSTEM_PROMPT = """Si parser dopytov na spojovací materiál. Extrahuj polia zl
 
 Dôležité pravidlá:
 - Matice (DIN 934, DIN 985, …), podložky (DIN 125, DIN 127, …) NEMAJÚ dĺžku → length = null
+- Závitová tyč má normu DIN 976 (v katalógu aj „976“) a VŽDY má dĺžku (napr. M10x1000)
 - Pri skrutke M10x50 je diameter M10 a length 50
 - A2/A4 pri nerezi daj do surface (Nerez A2), nie do v_class
 - Ak hodnotu nevieš určiť, použi null
+
+{product_norm_hints_for_prompt()}
 
 Príklady:
 - "skrutka M10x50 DIN933 8.8 pozinkovaná" → norma DIN933, diameter M10, length 50, v_class 8.8, surface Oceľ pozinkovaná
 - "Šesťhranná matica DIN 934 Oceľ Pozinkované M3" → norma DIN934, diameter M3, surface Oceľ pozinkovaná, length null
 - "6x matica M8 DIN934" → norma DIN934, diameter M8, quantity 6, length null
+- "Závitová tyč M10x1000 pozinkovaná" → norma DIN976, diameter M10, length 1000, surface Oceľ pozinkovaná
 """
 
 _JSON_KEYS_HINT = (
@@ -180,6 +188,8 @@ def _heuristic_parse(raw_text: str) -> InquiryLineAIOutput | None:
     m = re.search(r"\bDIN\s*[-]?\s*(\d+)\b", t, re.IGNORECASE)
     if m:
         norma = f"DIN{m.group(1)}"
+    if norma is None:
+        norma = infer_norma_from_text(t)
 
     v_class = None
     m = re.search(r"\bA[24]\b", t, re.IGNORECASE)

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 
+from app.services.inquiry.product_norm_hints import threaded_rod_text
+
 def search_key(value: str | None) -> str:
     if not value:
         return ""
@@ -53,6 +55,21 @@ def norm_key(norma: str | None) -> str:
     return search_key(norma)
 
 
+_NORMS_WITH_LENGTH_KEYS: frozenset[str] = frozenset(
+    {
+        "933",
+        "DIN933",
+        "975",
+        "DIN975",
+        "976",
+        "DIN976",
+        "931",
+        "DIN931",
+        "6914",
+        "DIN6914",
+    }
+)
+
 def norm_requires_length(norma: str | None, raw_text: str = "") -> bool:
     key = norm_key(norma)
     if key in NORMS_WITHOUT_LENGTH_KEYS:
@@ -61,6 +78,12 @@ def norm_requires_length(norma: str | None, raw_text: str = "") -> bool:
         return False
     if _NO_LENGTH_TEXT.search(raw_text or ""):
         return False
+    if key in _NORMS_WITH_LENGTH_KEYS:
+        return True
+    if key.startswith("DIN") and key[3:] in _NORMS_WITH_LENGTH_KEYS:
+        return True
+    if threaded_rod_text(raw_text):
+        return True
     return bool(_BOLT_TEXT.search(raw_text or ""))
 
 
