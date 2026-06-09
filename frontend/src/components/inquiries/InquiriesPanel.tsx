@@ -4,6 +4,7 @@ import { ClipboardList, Loader2, Upload } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { InquiryEditorTable } from "@/components/inquiries/InquiryEditorTable";
+import { InquiryResultsTable } from "@/components/inquiries/InquiryResultsTable";
 import {
   InquirySupplierPicker,
   inquirySuppliersReady,
@@ -18,6 +19,8 @@ import {
   type InquiryLineParsed,
   inquiryRowIsValid,
   normalizeInquiryRowFromApi,
+  normalizeInquiryRunResult,
+  type InquiryRunTaskResult,
 } from "@/types/inquiry";
 
 type Props = {
@@ -61,6 +64,9 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
   const [sourceFileName, setSourceFileName] = useState("");
   const [draftPrompt, setDraftPrompt] = useState<InquiryDraft | null>(null);
   const [selectedSupplierIds, setSelectedSupplierIds] = useState<number[]>([]);
+  const [running, setRunning] = useState(false);
+  const [runProgressPct, setRunProgressPct] = useState<number | null>(null);
+  const [runResult, setRunResult] = useState<InquiryRunTaskResult | null>(null);
 
   useEffect(() => {
     if (!authReady) return;
@@ -193,6 +199,63 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
     }
   };
 
+  const onRunInquiry = async () => {
+    if (!apiToken || !allValid) return;
+    setRunning(true);
+    setRunProgressPct(0);
+    setRunResult(null);
+    setStatus("Spúšťam vyhľadávanie u dodávateľov…");
+    try {
+      const startRes = await apiFetch(`${apiBase}/api/inquiries/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rows,
+          supplier_ids: selectedSupplierIds,
+          source_filename: sourceFileName,
+        }),
+      });
+      const startParsed = await readApiJsonOrText(startRes);
+      if (!startParsed.ok) throw new Error(startParsed.detail);
+      const startData = startParsed.data as { task_id?: string };
+      if (!startRes.ok || !startData.task_id) {
+        throw new Error("Nepodarilo sa spustiť dopyt.");
+      }
+
+      const taskId = startData.task_id;
+      while (true) {
+        await new Promise((r) => setTimeout(r, 1500));
+        const stRes = await apiFetch(`${apiBase}/api/inquiries/run/${taskId}`);
+        const stParsed = await readApiJsonOrText(stRes);
+        if (!stParsed.ok) throw new Error(stParsed.detail);
+        const st = stParsed.data as {
+          state?: string;
+          progress_pct?: number;
+          error?: string;
+          result?: Record<string, unknown>;
+        };
+        setRunProgressPct(typeof st.progress_pct === "number" ? st.progress_pct : null);
+        if (st.state === "done" && st.result) {
+          const result = normalizeInquiryRunResult(st.result);
+          setRunResult(result);
+          setStatus(
+            `Dopyt hotový — ${result.rows_with_offer}/${result.total_rows} riadkov s cenou.`,
+          );
+          break;
+        }
+        if (st.state === "error") {
+          throw new Error(st.error || "Dopyt zlyhal.");
+        }
+        setStatus(`Hľadám ceny… ${st.progress_pct ?? 0} %`);
+      }
+    } catch (e) {
+      setStatus(e instanceof Error ? e.message : "Chyba pri spúšťaní dopytu.");
+    } finally {
+      setRunning(false);
+      setRunProgressPct(null);
+    }
+  };
+
   if (!authReady) {
     return <p className="text-sm text-slate-500">Načítavam prihlásenie…</p>;
   }
@@ -281,7 +344,8 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
           <div className="flex flex-wrap items-center gap-3">
             <Button
               type="button"
-              disabled={!allValid}
+              disabled={!allValid || running || parsing}
+              onClick={() => void onRunInquiry()}
               title={
                 allValid
                   ? ""
@@ -290,7 +354,14 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
                     : "Doplň všetky riadky bez chýb"
               }
             >
-              Spustiť dopyt
+              {running ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Hľadám ceny…
+                </>
+              ) : (
+                "Spustiť dopyt"
+              )}
             </Button>
             {!allValid ? (
               <span className="text-xs text-slate-500">
@@ -303,7 +374,16 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
                 Pripravené — {selectedSupplierIds.length} dodávateľov, {rows.length} riadkov.
               </span>
             )}
+            {running && runProgressPct != null ? (
+              <div className="h-2 w-full min-w-[12rem] flex-1 overflow-hidden rounded bg-slate-100">
+                <div
+                  className="h-full bg-emerald-500 transition-all"
+                  style={{ width: `${runProgressPct}%` }}
+                />
+              </div>
+            ) : null}
           </div>
+          {runResult ? <InquiryResultsTable apiBase={apiBase} result={runResult} /> : null}
         </>
       ) : null}
     </div>

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
@@ -117,3 +117,50 @@ class InquiryParseTaskResult(BaseModel):
     rows: list[InquiryLineParsed]
     source_filename: str
     total_rows: int
+
+
+class InquiryRunRequest(BaseModel):
+    rows: list[InquiryLineParsed]
+    supplier_ids: list[int]
+    source_filename: str = ""
+
+
+class InquiryScrapedOffer(BaseModel):
+    supplier_id: int
+    supplier_name: str
+    supplier_code: str
+    logo_url: Optional[str] = None
+    supplier_product_url: Optional[str] = None
+    price_eur: Optional[float] = None
+    stock: Optional[int] = None
+    error: Optional[str] = None
+    logged_in: Optional[bool] = None
+
+
+class InquiryLineRunResult(BaseModel):
+    row_index: int
+    raw_text: str
+    quantity: Optional[int] = None
+    norma: Optional[str] = None
+    surface: Optional[str] = None
+    diameter: Optional[str] = None
+    length: Optional[str] = None
+    v_class: Optional[str] = None
+    product_id: Optional[int] = None
+    internal_code: Optional[str] = None
+    status: Literal["ok", "no_product", "no_mapping", "no_price", "error"] = "error"
+    no_stock: bool = False
+    best_offer: Optional[InquiryScrapedOffer] = None
+    offers: list[InquiryScrapedOffer] = Field(default_factory=list)
+    line_total_eur: Optional[float] = None
+    error: Optional[str] = None
+
+
+class InquiryRunTaskResult(BaseModel):
+    rows: list[InquiryLineRunResult]
+    source_filename: str
+    supplier_ids: list[int]
+    total_rows: int
+    rows_with_offer: int
+    rows_no_stock: int
+    total_eur: Optional[float] = None

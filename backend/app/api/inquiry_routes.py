@@ -11,7 +11,7 @@ from sqlmodel import Session
 from app.api.deps import AuthUserContext, get_current_user
 from app.db import get_session
 from app.schemas.common import ProductSearchFilters
-from app.schemas.inquiry import InquiryParseTaskResult
+from app.schemas.inquiry import InquiryParseTaskResult, InquiryRunRequest, InquiryRunTaskResult
 from app.services.inquiry.catalog_snap import (
     CatalogSnapCache,
     resolve_catalog_norma,
@@ -19,25 +19,29 @@ from app.services.inquiry.catalog_snap import (
 )
 from app.services.inquiry.file_reader import MAX_INQUIRY_ROWS, read_inquiry_rows_from_bytes
 from app.services.inquiry.parser import parse_inquiry_batch
+from app.services.inquiry.pipeline import run_inquiry_batch, validate_run_request
 
 router = APIRouter(tags=["inquiries"])
 
 _INQUIRY_PARSE_TASKS: dict[str, dict[str, object]] = {}
+_INQUIRY_RUN_TASKS: dict[str, dict[str, object]] = {}
 _INQUIRY_PARSE_LOCK = threading.Lock()
 
 _UPLOAD_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "inquiry_uploads"
 _MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 
 
-def _task_snapshot(task_id: str) -> dict[str, object] | None:
+def _task_snapshot(task_id: str, *, run: bool = False) -> dict[str, object] | None:
+    store = _INQUIRY_RUN_TASKS if run else _INQUIRY_PARSE_TASKS
     with _INQUIRY_PARSE_LOCK:
-        task = _INQUIRY_PARSE_TASKS.get(task_id)
+        task = store.get(task_id)
         return dict(task) if task else None
 
 
-def _task_update(task_id: str, **patch: object) -> None:
+def _task_update(task_id: str, *, run: bool = False, **patch: object) -> None:
+    store = _INQUIRY_RUN_TASKS if run else _INQUIRY_PARSE_TASKS
     with _INQUIRY_PARSE_LOCK:
-        task = _INQUIRY_PARSE_TASKS.get(task_id)
+        task = store.get(task_id)
         if task is None:
             return
         task.update(patch)
@@ -215,3 +219,129 @@ def inquiry_parse_preview_row(
     row_index = int(payload.get("row_index") or 1)
     parsed = parse_inquiry_line(raw, row_index=row_index)
     return parsed.model_dump(mode="json", by_alias=True)
+
+
+def _run_inquiry_task(
+    task_id: str,
+    *,
+    rows: list,
+    supplier_ids: list[int],
+    source_filename: str,
+    user_id: int,
+) -> None:
+    _task_update(task_id, run=True, state="running")
+    try:
+        from app.db import engine
+        from app.schemas.inquiry import InquiryLineParsed
+
+        parsed_rows = [InquiryLineParsed.model_validate(r) for r in rows]
+        total = len(parsed_rows)
+        _task_update(task_id, run=True, total_rows=total, rows_done=0)
+
+        def progress(done: int, tot: int) -> None:
+            _task_update(task_id, run=True, rows_done=done, total_rows=tot)
+
+        with Session(engine) as session:
+            result = run_inquiry_batch(
+                session,
+                rows=parsed_rows,
+                supplier_ids=supplier_ids,
+                user_id=user_id,
+                progress_cb=progress,
+            )
+        result = result.model_copy(update={"source_filename": source_filename})
+        _task_update(
+            task_id,
+            run=True,
+            state="done",
+            rows_done=total,
+            total_rows=total,
+            result=result.model_dump(mode="json"),
+            finished_at=time.time(),
+        )
+    except Exception as exc:
+        _task_update(
+            task_id,
+            run=True,
+            state="error",
+            error=str(exc),
+            error_code=400,
+            finished_at=time.time(),
+        )
+
+
+@router.post("/inquiries/run")
+async def inquiry_run_start(
+    payload: InquiryRunRequest,
+    user: AuthUserContext = Depends(get_current_user),
+):
+    validate_run_request(payload.rows, payload.supplier_ids)
+    if len(payload.rows) > MAX_INQUIRY_ROWS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Maximálne {MAX_INQUIRY_ROWS} riadkov na jeden dopyt.",
+        )
+
+    task_id = uuid4().hex
+    rows_json = [r.model_dump(mode="json") for r in payload.rows]
+    with _INQUIRY_PARSE_LOCK:
+        _INQUIRY_RUN_TASKS[task_id] = {
+            "task_id": task_id,
+            "state": "queued",
+            "rows_done": 0,
+            "total_rows": len(payload.rows),
+            "result": None,
+            "error": None,
+            "error_code": None,
+            "source_filename": payload.source_filename,
+            "created_at": time.time(),
+            "updated_at": time.time(),
+            "finished_at": None,
+        }
+
+    thread = threading.Thread(
+        target=_run_inquiry_task,
+        kwargs={
+            "task_id": task_id,
+            "rows": rows_json,
+            "supplier_ids": payload.supplier_ids,
+            "source_filename": payload.source_filename,
+            "user_id": user.id,
+        },
+        name=f"inquiry-run-{task_id[:8]}",
+        daemon=True,
+    )
+    thread.start()
+    return {
+        "task_id": task_id,
+        "state": "queued",
+        "total_rows": len(payload.rows),
+    }
+
+
+@router.get("/inquiries/run/{task_id}")
+def inquiry_run_status(
+    task_id: str,
+    _: AuthUserContext = Depends(get_current_user),
+):
+    task = _task_snapshot(task_id, run=True)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Run task neexistuje.")
+
+    total_rows = int(task.get("total_rows") or 0)
+    rows_done = int(task.get("rows_done") or 0)
+    progress_pct = 0
+    if total_rows > 0:
+        progress_pct = min(100, int((rows_done / total_rows) * 100))
+
+    return {
+        "task_id": task_id,
+        "state": task.get("state"),
+        "rows_done": rows_done,
+        "total_rows": total_rows,
+        "progress_pct": progress_pct,
+        "source_filename": task.get("source_filename"),
+        "result": task.get("result"),
+        "error": task.get("error"),
+        "error_code": task.get("error_code"),
+    }
