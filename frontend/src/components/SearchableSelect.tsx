@@ -15,6 +15,8 @@ type SearchableSelectProps = {
   emptyLabel?: string;
   placeholder?: string;
   className?: string;
+  /** Menší trigger — pre mobilné karty dopytu. */
+  size?: "default" | "compact";
 };
 
 export function SearchableSelect({
@@ -25,6 +27,7 @@ export function SearchableSelect({
   emptyLabel = "Všetky",
   placeholder = "Hľadať v zozname…",
   className,
+  size = "default",
 }: SearchableSelectProps) {
   const genId = useId();
   const baseId = idProp ?? genId.replace(/:/g, "");
@@ -110,14 +113,18 @@ export function SearchableSelect({
           }
         }}
         className={cn(
-          "flex h-10 w-full items-center justify-between gap-2 rounded-lg border border-slate-300 bg-white px-3 text-left text-sm text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500",
+          "flex w-full items-center justify-between gap-1 border border-slate-300 bg-white text-left text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500",
+          size === "compact"
+            ? "h-6 min-h-6 rounded-md px-1.5 text-[10px] leading-tight"
+            : "h-10 gap-2 rounded-lg px-3 text-sm",
           !value && "text-slate-500",
         )}
       >
         <span className="min-w-0 flex-1 truncate">{displayLabel}</span>
         <ChevronDown
           className={cn(
-            "h-4 w-4 shrink-0 text-slate-500 transition-transform",
+            "shrink-0 text-slate-500 transition-transform",
+            size === "compact" ? "h-3 w-3" : "h-4 w-4",
             open && "rotate-180",
           )}
           aria-hidden

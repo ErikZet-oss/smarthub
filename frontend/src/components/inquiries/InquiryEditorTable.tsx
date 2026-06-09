@@ -40,6 +40,15 @@ const SELECT_FIELDS: (keyof InquiryFilterOptions)[] = [
   "v_class",
 ];
 
+/** Kratšie popisky pre úzke mobilné stĺpce (3 vedľa seba). */
+const COMPACT_FIELD_LABELS: Record<(typeof SELECT_FIELDS)[number], string> = {
+  norma: "Norma",
+  surface: "Povrch",
+  diameter: "Priem.",
+  length: "Dĺžka",
+  v_class: "Class",
+};
+
 type RowProps = {
   row: InquiryLineParsed;
   apiBase: string;
@@ -145,20 +154,21 @@ function useInquiryEditorRowState({
     const isCatalogBad = catalogBad.has(field);
     const cell = row[field];
     return (
-      <div key={field} className={compact ? "min-w-0" : undefined}>
+      <div key={field} className={compact ? "min-w-0 overflow-hidden" : undefined}>
         {compact ? (
-          <label className="mb-0.5 block text-[9px] font-medium uppercase tracking-wide text-slate-500">
-            {FIELD_LABELS[field]}
+          <label className="mb-px block truncate text-[8px] font-semibold uppercase leading-none tracking-tight text-slate-500">
+            {COMPACT_FIELD_LABELS[field]}
           </label>
         ) : null}
         <SearchableSelect
           value={cell == null ? "" : String(cell)}
           onChange={(v) => handleField(field, v)}
           options={opts[field]}
-          emptyLabel={isRequired ? "Vyber…" : "—"}
+          emptyLabel={isRequired ? "…" : "—"}
           placeholder="Hľadať…"
+          size={compact ? "compact" : "default"}
           className={cn(
-            compact ? "h-7 w-full text-[11px] md:h-10 md:text-sm" : "h-8 min-w-[80px] text-xs",
+            compact ? "w-full" : "h-8 min-w-[80px] text-xs",
             (isMissing || isCatalogBad) &&
               "[&_button]:border-amber-500 [&_button]:bg-amber-50",
             !isRequired && !isCatalogBad && "[&_button]:bg-slate-50/80",
@@ -166,10 +176,10 @@ function useInquiryEditorRowState({
         />
         {isCatalogBad ? (
           <p
-            className="mt-0.5 line-clamp-2 text-[10px] text-amber-700"
+            className="mt-px line-clamp-1 text-[8px] leading-tight text-amber-700 md:text-[10px]"
             title={catalogMessages.find((m) => m.includes(FIELD_LABELS[field as InquiryFilterField]))}
           >
-            Nie je v katalógu
+            Mimo katalógu
           </p>
         ) : null}
       </div>
@@ -208,11 +218,13 @@ function InquiryEditorRow({ row, apiBase, apiFetch, onChange, onDelete, variant 
               : "border-slate-200",
         )}
       >
-        <div className="mb-2 flex items-start gap-1.5 md:mb-3 md:gap-2">
+        <div className="mb-1.5 flex items-start gap-1.5 border-b border-slate-100 pb-1.5 md:mb-3 md:gap-2 md:border-0 md:pb-0">
           <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-slate-100 text-[10px] font-semibold text-slate-600 md:h-7 md:w-7 md:text-xs">
             {row.row_index}
           </span>
-          <p className="min-w-0 flex-1 text-[11px] leading-snug text-slate-800 md:text-sm">{row.raw_text}</p>
+          <p className="min-w-0 flex-1 line-clamp-2 text-[11px] leading-snug text-slate-800 md:line-clamp-none md:text-sm">
+            {row.raw_text}
+          </p>
           <button
             type="button"
             onClick={onDelete}
@@ -224,13 +236,13 @@ function InquiryEditorRow({ row, apiBase, apiFetch, onChange, onDelete, variant 
           </button>
         </div>
 
-        <div className="grid grid-cols-2 gap-1.5 md:gap-2.5">
+        <div className="grid grid-cols-3 gap-x-1 gap-y-1.5 md:grid-cols-2 md:gap-2.5">
           {SELECT_FIELDS.map((field) => renderSelect(field, true))}
         </div>
 
-        <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] items-end gap-2 md:mt-3 md:gap-3">
+        <div className="mt-1.5 grid grid-cols-[minmax(0,1fr)_auto] items-end gap-2 md:mt-3 md:gap-3">
           <div>
-            <label className="mb-0.5 block text-[9px] font-medium uppercase tracking-wide text-slate-500">
+            <label className="mb-px block text-[8px] font-semibold uppercase leading-none tracking-tight text-slate-500 md:mb-0.5 md:text-[9px]">
               {FIELD_LABELS.quantity}
             </label>
             <input
@@ -240,7 +252,7 @@ function InquiryEditorRow({ row, apiBase, apiFetch, onChange, onDelete, variant 
               value={row.quantity ?? ""}
               onChange={(e) => handleField("quantity", e.target.value)}
               className={cn(
-                "h-7 w-full rounded-md border px-2 text-xs md:h-10 md:rounded-lg md:px-3 md:text-sm",
+                "h-6 w-full rounded-md border px-1.5 text-[10px] md:h-10 md:rounded-lg md:px-3 md:text-sm",
                 missing.has("quantity")
                   ? "border-red-400 bg-red-50 text-red-900"
                   : "border-slate-200 bg-white",
@@ -248,21 +260,21 @@ function InquiryEditorRow({ row, apiBase, apiFetch, onChange, onDelete, variant 
             />
           </div>
           <div className="text-right">
-            <p className="mb-0.5 text-[9px] font-medium uppercase tracking-wide text-slate-500">
+            <p className="mb-px text-[8px] font-semibold uppercase leading-none tracking-tight text-slate-500 md:mb-0.5 md:text-[9px]">
               Stav
             </p>
             {statusMessage ? (
               <span
                 className={cn(
-                  "inline-block max-w-[7rem] text-[10px] leading-snug md:max-w-[9rem] md:text-xs",
+                  "inline-block max-w-[4.5rem] text-[9px] leading-tight md:max-w-[9rem] md:text-xs",
                   row.parse_error || catalogMessages.length ? "text-amber-700" : "text-red-600",
                 )}
                 title={catalogMessages.join("\n") || statusMessage}
               >
-                {statusMessage.length > 40 ? `${statusMessage.slice(0, 40)}…` : statusMessage}
+                {statusMessage.length > 28 ? `${statusMessage.slice(0, 28)}…` : statusMessage}
               </span>
             ) : (
-              <span className="text-xs font-medium text-emerald-600 md:text-sm">OK</span>
+              <span className="text-[10px] font-medium text-emerald-600 md:text-sm">OK</span>
             )}
           </div>
         </div>

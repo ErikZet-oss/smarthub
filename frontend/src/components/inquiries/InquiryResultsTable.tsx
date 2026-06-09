@@ -83,10 +83,14 @@ function statusLabel(row: InquiryLineRunResult): string {
   return labels[row.status] ?? "Chyba";
 }
 
-function statusBadge(row: InquiryLineRunResult) {
+function statusBadge(row: InquiryLineRunResult, compact?: boolean) {
+  const compactCls = compact
+    ? "h-5 shrink-0 rounded-md px-1.5 py-0 text-[10px] [&_svg]:mr-0.5 [&_svg]:h-2.5 [&_svg]:w-2.5"
+    : "";
+
   if (row.status === "ok") {
     return (
-      <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">
+      <Badge className={cn("bg-emerald-100 text-emerald-800 hover:bg-emerald-100", compactCls)}>
         <CheckCircle2 className="mr-1 h-3 w-3" />
         OK
       </Badge>
@@ -94,34 +98,39 @@ function statusBadge(row: InquiryLineRunResult) {
   }
   if (row.status === "no_stock" || (row.no_stock && row.best_offer)) {
     return (
-      <Badge className="bg-amber-100 text-amber-900 hover:bg-amber-100">
+      <Badge className={cn("bg-amber-100 text-amber-900 hover:bg-amber-100", compactCls)}>
         <AlertTriangle className="mr-1 h-3 w-3" />
-        Nie je skladom
+        {compact ? "Sklad" : "Nie je skladom"}
       </Badge>
     );
   }
 
   if (row.status === "catalog_mismatch") {
     return (
-      <Badge className="border-amber-200 bg-amber-50 text-amber-900" title={row.error ?? undefined}>
-        {statusLabel(row)}
+      <Badge
+        className={cn("border-amber-200 bg-amber-50 text-amber-900", compactCls)}
+        title={row.error ?? undefined}
+      >
+        {compact ? "Katalóg" : statusLabel(row)}
       </Badge>
     );
   }
 
   const text = statusLabel(row);
   const isSoftFail = row.status === "invalid_row";
+  const display = compact && text.length > 12 ? `${text.slice(0, 10)}…` : text.length > 48 ? `${text.slice(0, 45)}…` : text;
 
   return (
     <Badge
-      className={
+      className={cn(
         isSoftFail
           ? "border-orange-200 bg-orange-50 text-orange-800"
-          : "border-red-200 bg-red-50 text-red-700"
-      }
-      title={row.error ?? undefined}
+          : "border-red-200 bg-red-50 text-red-700",
+        compactCls,
+      )}
+      title={row.error ?? text}
     >
-      {text.length > 48 ? `${text.slice(0, 45)}…` : text}
+      {display}
     </Badge>
   );
 }
@@ -268,87 +277,124 @@ function ResultRow({
     <div className="border-b border-slate-100 last:border-b-0">
       {/* Mobil: karta */}
       <div className="lg:hidden">
-        <button
-          type="button"
-          className="flex w-full items-start gap-1.5 px-2 py-2 text-left active:bg-slate-50 md:gap-2 md:px-3 md:py-3"
-          onClick={() => setOpen((v) => !v)}
-          aria-expanded={open}
-        >
-          <span className="mt-0.5 shrink-0 text-slate-400">
-            {open ? <ChevronDown className="h-4 w-4 md:h-5 md:w-5" /> : <ChevronRight className="h-4 w-4 md:h-5 md:w-5" />}
-          </span>
-          <div className="min-w-0 flex-1 space-y-1 md:space-y-2">
-            <div>
-              <p className="text-[11px] font-medium leading-snug text-slate-900 md:text-sm">{row.raw_text}</p>
-              <p className="mt-0.5 text-[10px] text-slate-500 md:text-xs">
+        <div className="px-2 py-2 md:px-3 md:py-2.5">
+          <button
+            type="button"
+            className="flex w-full items-start gap-2 text-left active:opacity-80"
+            onClick={() => row.offers.length > 0 && setOpen((v) => !v)}
+            aria-expanded={open}
+            disabled={row.offers.length === 0}
+          >
+            <span className="mt-0.5 shrink-0 text-slate-400">
+              {row.offers.length > 0 ? (
+                open ? (
+                  <ChevronDown className="h-4 w-4" />
+                ) : (
+                  <ChevronRight className="h-4 w-4" />
+                )
+              ) : (
+                <span className="inline-block h-4 w-4" />
+              )}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="line-clamp-2 text-xs font-medium leading-snug text-slate-900 md:text-sm">
+                {row.raw_text}
+              </p>
+              <p className="mt-0.5 truncate text-[10px] text-slate-500 md:text-xs">
                 #{row.row_index}
                 {row.internal_code ? ` · ${row.internal_code}` : ""}
                 {row.quantity != null ? ` · ${row.quantity} ks` : ""}
               </p>
             </div>
-            {active ? (
-              <div className="flex flex-wrap items-end justify-between gap-2">
+            <div className="shrink-0 pt-0.5">{statusBadge(row, true)}</div>
+          </button>
+
+          {active ? (
+            <div className="mt-2 rounded-lg border border-slate-100 bg-slate-50/90 px-2.5 py-2">
+              <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="text-xs text-slate-500">{active.supplier_name}</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                    {active.supplier_name}
+                  </p>
                   <p
                     className={cn(
-                      "text-xs font-semibold tabular-nums md:text-sm",
+                      "mt-0.5 text-sm font-semibold tabular-nums leading-tight",
                       showWithMargin ? "text-sky-900" : "text-slate-900",
                     )}
                   >
                     {formatScrapePrice(unitPrice, active.supplier_name, active.price_unit)}
                   </p>
                   {showWithMargin ? (
-                    <p className="text-[10px] text-slate-400 line-through">
+                    <p className="text-[10px] tabular-nums text-slate-400 line-through">
                       {formatScrapePrice(active.price_eur, active.supplier_name, active.price_unit)}
                     </p>
                   ) : null}
                 </div>
-                <div className="text-right">
-                  <p className="text-[10px] uppercase tracking-wide text-slate-400">Spolu</p>
+                <div className="shrink-0 text-right">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Spolu</p>
                   <p
                     className={cn(
-                      "text-sm font-semibold tabular-nums md:text-base",
+                      "mt-0.5 text-sm font-bold tabular-nums leading-tight",
                       showWithMargin ? "text-sky-900" : "text-slate-800",
                     )}
                   >
                     {formatEur(lineTotal)}
                   </p>
+                  {showWithMargin && purchaseLineTotal != null ? (
+                    <p className="text-[10px] tabular-nums text-slate-400 line-through">
+                      {formatEur(purchaseLineTotal)}
+                    </p>
+                  ) : null}
                 </div>
               </div>
-            ) : (
-              <div>{statusBadge(row)}</div>
-            )}
-            {active ? <div className="flex flex-wrap gap-2">{statusBadge(row)}</div> : null}
-          </div>
-        </button>
+            </div>
+          ) : (
+            <div className="mt-2">{statusBadge(row)}</div>
+          )}
 
-        <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 px-2 py-1.5 md:gap-3 md:px-3 md:py-2">
-          <label className="flex items-center gap-1 text-[10px] text-slate-600 md:gap-2 md:text-xs">
-            Marža %
-            <input
-              type="text"
-              inputMode="decimal"
-              placeholder="%"
-              value={rowMargin}
-              onChange={(e) => onRowMarginChange(e.target.value)}
+          <div className="mt-2 flex items-center justify-between gap-2 border-t border-slate-100 pt-2">
+            <label
+              className="flex items-center gap-1.5"
               onClick={(e) => e.stopPropagation()}
-              className={marginInputClassName(parseMarginPercentInput(rowMargin) !== null, true)}
-            />
-          </label>
-          {row.offers.length > 0 ? (
-            <span className="text-[10px] text-slate-500 md:text-[11px]">
-              {open ? "Skryť" : "Zobraziť"} {row.offers.length} ponúk
-            </span>
+            >
+              <span className="text-[10px] font-medium text-slate-500">Marža</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder="0"
+                value={rowMargin}
+                onChange={(e) => onRowMarginChange(e.target.value)}
+                className={marginInputClassName(parseMarginPercentInput(rowMargin) !== null, true)}
+                aria-label={`Marža % riadok ${row.row_index}`}
+              />
+              <span className="text-[10px] text-slate-400">%</span>
+            </label>
+            {row.offers.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => setOpen((v) => !v)}
+                className="inline-flex min-h-[28px] items-center gap-0.5 rounded-md px-2 text-[10px] font-medium text-sky-700 hover:bg-sky-50 active:bg-sky-100 md:text-[11px]"
+              >
+                {open ? "Skryť" : "Ponuky"}
+                <span className="tabular-nums text-slate-500">({row.offers.length})</span>
+                {open ? (
+                  <ChevronDown className="h-3 w-3" />
+                ) : (
+                  <ChevronRight className="h-3 w-3" />
+                )}
+              </button>
+            ) : (
+              <span className="text-[10px] text-slate-400">Bez ponúk</span>
+            )}
+          </div>
+
+          {!active && row.error ? (
+            <p className="mt-1.5 text-[10px] leading-snug text-slate-600 md:text-xs">{row.error}</p>
           ) : null}
         </div>
 
-        {!active && row.error ? (
-          <p className="px-2 pb-1.5 text-[10px] leading-snug text-slate-600 md:px-3 md:pb-2 md:text-xs">{row.error}</p>
-        ) : null}
-
         {open && row.offers.length > 0 ? (
-          <div className="space-y-1.5 bg-slate-50/80 px-2 pb-2 pt-0.5 md:space-y-2 md:px-3 md:pb-3">
+          <div className="space-y-1.5 border-t border-slate-100 bg-slate-50/60 px-2 py-2 md:space-y-2 md:px-3">
             <p className="text-[10px] text-slate-500">Klikni na dodávateľa pre výber.</p>
             {row.offers.map((offer) => (
               <OfferRow
