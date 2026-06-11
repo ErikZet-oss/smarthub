@@ -5,6 +5,7 @@ import re
 from app.schemas.inquiry import InquiryLineParsed
 from app.services.inquiry.norm_rules import norm_requires_length, search_key
 from app.services.inquiry.product_norm_hints import infer_norma_from_text
+from app.services.inquiry.stn_to_din import map_standard_to_catalog_din
 
 
 def norm_display_candidates(parsed: InquiryLineParsed) -> list[str]:
@@ -138,12 +139,20 @@ def apply_normalization(parsed: InquiryLineParsed) -> InquiryLineParsed:
         if inferred:
             data["surface"] = inferred
     apply_plastic_material_rules(data, parsed.raw_text)
-    if parsed.norma:
+    mapped = map_standard_to_catalog_din(parsed.norma, parsed.raw_text)
+    if mapped:
+        data["norma"] = mapped
+    elif parsed.norma:
         data["norma"] = parsed.norma.strip().upper().replace("  ", " ")
     else:
         inferred = infer_norma_from_text(parsed.raw_text)
         if inferred:
             data["norma"] = inferred
-    if not norm_requires_length(parsed.norma, parsed.raw_text) and not data.get("length"):
+        else:
+            remapped = map_standard_to_catalog_din(None, parsed.raw_text)
+            if remapped:
+                data["norma"] = remapped
+    final_norma = data.get("norma")
+    if not norm_requires_length(final_norma, parsed.raw_text) and not data.get("length"):
         data["length"] = "0"
     return InquiryLineParsed.model_validate(data)

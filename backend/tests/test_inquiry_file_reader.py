@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from app.services.inquiry.file_reader import (
+    MAX_INQUIRY_ROWS,
     _detect_table_layout,
     read_inquiry_rows_from_bytes,
     read_inquiry_rows_from_path,
@@ -25,6 +26,13 @@ def test_read_csv_with_quantity_column() -> None:
     rows = read_inquiry_rows_from_bytes(data, filename="dopyt.csv")
     assert len(rows) == 1
     assert rows[0].quantity_hint == 10
+
+
+def test_read_csv_caps_at_max_inquiry_rows() -> None:
+    assert MAX_INQUIRY_ROWS == 1500
+    body = "\n".join(f"polozka {i:04d}" for i in range(1, MAX_INQUIRY_ROWS + 100))
+    rows = read_inquiry_rows_from_bytes(f"popis\n{body}".encode(), filename="dopyt.csv")
+    assert len(rows) == MAX_INQUIRY_ROWS
 
 
 def test_read_csv_named_columns() -> None:

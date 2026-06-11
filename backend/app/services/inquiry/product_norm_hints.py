@@ -63,7 +63,7 @@ _COMPILED: list[tuple[re.Pattern[str], ProductNormHint]] = [
 ]
 
 _EXPLICIT_NORM = re.compile(
-    r"\b(?:DIN|ISO|EN)\s*[-]?\s*\d",
+    r"\b(?:DIN|ISO|EN|STN|CSN|ČSN)\s*[-]?\s*\d",
     re.IGNORECASE,
 )
 

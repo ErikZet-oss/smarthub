@@ -14,12 +14,14 @@ from app.services.inquiry.product_norm_hints import (
     infer_norma_from_text,
     product_norm_hints_for_prompt,
 )
+from app.services.inquiry.stn_to_din import extract_stn_base, stn_base_to_din, stn_to_din_prompt_section
 
 logger = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT = f"""Si parser dopytov na spojovací materiál. Extrahuj polia zladené s katalógom SmartHub:
 
-- norma: leading standard (napr. DIN 933, DIN 934, 934, DIN 125)
+- norma: leading standard v tvare DIN pre katalóg SmartHub (napr. DIN933, DIN934, 934, DIN125)
+  Ak je v texte STN/ČSN 02 xxxx alebo ISO, premapuj na ekvivalentný DIN (nie STN).
 - surface: povrchová úprava / materiál (napr. Oceľ pozinkovaná, Nerez A2, Mosadz)
 - diameter: priemer (M3, M10, …)
 - length: dĺžka v mm — LEN pre skrutky, zvary a pod. s dĺžkou
@@ -36,12 +38,17 @@ Dôležité pravidlá:
 
 {product_norm_hints_for_prompt()}
 
+{stn_to_din_prompt_section()}
+
 Príklady:
 - "skrutka M10x50 DIN933 8.8 pozinkovaná" → norma DIN933, diameter M10, length 50, v_class 8.8, surface Oceľ pozinkovaná
 - "Šesťhranná matica DIN 934 Oceľ Pozinkované M3" → norma DIN934, diameter M3, surface Oceľ pozinkovaná, length null
 - "Šesťhranná matica DIN 934 Plast Polyamid (nylon) 6.6 M3" → norma DIN934, diameter M3, surface Polyamid, v_class 0, length null
 - "6x matica M8 DIN934" → norma DIN934, diameter M8, quantity 6, length null
 - "Závitová tyč M10x1000 pozinkovaná" → norma DIN976, diameter M10, length 1000, surface Oceľ pozinkovaná
+- "SKRUTKA M10X100 STN 02 1103 A4" → norma DIN933, diameter M10, length 100, surface Nerez A4
+- "MATICA M 12 STN 02 1401" → norma DIN934, diameter M12, length null, surface Oceľ
+- "PODLOZKA 10 A2 STN 02 1702" → norma DIN125, diameter 10, length null
 """
 
 _JSON_KEYS_HINT = (
@@ -195,6 +202,10 @@ def _heuristic_parse(raw_text: str) -> InquiryLineAIOutput | None:
         m = re.search(r"\bDIN\s*[-]?\s*(\d+)\b", t, re.IGNORECASE)
         if m:
             norma = f"DIN{m.group(1)}"
+    if norma is None:
+        stn_base = extract_stn_base(t)
+        if stn_base:
+            norma = stn_base_to_din(stn_base)
     if norma is None:
         norma = infer_norma_from_text(t)
 

@@ -21,6 +21,12 @@ export type InquiryDraft = {
 
 export const INQUIRY_DRAFT_STORAGE_KEY = "smarthub_inquiry_draft_v1";
 
+/** Musí zodpovedať backend `MAX_INQUIRY_ROWS` v file_reader.py */
+export const MAX_INQUIRY_ROWS = 1500;
+
+/** Musí zodpovedať backend `_MAX_UPLOAD_BYTES` v inquiry_routes.py */
+export const MAX_INQUIRY_UPLOAD_MB = 5;
+
 import {
   inquiryRequiredFields,
   type InquiryFilterField,

@@ -10,12 +10,14 @@ from openpyxl import load_workbook
 
 from app.schemas.inquiry import InquiryInputRow
 
-MAX_INQUIRY_ROWS = 500
+MAX_INQUIRY_ROWS = 1500
 _HEADER_SCAN_ROWS = 60
 
 _TEXT_HEADER_HINTS = (
     "názov položky",
     "nazov polozky",
+    "názov materiálu",
+    "nazov materialu",
     "názov",
     "nazov",
     "položka",
@@ -33,9 +35,21 @@ _TEXT_HEADER_HINTS = (
     "opis",
 )
 
+_SPEC_HEADER_HINTS = (
+    "technická špecifikácia",
+    "technicka specifikacia",
+    "technická specifik",
+    "technicka specifik",
+    "specifikácia materiálu",
+    "specifikacia materialu",
+    "specifik",
+)
+
 _QTY_HEADER_HINTS = (
     "požadované množstvo",
     "pozadovane mnozstvo",
+    "spotreba",
+    "historickej spotreby",
     "množstvo",
     "mnozstvo",
     "počet",
@@ -75,6 +89,7 @@ class _TableLayout:
     text_col: int
     qty_col: int | None
     data_start_idx: int
+    spec_col: int | None = None
 
 
 def read_inquiry_rows_from_bytes(
@@ -158,6 +173,10 @@ def _rows_from_layout(matrix: list[list[str]], layout: _TableLayout) -> list[Inq
         if len(out) >= MAX_INQUIRY_ROWS:
             break
         text = row[layout.text_col].strip() if layout.text_col < len(row) else ""
+        if layout.spec_col is not None and layout.spec_col < len(row):
+            spec = row[layout.spec_col].strip()
+            if spec and spec.casefold() != text.casefold():
+                text = f"{text} — {spec}" if text else spec
         if not text or _looks_like_footer_text(text):
             continue
         if _looks_like_subheader_row(row):
@@ -180,6 +199,7 @@ def _rows_from_layout(matrix: list[list[str]], layout: _TableLayout) -> list[Inq
 def _detect_table_layout(matrix: list[list[str]]) -> _TableLayout | None:
     best_row_idx = -1
     best_text_col = -1
+    best_spec_col: int | None = None
     best_qty_col: int | None = None
     best_score = 0
 
@@ -187,6 +207,7 @@ def _detect_table_layout(matrix: list[list[str]]) -> _TableLayout | None:
     for row_idx in range(scan_limit):
         row = matrix[row_idx]
         text_col, text_score = _best_column_for_hints(row, _TEXT_HEADER_HINTS)
+        spec_col, spec_score = _best_column_for_hints(row, _SPEC_HEADER_HINTS)
         qty_col, qty_score = _best_column_for_hints(
             row,
             _QTY_HEADER_HINTS,
@@ -194,11 +215,13 @@ def _detect_table_layout(matrix: list[list[str]]) -> _TableLayout | None:
         )
         if text_col < 0 or text_score <= 0:
             continue
-        score = text_score + (qty_score * 2 if qty_col >= 0 else 0)
+        score = text_score + (spec_score if spec_col >= 0 else 0)
+        score += qty_score * 2 if qty_col >= 0 else 0
         if score > best_score:
             best_score = score
             best_row_idx = row_idx
             best_text_col = text_col
+            best_spec_col = spec_col if spec_col >= 0 and spec_score > 0 else None
             best_qty_col = qty_col if qty_col >= 0 and qty_score > 0 else None
 
     if best_row_idx < 0 or best_text_col < 0 or best_score < 4:
@@ -217,6 +240,7 @@ def _detect_table_layout(matrix: list[list[str]]) -> _TableLayout | None:
         text_col=best_text_col,
         qty_col=best_qty_col,
         data_start_idx=data_start,
+        spec_col=best_spec_col,
     )
 
 

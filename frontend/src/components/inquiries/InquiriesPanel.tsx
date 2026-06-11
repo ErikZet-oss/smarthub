@@ -15,6 +15,8 @@ import { readApiJsonOrText } from "@/lib/api-errors";
 import { cn } from "@/lib/utils";
 import {
   INQUIRY_DRAFT_STORAGE_KEY,
+  MAX_INQUIRY_ROWS,
+  MAX_INQUIRY_UPLOAD_MB,
   type InquiryDraft,
   type InquiryLineParsed,
   inquiryRowIsValid,
@@ -346,11 +348,13 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
 
       <Card className="space-y-2 p-2.5 md:space-y-3 md:p-4">
         <p className="hidden text-sm leading-relaxed text-slate-600 md:block">
-          Nahraj XLSX alebo CSV s textom položiek (jeden popis na riadok). AI rozloží parametre;
-          chýbajúce polia označíme červeno — doplň ich ručne.
+          Nahraj XLSX alebo CSV s textom položiek (jeden popis na riadok, max.{" "}
+          {MAX_INQUIRY_ROWS.toLocaleString("sk-SK")} riadkov, {MAX_INQUIRY_UPLOAD_MB} MB). AI
+          rozloží parametre; chýbajúce polia označíme červeno — doplň ich ručne.
         </p>
         <p className="text-[11px] leading-snug text-slate-500 md:hidden">
-          XLSX/CSV — jeden popis na riadok. Chýbajúce polia doplníš ručne.
+          XLSX/CSV — jeden popis na riadok (max. {MAX_INQUIRY_ROWS.toLocaleString("sk-SK")}{" "}
+          riadkov). Chýbajúce polia doplníš ručne.
         </p>
         <label className="flex w-full cursor-pointer md:inline-flex md:w-auto">
           <input
