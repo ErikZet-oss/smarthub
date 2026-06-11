@@ -33,6 +33,9 @@ const NO_LENGTH_TEXT =
 const BOLT_TEXT =
   /\b(skrutk(?:a|y|ou|ami)?|šroub|bolt|screw|vrut|skrutka)\b/i;
 
+const NAIL_TEXT =
+  /\b(klin(?:ec|ce|ca|cov|cové|cových)?|hreb(?:ík|ik|iky|íkov|ikov)?|hřeb(?:ík|ik|iky|íkov|ikov)?)\b/i;
+
 const THREADED_ROD_TEXT =
   /závitov(?:á|é|ých|ou|e|y)?\s+ty|zavitov(?:a|e|ych|ou|y)?\s+ty|threaded\s+rod/i;
 
@@ -47,6 +50,8 @@ const NORMS_WITH_LENGTH_KEYS = new Set([
   "DIN931",
   "6914",
   "DIN6914",
+  "1151",
+  "DIN1151",
 ]);
 
 export function searchKey(value: string | null | undefined): string {
@@ -74,6 +79,7 @@ export function normRequiresLength(
   if (key.startsWith("DIN") && NORMS_WITH_LENGTH_KEYS.has(key.slice(3)))
     return true;
   if (THREADED_ROD_TEXT.test(rawText)) return true;
+  if (NAIL_TEXT.test(rawText)) return true;
   return BOLT_TEXT.test(rawText);
 }
 

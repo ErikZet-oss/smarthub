@@ -50,6 +50,11 @@ _BOLT_TEXT = re.compile(
     re.IGNORECASE,
 )
 
+_NAIL_TEXT = re.compile(
+    r"\b(klin(?:ec|ce|ca|cov|cové|cových)?|hreb(?:ík|ik|iky|íkov|ikov)?|hřeb(?:ík|ik|iky|íkov|ikov)?)\b",
+    re.IGNORECASE,
+)
+
 
 def norm_key(norma: str | None) -> str:
     return search_key(norma)
@@ -67,6 +72,8 @@ _NORMS_WITH_LENGTH_KEYS: frozenset[str] = frozenset(
         "DIN931",
         "6914",
         "DIN6914",
+        "1151",
+        "DIN1151",
     }
 )
 
@@ -83,6 +90,8 @@ def norm_requires_length(norma: str | None, raw_text: str = "") -> bool:
     if key.startswith("DIN") and key[3:] in _NORMS_WITH_LENGTH_KEYS:
         return True
     if threaded_rod_text(raw_text):
+        return True
+    if _NAIL_TEXT.search(raw_text or ""):
         return True
     return bool(_BOLT_TEXT.search(raw_text or ""))
 

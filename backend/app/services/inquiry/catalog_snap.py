@@ -30,6 +30,21 @@ _SURFACE_V_CLASS: tuple[tuple[str, str], ...] = (
     ("ocel", "8.8"),
 )
 
+_EXPLICIT_V_CLASS = re.compile(
+    r"\b("
+    r"4[,.]6|4[,.]8|5[,.]6|5[,.]8|6[,.]8|8[,.]8|10[,.]9|12[,.]9"
+    r"|A2-70|A2-80|A4-70|A4-80"
+    r")\b",
+    re.IGNORECASE,
+)
+
+_NUT_TEXT = re.compile(
+    r"\b(matic(?:a|e|ou|i|ami)?|sestihrann(?:a|e|ych|ou|y)?\s+matic)\b",
+    re.IGNORECASE,
+)
+
+_NUT_NORM_KEYS = frozenset({"934", "985", "6923", "439", "4032", "315"})
+
 # Priemer dier podložky DIN 125 (vnútorný Ø) podľa veľkosti skrutky M*.
 _WASHER_BOLT_TO_INNER: dict[str, str] = {
     "2": "2.2",
@@ -99,15 +114,43 @@ def infer_v_class_from_surface(surface: str | None) -> str | None:
     return None
 
 
+def extract_explicit_v_class(raw_text: str) -> str | None:
+    """Pevnosť uvedená priamo v texte (10.9, 8.8, A2-70, …)."""
+    m = _EXPLICIT_V_CLASS.search(raw_text or "")
+    if not m:
+        return None
+    return m.group(1).replace(",", ".")
+
+
+def _is_nut_row(norma: str | None, raw_text: str) -> bool:
+    if _NUT_TEXT.search(raw_text or ""):
+        return True
+    key = search_key(norma)
+    num = key[3:] if key.startswith("DIN") and len(key) > 3 else key
+    return num in _NUT_NORM_KEYS
+
+
 def infer_v_class_for_row(
     *,
     norma: str | None,
     surface: str | None,
     raw_text: str,
 ) -> str | None:
-    """Matice/skrutky — mapovanie z povrchu; podložky DIN 125 majú iné class v DB."""
+    """Matice — class len ak je v texte alebo pri podložkách z materiálu; inak radšej prázdne."""
+    explicit = extract_explicit_v_class(raw_text)
+    if explicit:
+        return explicit
     if _is_washer_norm(norma, raw_text):
         return _infer_washer_v_class(surface, raw_text)
+    if _is_nut_row(norma, raw_text):
+        low = (raw_text or "").casefold()
+        if "a2-80" in low or "a2 80" in low:
+            return "A2-80"
+        if "a4" in low and ("nerez" in low or "nerez" in (surface or "").casefold()):
+            return "A4-70"
+        if "a2" in low or "nerez" in low or "nerez" in (surface or "").casefold():
+            return "A2-70"
+        return None
     return infer_v_class_from_surface(surface)
 
 
@@ -326,7 +369,11 @@ def snap_inquiry_line_to_catalog(
     if washer and washer_v_class:
         data["v_class"] = washer_v_class
     elif not data.get("v_class"):
-        inferred = infer_v_class_from_surface(data.get("surface"))  # type: ignore[arg-type]
+        inferred = infer_v_class_for_row(
+            norma=str(data.get("norma") or ""),
+            surface=str(data.get("surface") or "") or None,
+            raw_text=row.raw_text,
+        )
         if inferred:
             data["v_class"] = inferred
 

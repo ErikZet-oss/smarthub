@@ -7,14 +7,18 @@ import re
 from typing import Callable
 
 from app.schemas.inquiry import InquiryLineAIOutput, InquiryLineParsed
-from app.services.inquiry.catalog_snap import infer_v_class_for_row, is_washer_text
+from app.services.inquiry.catalog_snap import (
+    extract_explicit_v_class,
+    infer_v_class_for_row,
+    is_washer_text,
+)
 from app.services.inquiry.normalize import apply_normalization, infer_surface_from_text
 from app.services.inquiry.norm_rules import norm_requires_length
 from app.services.inquiry.product_norm_hints import (
     infer_norma_from_text,
     product_norm_hints_for_prompt,
 )
-from app.services.inquiry.stn_suffix import infer_material_from_stn_text
+from app.services.inquiry.stn_suffix import extract_stn_suffix, infer_material_from_stn_text
 from app.services.inquiry.stn_to_din import extract_stn_base, stn_base_to_din, stn_to_din_prompt_section
 
 logger = logging.getLogger(__name__)
@@ -31,6 +35,7 @@ _SYSTEM_PROMPT = f"""Si parser dopytov na spojovací materiál. Extrahuj polia z
 
 Dôležité pravidlá:
 - Matice (DIN 934, DIN 985, …), podložky (DIN 125, DIN 127, …) NEMAJÚ dĺžku → length = null
+- Matice: v_class doplň LEN ak je v texte (8.8, 10.9) alebo z STN suffixu (.55, .05); bez toho → null
 - Závitová tyč má normu DIN 976 (v katalógu aj „976“) a VŽDY má dĺžku (napr. M10x1000)
 - Pri skrutke M10x50 je diameter M10 a length 50
 - A2/A4 pri nerezi daj do surface (Nerez A2), nie do v_class
@@ -43,7 +48,8 @@ Dôležité pravidlá:
 
 Príklady:
 - "skrutka M10x50 DIN933 8.8 pozinkovaná" → norma DIN933, diameter M10, length 50, v_class 8.8, surface Oceľ pozinkovaná
-- "Šesťhranná matica DIN 934 Oceľ Pozinkované M3" → norma DIN934, diameter M3, surface Oceľ pozinkovaná, length null
+- "Šesťhranná matica DIN 934 Oceľ Pozinkované M3" → norma DIN934, diameter M3, surface Oceľ pozinkovaná, v_class null, length null
+- "MATICA M 24 10.9 DIN 934 ZN" → norma DIN934, diameter M24, surface Oceľ pozinkovaná, v_class 10.9, length null
 - "Šesťhranná matica DIN 934 Plast Polyamid (nylon) 6.6 M3" → norma DIN934, diameter M3, surface Polyamid, v_class 0, length null
 - "6x matica M8 DIN934" → norma DIN934, diameter M8, quantity 6, length null
 - "Závitová tyč M10x1000 pozinkovaná" → norma DIN976, diameter M10, length 1000, surface Oceľ pozinkovaná
@@ -187,9 +193,18 @@ def _heuristic_parse(raw_text: str) -> InquiryLineAIOutput | None:
         diameter = m.group(1).replace(",", ".")
         length = m.group(2).replace(",", ".")
     else:
-        m = re.search(r"\bM\s*(\d+(?:[,.]\d+)?)\b", t, re.IGNORECASE)
+        m = re.search(
+            r"\b(\d+(?:[,.]\d+)?)\s*[x×X]\s*(\d+(?:[,.]\d+)?)\b",
+            t,
+            re.IGNORECASE,
+        )
         if m:
             diameter = m.group(1).replace(",", ".")
+            length = m.group(2).replace(",", ".")
+        else:
+            m = re.search(r"\bM\s*(\d+(?:[,.]\d+)?)\b", t, re.IGNORECASE)
+            if m:
+                diameter = m.group(1).replace(",", ".")
 
     if length is None:
         m = re.search(r"\b(\d+(?:[,.]\d+)?)\s*mm\b", t, re.IGNORECASE)
@@ -211,7 +226,7 @@ def _heuristic_parse(raw_text: str) -> InquiryLineAIOutput | None:
     if norma is None:
         norma = infer_norma_from_text(t)
 
-    v_class = None
+    v_class = extract_explicit_v_class(t)
     if is_washer_text(t):
         surface_guess = infer_surface_from_text(t)
         if surface_guess is None:
@@ -229,15 +244,29 @@ def _heuristic_parse(raw_text: str) -> InquiryLineAIOutput | None:
         v_class = None  # A2/A4 ide do surface
     elif infer_surface_from_text(t) == "Polyamid":
         v_class = "0"
-    else:
+    elif not v_class:
         norm_digits = ""
         if norma:
             m_norm = re.search(r"\d+", norma)
             if m_norm:
                 norm_digits = m_norm.group(0)
+        stn_base = extract_stn_base(t)
+        stn_match = extract_stn_suffix(t)
         for m in re.finditer(r"\b(\d+(?:[,.]\d+)?)\b", t):
             val = m.group(1).replace(",", ".")
             if norm_digits and val in norm_digits:
+                continue
+            if stn_base and val in {stn_base, stn_base.lstrip("0"), f"02{stn_base}"}:
+                continue
+            if stn_match:
+                stn_full = f"{stn_match.base}.{stn_match.suffix}"
+                if val in {stn_match.base, stn_full, stn_match.suffix}:
+                    continue
+            if re.search(r"\bSTN\s*0?\s*2\s", t, re.IGNORECASE) and val in {"02", "2"}:
+                continue
+            if diameter and val == diameter:
+                continue
+            if re.search(rf"\bM\s*{re.escape(val)}\b", t, re.IGNORECASE):
                 continue
             if re.fullmatch(r"\d+(?:\.\d+)?", val):
                 v_class = val

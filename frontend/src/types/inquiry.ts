@@ -56,6 +56,24 @@ export function inquiryRowIsValid(row: InquiryLineParsed): boolean {
   );
 }
 
+export function inquiryParseSummary(rows: InquiryLineParsed[]): {
+  total: number;
+  ok: number;
+  error: number;
+} {
+  const total = rows.length;
+  const ok = rows.filter(inquiryRowIsValid).length;
+  return { total, ok, error: total - ok };
+}
+
+export function formatInquiryParseCompleteMessage(rows: InquiryLineParsed[]): string {
+  const { total, ok, error } = inquiryParseSummary(rows);
+  if (error === 0) {
+    return `Parsovanie hotové — ${total} riadkov. Všetko OK.`;
+  }
+  return `Parsovanie hotové — ${total} riadkov (${ok} OK, ${error} s chybou). Skontroluj červené bunky.`;
+}
+
 export function normalizeInquiryRowFromApi(raw: Record<string, unknown>): InquiryLineParsed {
   return {
     row_index: Number(raw.row_index ?? 0),

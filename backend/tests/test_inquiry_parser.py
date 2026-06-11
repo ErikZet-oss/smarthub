@@ -63,8 +63,31 @@ def test_heuristic_parse_matica() -> None:
     assert ai.diameter == "3"
     assert ai.norma == "DIN934"
     assert ai.surface == "Oceľ pozinkovaná"
-    assert ai.v_class == "8.8"
+    assert ai.v_class is None
     assert ai.length is None
+
+
+def test_heuristic_parse_matica_10_9_zn() -> None:
+    ai = _heuristic_parse("MATICA M 24 10.9 DIN 934 ZN")
+    assert ai is not None
+    assert ai.norma == "DIN934"
+    assert ai.diameter == "24"
+    assert ai.v_class == "10.9"
+    assert ai.surface == "Oceľ pozinkovaná"
+
+
+def test_heuristic_parse_matica_bare_stn_no_class() -> None:
+    ai = _heuristic_parse("MATICA M 24 STN 02 1401 — M 24; Norma : STN 02 1401;")
+    assert ai is not None
+    assert ai.norma == "DIN934"
+    assert ai.v_class is None
+
+
+def test_heuristic_parse_matica_stn_1401_5_no_class() -> None:
+    ai = _heuristic_parse("MATICA M 24 STN 02 1401.5 — M 24; Norma : STN 02 1401.5;")
+    assert ai is not None
+    assert ai.norma == "DIN934"
+    assert ai.v_class is None
 
 
 def test_heuristic_parse_polyamid_matica() -> None:

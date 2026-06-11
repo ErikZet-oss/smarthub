@@ -37,6 +37,7 @@ def test_extract_stn_base(raw: str, expected: str) -> None:
         ("SKRUTKA IMBUSOVA M 8X45 STN 02 1143", "DIN912"),
         ("PODLOZKA 10 A2 STN 02 1702", "DIN125"),
         ("DREVOSKRUTKA M 4X50 STN 02 1814", "DIN97"),
+        ("KLINEC 4,0X120 STN 02 2825", "DIN1151"),
         ("CAP S HLAVOU ISO 4017 B A2", "DIN933"),
     ],
 )
@@ -122,3 +123,13 @@ def test_parse_stn_1401_55_fills_surface_and_class(monkeypatch) -> None:
     assert parsed.surface == "Oceľ pozinkovaná"
     assert parsed.v_class == "8.8"
     assert parsed.length == "0"
+
+
+def test_heuristic_parse_stn_klinec(monkeypatch) -> None:
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    raw = "KLINEC 4,0X120 STN 02 2825 — 4,0X120; Norma : STN 02 2825;"
+    parsed = parse_inquiry_line(raw, row_index=52)
+    assert parsed.parse_error is None
+    assert parsed.norma == "DIN1151"
+    assert parsed.diameter == "4.0"
+    assert parsed.length == "120"

@@ -19,6 +19,7 @@ import {
   MAX_INQUIRY_UPLOAD_MB,
   type InquiryDraft,
   type InquiryLineParsed,
+  formatInquiryParseCompleteMessage,
   inquiryRowIsValid,
   normalizeInquiryRowFromApi,
   normalizeInquiryRunResult,
@@ -194,7 +195,7 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
         if (st.state === "done" && st.result?.rows) {
           const parsed = st.result.rows.map(normalizeInquiryRowFromApi);
           persistDraft(parsed, st.result.source_filename ?? file.name);
-          setStatus(`Parsovanie hotové — ${parsed.length} riadkov. Skontroluj červené bunky.`);
+          setStatus(formatInquiryParseCompleteMessage(parsed));
           break;
         }
         if (st.state === "error") {

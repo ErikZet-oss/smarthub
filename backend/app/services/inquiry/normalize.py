@@ -109,7 +109,7 @@ def infer_surface_from_text(text: str) -> str | None:
         return "Nerez A4"
     if "a2" in low or "nerez" in low:
         return "Nerez A2"
-    if "pozink" in low:
+    if "pozink" in low or re.search(r"\bzn\b", low):
         return "Oceľ pozinkovaná"
     if "mosadz" in low:
         return "Mosadz"

@@ -63,7 +63,7 @@ def test_snap_inquiry_matica_to_catalog(session) -> None:
     assert snapped.norma == "934"
     assert snapped.diameter == "3"
     assert snapped.length == "0"
-    assert snapped.v_class in ("8.8", "10.9")
+    assert snapped.v_class in (None, "")
 
 
 def test_infer_v_class_nerez_a2_washer() -> None:
