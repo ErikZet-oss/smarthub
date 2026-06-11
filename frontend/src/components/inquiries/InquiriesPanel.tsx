@@ -20,6 +20,7 @@ import {
   type InquiryDraft,
   type InquiryLineParsed,
   formatInquiryParseCompleteMessage,
+  inquiryParseSummary,
   inquiryRowIsValid,
   normalizeInquiryRowFromApi,
   normalizeInquiryRunResult,
@@ -74,6 +75,8 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
   const [runProgressPct, setRunProgressPct] = useState<number | null>(null);
   const [runResult, setRunResult] = useState<InquiryRunTaskResult | null>(null);
   const [ignoreErrors, setIgnoreErrors] = useState(false);
+  const [showOkOnly, setShowOkOnly] = useState(false);
+  const [showErrorsOnly, setShowErrorsOnly] = useState(false);
 
   useEffect(() => {
     if (!authReady) return;
@@ -103,6 +106,14 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
     () => rows.filter((r) => !inquiryRowIsValid(r)).length,
     [rows],
   );
+
+  const parseSummary = useMemo(() => inquiryParseSummary(rows), [rows]);
+
+  const filteredRows = useMemo(() => {
+    if (showOkOnly) return rows.filter(inquiryRowIsValid);
+    if (showErrorsOnly) return rows.filter((r) => !inquiryRowIsValid(r));
+    return rows;
+  }, [rows, showOkOnly, showErrorsOnly]);
 
   const persistDraft = useCallback(
     (nextRows: InquiryLineParsed[], fileName?: string, supplierIds?: number[]) => {
@@ -195,6 +206,8 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
         if (st.state === "done" && st.result?.rows) {
           const parsed = st.result.rows.map(normalizeInquiryRowFromApi);
           persistDraft(parsed, st.result.source_filename ?? file.name);
+          setShowOkOnly(false);
+          setShowErrorsOnly(false);
           setStatus(formatInquiryParseCompleteMessage(parsed));
           break;
         }
@@ -394,8 +407,52 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
 
       {rows.length > 0 ? (
         <>
+          <div className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-slate-50/80 px-2.5 py-2 md:flex-row md:flex-wrap md:items-center md:gap-4 md:px-3">
+            <p className="text-xs text-slate-700 md:text-sm">
+              <span className="font-medium text-emerald-700">{parseSummary.ok} OK</span>
+              {" · "}
+              <span className="font-medium text-amber-800">{parseSummary.error} s chybou</span>
+              {" · "}
+              <span className="text-slate-600">{parseSummary.total} celkom</span>
+              {showOkOnly || showErrorsOnly ? (
+                <span className="text-slate-500">
+                  {" "}
+                  (zobrazených {filteredRows.length})
+                </span>
+              ) : null}
+            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-slate-700 md:text-sm">
+                <input
+                  type="checkbox"
+                  checked={showOkOnly}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setShowOkOnly(checked);
+                    if (checked) setShowErrorsOnly(false);
+                  }}
+                  className="h-3.5 w-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 md:h-4 md:w-4"
+                />
+                Len OK
+              </label>
+              <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-slate-700 md:text-sm">
+                <input
+                  type="checkbox"
+                  checked={showErrorsOnly}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setShowErrorsOnly(checked);
+                    if (checked) setShowOkOnly(false);
+                  }}
+                  className="h-3.5 w-3.5 rounded border-slate-300 text-amber-600 focus:ring-amber-500 md:h-4 md:w-4"
+                />
+                Len chybné
+              </label>
+            </div>
+          </div>
+
           <InquiryEditorTable
-            rows={rows}
+            rows={filteredRows}
             apiBase={apiBase}
             apiFetch={apiFetch}
             onChange={persistRows}

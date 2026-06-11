@@ -8,7 +8,12 @@ from sqlmodel import Session, select
 from app.models.entities import Product
 from app.schemas.common import ProductSearchFilters
 from app.schemas.inquiry import InquiryLineParsed
-from app.services.inquiry.norm_rules import norm_requires_length, search_key
+from app.services.inquiry.norm_rules import (
+    extract_snap_ring_diameter,
+    is_snap_ring_norm,
+    norm_requires_length,
+    search_key,
+)
 from app.services.inquiry.normalize import (
     apply_plastic_material_rules,
     infer_surface_from_text,
@@ -368,7 +373,9 @@ def snap_inquiry_line_to_catalog(
     )
     if washer and washer_v_class:
         data["v_class"] = washer_v_class
-    elif not data.get("v_class"):
+    elif not data.get("v_class") and not is_snap_ring_norm(
+        str(data.get("norma") or ""), row.raw_text
+    ):
         inferred = infer_v_class_for_row(
             norma=str(data.get("norma") or ""),
             surface=str(data.get("surface") or "") or None,
@@ -376,6 +383,12 @@ def snap_inquiry_line_to_catalog(
         )
         if inferred:
             data["v_class"] = inferred
+
+    if is_snap_ring_norm(str(data.get("norma") or ""), row.raw_text):
+        snap_d = extract_snap_ring_diameter(row.raw_text)
+        if snap_d and not data.get("diameter"):
+            data["diameter"] = snap_d
+        data["v_class"] = None
 
     if not norm_requires_length(catalog_norma or row.norma, row.raw_text) and not data.get("length"):
         data["length"] = "0"
@@ -397,7 +410,9 @@ def snap_inquiry_line_to_catalog(
 
     if washer and washer_v_class:
         data["v_class"] = snap_value_to_options(washer_v_class, opts.get("v_class", [])) or washer_v_class
-    elif not data.get("v_class"):
+    elif not data.get("v_class") and not is_snap_ring_norm(
+        str(data.get("norma") or ""), row.raw_text
+    ):
         inferred = infer_v_class_for_row(
             norma=str(data.get("norma") or ""),
             surface=str(data.get("surface") or "") or None,
@@ -405,6 +420,9 @@ def snap_inquiry_line_to_catalog(
         )
         if inferred:
             data["v_class"] = snap_value_to_options(inferred, opts.get("v_class", [])) or inferred
+
+    if is_snap_ring_norm(str(data.get("norma") or ""), row.raw_text):
+        data["v_class"] = None
 
     if not norm_requires_length(data.get("norma"), row.raw_text):  # type: ignore[arg-type]
         data["length"] = snap_value_to_options(str(data.get("length") or "0"), opts.get("length", [])) or "0"

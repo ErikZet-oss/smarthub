@@ -25,10 +25,24 @@ const NORMS_WITHOUT_LENGTH_KEYS = new Set([
   "ISO4032",
   "7089",
   "ISO7089",
+  "471",
+  "DIN471",
+  "472",
+  "DIN472",
+]);
+
+const NORMS_WITHOUT_V_CLASS = new Set([
+  "471",
+  "DIN471",
+  "472",
+  "DIN472",
 ]);
 
 const NO_LENGTH_TEXT =
   /\b(matic(?:a|e|ou|i|ami)?|podložk(?:a|y|ou|ami)?|washer|mutter|nut)\b/i;
+
+const SNAP_RING_TEXT =
+  /\b(kru[žz]ok\s+poistn|kruzok\s+poistn|poistn(?:[ýy])?\s+kru[žz]ok|segerring|snap\s*ring)\b/i;
 
 const BOLT_TEXT =
   /\b(skrutk(?:a|y|ou|ami)?|šroub|bolt|screw|vrut|skrutka)\b/i;
@@ -75,6 +89,7 @@ export function normRequiresLength(
   if (key.startsWith("DIN") && NORMS_WITHOUT_LENGTH_KEYS.has(key.slice(3)))
     return false;
   if (NO_LENGTH_TEXT.test(rawText)) return false;
+  if (SNAP_RING_TEXT.test(rawText)) return false;
   if (NORMS_WITH_LENGTH_KEYS.has(key)) return true;
   if (key.startsWith("DIN") && NORMS_WITH_LENGTH_KEYS.has(key.slice(3)))
     return true;
@@ -88,6 +103,10 @@ export function normRequiresVClass(
   rawText = "",
 ): boolean {
   const key = normKey(norma);
+  if (NORMS_WITHOUT_V_CLASS.has(key)) return false;
+  if (key.startsWith("DIN") && NORMS_WITHOUT_V_CLASS.has(key.slice(3)))
+    return false;
+  if (SNAP_RING_TEXT.test(rawText)) return false;
   if (NORMS_WITHOUT_LENGTH_KEYS.has(key)) return true;
   if (key.startsWith("DIN") && NORMS_WITHOUT_LENGTH_KEYS.has(key.slice(3)))
     return true;

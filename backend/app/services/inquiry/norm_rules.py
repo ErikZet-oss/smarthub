@@ -37,11 +37,33 @@ NORMS_WITHOUT_LENGTH_KEYS: frozenset[str] = frozenset(
         "ISO4032",
         "7089",
         "ISO7089",
+        "471",
+        "DIN471",
+        "472",
+        "DIN472",
+    }
+)
+
+# Bez povinného class (poistné krúžky DIN 471/472, …).
+NORMS_WITHOUT_V_CLASS_KEYS: frozenset[str] = frozenset(
+    {
+        "471",
+        "DIN471",
+        "472",
+        "DIN472",
     }
 )
 
 _NO_LENGTH_TEXT = re.compile(
     r"\b(matic(?:a|e|ou|i|ami)?|podložk(?:a|y|ou|ami)?|washer|mutter|nut)\b",
+    re.IGNORECASE,
+)
+
+_SNAP_RING_TEXT = re.compile(
+    r"\b("
+    r"kru[žz]ok\s+poistn|kruzok\s+poistn|poistn(?:[ýy])?\s+kru[žz]ok|"
+    r"segerring|snap\s*ring"
+    r")\b",
     re.IGNORECASE,
 )
 
@@ -58,6 +80,42 @@ _NAIL_TEXT = re.compile(
 
 def norm_key(norma: str | None) -> str:
     return search_key(norma)
+
+
+def _norm_num_key(norma: str | None) -> str:
+    key = norm_key(norma)
+    if key.startswith("DIN") and len(key) > 3:
+        return key[3:]
+    return key
+
+
+def is_snap_ring_norm(norma: str | None, raw_text: str = "") -> bool:
+    if _norm_num_key(norma) in ("471", "472"):
+        return True
+    return bool(_SNAP_RING_TEXT.search(raw_text or ""))
+
+
+def extract_snap_ring_diameter(raw_text: str) -> str | None:
+    """Priemer hriadeľa D pre poistný krúžok DIN 471/472."""
+    t = raw_text or ""
+    m = re.search(r"\bD1\s*=\s*(\d+(?:[,.]\d+)?)\b", t, re.IGNORECASE)
+    if m:
+        return m.group(1).replace(",", ".")
+    m = re.search(
+        r"\b(?:kru[žz]ok|kruzok)\s+poistn(?:[ýy])?\s+D\s*(\d+(?:[,.]\d+)?)\b",
+        t,
+        re.IGNORECASE,
+    )
+    if m:
+        return m.group(1).replace(",", ".")
+    m = re.search(
+        r"\b(?:kru[žz]ok|kruzok)\s+poistn(?:[ýy])?\s+(\d+(?:[,.]\d+)?)\b",
+        t,
+        re.IGNORECASE,
+    )
+    if m:
+        return m.group(1).replace(",", ".")
+    return None
 
 
 _NORMS_WITH_LENGTH_KEYS: frozenset[str] = frozenset(
@@ -85,6 +143,8 @@ def norm_requires_length(norma: str | None, raw_text: str = "") -> bool:
         return False
     if _NO_LENGTH_TEXT.search(raw_text or ""):
         return False
+    if is_snap_ring_norm(norma, raw_text):
+        return False
     if key in _NORMS_WITH_LENGTH_KEYS:
         return True
     if key.startswith("DIN") and key[3:] in _NORMS_WITH_LENGTH_KEYS:
@@ -98,6 +158,14 @@ def norm_requires_length(norma: str | None, raw_text: str = "") -> bool:
 
 def norm_requires_v_class(norma: str | None, raw_text: str = "") -> bool:
     key = norm_key(norma)
+    if key in NORMS_WITHOUT_V_CLASS_KEYS:
+        return False
+    if key.startswith("DIN") and key[3:] in NORMS_WITHOUT_V_CLASS_KEYS:
+        return False
+    if _norm_num_key(norma) in ("471", "472"):
+        return False
+    if is_snap_ring_norm(norma, raw_text):
+        return False
     if key in NORMS_WITHOUT_LENGTH_KEYS:
         return True
     if key.startswith("DIN") and key[3:] in NORMS_WITHOUT_LENGTH_KEYS:

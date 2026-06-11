@@ -13,7 +13,11 @@ from app.services.inquiry.catalog_snap import (
     is_washer_text,
 )
 from app.services.inquiry.normalize import apply_normalization, infer_surface_from_text
-from app.services.inquiry.norm_rules import norm_requires_length
+from app.services.inquiry.norm_rules import (
+    extract_snap_ring_diameter,
+    is_snap_ring_norm,
+    norm_requires_length,
+)
 from app.services.inquiry.product_norm_hints import (
     infer_norma_from_text,
     product_norm_hints_for_prompt,
@@ -226,6 +230,11 @@ def _heuristic_parse(raw_text: str) -> InquiryLineAIOutput | None:
     if norma is None:
         norma = infer_norma_from_text(t)
 
+    if is_snap_ring_norm(norma, t):
+        snap_d = extract_snap_ring_diameter(t)
+        if snap_d:
+            diameter = snap_d
+
     v_class = extract_explicit_v_class(t)
     if is_washer_text(t):
         surface_guess = infer_surface_from_text(t)
@@ -244,6 +253,8 @@ def _heuristic_parse(raw_text: str) -> InquiryLineAIOutput | None:
         v_class = None  # A2/A4 ide do surface
     elif infer_surface_from_text(t) == "Polyamid":
         v_class = "0"
+    elif is_snap_ring_norm(norma, t):
+        v_class = None
     elif not v_class:
         norm_digits = ""
         if norma:

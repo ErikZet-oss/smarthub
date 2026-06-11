@@ -133,3 +133,26 @@ def test_heuristic_parse_stn_klinec(monkeypatch) -> None:
     assert parsed.norma == "DIN1151"
     assert parsed.diameter == "4.0"
     assert parsed.length == "120"
+
+
+def test_heuristic_parse_snap_ring_din471() -> None:
+    from app.services.inquiry.norm_rules import inquiry_required_field_names, norm_requires_v_class
+
+    raw = "KRUZOK POISTNY 10 STN 02 2930 - 10; Norma : STN 02 2930;"
+    ai = _heuristic_parse(raw)
+    assert ai is not None
+    assert ai.norma == "DIN471"
+    assert ai.diameter == "10"
+    assert ai.v_class is None
+    assert ai.length is None
+    assert "v_class" not in inquiry_required_field_names("DIN471", raw)
+    assert norm_requires_v_class("DIN471", raw) is False
+
+
+def test_heuristic_parse_snap_ring_d100() -> None:
+    raw = "KRUZOK POISTNY D 100 CSN 02 2930 — D1 = 100; D3 = 94,5;"
+    ai = _heuristic_parse(raw)
+    assert ai is not None
+    assert ai.norma == "DIN471"
+    assert ai.diameter == "100"
+    assert ai.v_class is None

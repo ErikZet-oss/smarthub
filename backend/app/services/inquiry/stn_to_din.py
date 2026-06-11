@@ -32,6 +32,7 @@ _PROMPT_EXAMPLES = (
     ("STN 02 1174", "DIN938 — závrtná skrutka do ocele"),
     ("STN 02 1131", "DIN84 — skrutka s valcovou hlavou"),
     ("STN 02 2825", "DIN1151 — stavebný klinec"),
+    ("STN 02 2930 / STN 02 2931", "DIN471 / DIN472 — poistný krúžok (priemer = D hriadeľa)"),
     ("ISO 4017", "DIN933"),
     ("ISO 4032", "DIN934"),
     ("ISO 4762", "DIN912"),
