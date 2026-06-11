@@ -5,6 +5,7 @@ import pytest
 from app.services.inquiry.normalize import apply_normalization
 from app.services.inquiry.parser import _heuristic_parse, parse_inquiry_line
 from app.schemas.inquiry import InquiryLineParsed
+from app.services.inquiry.stn_suffix import decode_stn_suffix, extract_stn_suffix, infer_material_from_stn_text
 from app.services.inquiry.stn_to_din import (
     extract_stn_base,
     map_standard_to_catalog_din,
@@ -84,3 +85,40 @@ def test_apply_normalization_remaps_stn_in_norma_field() -> None:
     )
     out = apply_normalization(row)
     assert out.norma == "DIN933"
+
+
+def test_extract_stn_suffix() -> None:
+    m = extract_stn_suffix("MATICA M 12 STN 02 1401.55")
+    assert m is not None
+    assert m.base == "1401"
+    assert m.suffix == "55"
+
+
+@pytest.mark.parametrize(
+    ("text", "surface", "v_class"),
+    [
+        ("MATICA M 12 STN 02 1401.55", "Oceľ pozinkovaná", "8.8"),
+        ("MATICA M 10 STN 02 1401.05", "Oceľ pozinkovaná", "5.8"),
+        ("MATICA M 12 STN 02 1401.52", "Oceľ", "8.8"),
+        ("MATICA M 8 A2 STN 02 1401.90", "Nerez A2", "A2-70"),
+        ("MATICA M 4 STN 02 1401.8", "Mosadz", "0"),
+        ("PODLOZKA 10 STN 02 1702.15", "Oceľ pozinkovaná", "0"),
+    ],
+)
+def test_decode_stn_suffix_material(text: str, surface: str, v_class: str) -> None:
+    hint = infer_material_from_stn_text(text)
+    assert hint is not None
+    assert hint.surface == surface
+    assert hint.v_class == v_class
+
+
+def test_parse_stn_1401_55_fills_surface_and_class(monkeypatch) -> None:
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    raw = "MATICA MATICA M 12 STN 02 1401.55  M 12; Norma : STN 02 1401.55;"
+    parsed = parse_inquiry_line(raw, row_index=149)
+    assert parsed.parse_error is None
+    assert parsed.norma == "DIN934"
+    assert parsed.diameter == "12"
+    assert parsed.surface == "Oceľ pozinkovaná"
+    assert parsed.v_class == "8.8"
+    assert parsed.length == "0"

@@ -14,6 +14,7 @@ from app.services.inquiry.product_norm_hints import (
     infer_norma_from_text,
     product_norm_hints_for_prompt,
 )
+from app.services.inquiry.stn_suffix import infer_material_from_stn_text
 from app.services.inquiry.stn_to_din import extract_stn_base, stn_base_to_din, stn_to_din_prompt_section
 
 logger = logging.getLogger(__name__)
@@ -48,6 +49,7 @@ Príklady:
 - "Závitová tyč M10x1000 pozinkovaná" → norma DIN976, diameter M10, length 1000, surface Oceľ pozinkovaná
 - "SKRUTKA M10X100 STN 02 1103 A4" → norma DIN933, diameter M10, length 100, surface Nerez A4
 - "MATICA M 12 STN 02 1401" → norma DIN934, diameter M12, length null, surface Oceľ
+- "MATICA M 12 STN 02 1401.55" → norma DIN934, diameter M12, surface Oceľ pozinkovaná, v_class 8.8
 - "PODLOZKA 10 A2 STN 02 1702" → norma DIN125, diameter 10, length null
 """
 
@@ -242,7 +244,13 @@ def _heuristic_parse(raw_text: str) -> InquiryLineAIOutput | None:
                 break
 
     surface = infer_surface_from_text(t)
-    if surface is None:
+    stn_hint = infer_material_from_stn_text(t, norma=norma, is_washer=is_washer_text(t))
+    if stn_hint:
+        if stn_hint.surface:
+            surface = stn_hint.surface
+        if stn_hint.v_class:
+            v_class = stn_hint.v_class
+    elif not surface:
         low = t.casefold()
         if "a4" in low and "nerez" in low:
             surface = "Nerez A4"

@@ -23,6 +23,9 @@ _CSN_IN_TEXT = re.compile(
 _PROMPT_EXAMPLES = (
     ("STN 02 1103 / STN 02 1101", "DIN933 / DIN931 — skrutky so šesťhrannou hlavou"),
     ("STN 02 1401", "DIN934 — šesťhranná matica"),
+    ("STN 02 1401.55", "DIN934, surface Oceľ pozinkovaná, v_class 8.8"),
+    ("STN 02 1401.05", "DIN934, surface Oceľ pozinkovaná, v_class 5.8"),
+    ("STN 02 1401.90 / .92", "DIN934, surface Nerez A2, v_class A2-70"),
     ("STN 02 1143", "DIN912 — imbus (valcová hlava, vnútorný šesťhran)"),
     ("STN 02 1702", "DIN125 — plochá podložka"),
     ("STN 02 1741 / STN 02 1745", "DIN127 / DIN6798 — pružné podložky"),
@@ -164,7 +167,10 @@ def map_standard_to_catalog_din(
 def stn_to_din_prompt_section() -> str:
     lines = [
         "STN / ČSN 02 xxxx a ISO — v poli norma VŽDY vráť ekvivalentný DIN pre katalóg SmartHub "
-        "(nie pôvodné STN). Desiatkové suffixy STN (.55, .05) ignoruj — ber len štvormiestny kód.",
+        "(nie pôvodné STN). Desiatkový suffix STN určuje materiál a pevnosť — doplň surface a v_class:",
+        "- .55 → Oceľ pozinkovaná, 8.8  |  .05 → Oceľ pozinkovaná, 5.8  |  .52 → Oceľ, 8.8",
+        "- .90 / .92 → Nerez A2, A2-70  |  .50 → Nerez A2, A2-80  |  .8 → Mosadz",
+        "- .5 s A4 v texte → Nerez A4, A4-70",
     ]
     for left, right in _PROMPT_EXAMPLES:
         lines.append(f"- {left} → {right}")
