@@ -4,7 +4,7 @@ python-dotenv
 sqlmodel
 playwright
 playwright-stealth>=2.0,<3
-httpx[http2]
+httpx[http2]>=0.28.1,<0.29
 python-multipart
 openpyxl
 bcrypt
