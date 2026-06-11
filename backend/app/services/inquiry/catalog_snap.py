@@ -12,6 +12,7 @@ from app.services.inquiry.norm_rules import (
     extract_snap_ring_diameter,
     is_snap_ring_norm,
     norm_requires_length,
+    norm_requires_v_class,
     search_key,
 )
 from app.services.inquiry.normalize import (
@@ -88,11 +89,12 @@ class CatalogSnapCache:
     def filter_options(self, session: Session, filters: ProductSearchFilters) -> dict[str, list[str]]:
         from app.api.routes import _build_conditional_filter_options
 
-        key = self._filters_key(filters)
+        prepared = prepare_inquiry_catalog_filters(filters, known_norma=self.norma_values)
+        key = self._filters_key(prepared)
         cached = self._filter_opts.get(key)
         if cached is not None:
             return cached
-        result = _build_conditional_filter_options(session, filters)
+        result = _build_conditional_filter_options(session, prepared)
         self._filter_opts[key] = result
         return result
 
@@ -201,6 +203,19 @@ def resolve_catalog_norma(norma: str | None, *, known: list[str] | None = None) 
     suffix_a = _resolve_catalog_norma_suffix_a(raw, known=known)
     if suffix_a is not None:
         return suffix_a
+    m = re.match(r"^DIN(\d+[A-Za-z]?)", key)
+    if m:
+        base = m.group(1).lower()
+        if base in known:
+            return base
+        alt = f"{base}a"
+        if alt in known:
+            return alt
+        for val in known:
+            if search_key(val) == base:
+                return val
+        # Katalóg ukladá normu bez prefixu DIN — DIN471 → 471 aj keď known zoznam mešká.
+        return base
     return raw
 
 
@@ -268,6 +283,24 @@ def snap_value_to_options(value: str | None, options: list[str]) -> str | None:
             if opt == bare or search_key(opt) == search_key(bare):
                 return opt
     return value
+
+
+def prepare_inquiry_catalog_filters(
+    filters: ProductSearchFilters,
+    *,
+    known_norma: list[str],
+) -> ProductSearchFilters:
+    """DIN471 → 471; pri normách bez dĺžky/class nefiltruj podľa týchto polí (DB má length=0)."""
+    data = filters.model_dump()
+    norma = str(data.get("norma") or "").strip()
+    if norma:
+        data["norma"] = resolve_catalog_norma(norma, known=known_norma) or norma
+    catalog_norma = str(data.get("norma") or "").strip() or None
+    if not norm_requires_length(catalog_norma):
+        data["length"] = None
+    if not norm_requires_v_class(catalog_norma):
+        data["v_class"] = None
+    return ProductSearchFilters.model_validate(data)
 
 
 def _row_to_filters(row: InquiryLineParsed) -> ProductSearchFilters:

@@ -10,6 +10,7 @@ import {
   inquiryRequiredFields,
   normRequiresLength,
   normRequiresVClass,
+  optionsWithCurrent,
   type InquiryFilterField,
   type InquiryFilterOptions,
 } from "@/lib/inquiry-norm-rules";
@@ -164,6 +165,11 @@ function useInquiryEditorRowState({
     const isMissing = isRequired && missing.has(field);
     const isCatalogBad = catalogBad.has(field);
     const cell = row[field];
+    const skipLengthZero =
+      field === "length" &&
+      !normRequiresLength(row.norma, row.raw_text) &&
+      (cell === "0" || cell === "");
+    const selectValue = skipLengthZero || cell == null ? "" : String(cell);
     return (
       <div key={field} className={compact ? "min-w-0 overflow-hidden" : undefined}>
         {compact ? (
@@ -172,9 +178,9 @@ function useInquiryEditorRowState({
           </label>
         ) : null}
         <SearchableSelect
-          value={cell == null ? "" : String(cell)}
+          value={selectValue}
           onChange={(v) => handleField(field, v)}
-          options={opts[field]}
+          options={optionsWithCurrent(selectValue || null, opts[field])}
           emptyLabel={isRequired ? "…" : "—"}
           placeholder="Hľadať…"
           size={compact ? "compact" : "default"}

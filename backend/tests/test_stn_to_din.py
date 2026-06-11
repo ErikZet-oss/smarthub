@@ -149,6 +149,14 @@ def test_heuristic_parse_snap_ring_din471() -> None:
     assert norm_requires_v_class("DIN471", raw) is False
 
 
+def test_parse_snap_ring_norma_to_catalog_471() -> None:
+    raw = "KRUZOK POISTNY 12 STN 02 2930 — 12; Norma : STN 02 2930;"
+    parsed = parse_inquiry_line(raw, row_index=100)
+    assert parsed.norma == "471"
+    assert parsed.diameter == "12"
+    assert parsed.length == "0"
+
+
 def test_heuristic_parse_snap_ring_d100() -> None:
     raw = "KRUZOK POISTNY D 100 CSN 02 2930 — D1 = 100; D3 = 94,5;"
     ai = _heuristic_parse(raw)
