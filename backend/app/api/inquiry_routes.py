@@ -17,6 +17,7 @@ from app.services.inquiry.catalog_snap import (
     resolve_catalog_norma,
     snap_inquiry_batch_to_catalog,
 )
+from app.services.inquiry.norm_rules import norm_requires_length, norm_requires_v_class
 from app.services.inquiry.file_reader import MAX_INQUIRY_ROWS, read_inquiry_rows_from_bytes
 from app.services.inquiry.parser import parse_inquiry_batch
 from app.services.inquiry.pipeline import run_inquiry_batch, validate_run_request
@@ -190,6 +191,24 @@ def inquiry_parse_status(
     }
 
 
+def _prepare_inquiry_conditional_filters(
+    filters: ProductSearchFilters,
+    *,
+    known_norma: list[str],
+) -> ProductSearchFilters:
+    """DIN471 → 471; pri normách bez dĺžky/class nefiltruj podľa týchto polí (DB má length=0)."""
+    data = filters.model_dump()
+    norma = str(data.get("norma") or "").strip()
+    if norma:
+        data["norma"] = resolve_catalog_norma(norma, known=known_norma) or norma
+    catalog_norma = str(data.get("norma") or "").strip() or None
+    if not norm_requires_length(catalog_norma):
+        data["length"] = None
+    if not norm_requires_v_class(catalog_norma):
+        data["v_class"] = None
+    return ProductSearchFilters.model_validate(data)
+
+
 @router.post("/inquiries/filter-options/conditional")
 def inquiry_filter_options_conditional(
     filters: ProductSearchFilters,
@@ -199,12 +218,11 @@ def inquiry_filter_options_conditional(
     """Kaskádové možnosti filtrov pre riadok dopytu — rovnaká logika ako vyhľadávanie."""
     from app.api.routes import _build_conditional_filter_options
 
-    if filters.norma:
-        filters.norma = resolve_catalog_norma(
-            filters.norma,
-            known=CatalogSnapCache.load(session).norma_values,
-        ) or filters.norma
-    return _build_conditional_filter_options(session, filters)
+    prepared = _prepare_inquiry_conditional_filters(
+        filters,
+        known_norma=CatalogSnapCache.load(session).norma_values,
+    )
+    return _build_conditional_filter_options(session, prepared)
 
 
 @router.post("/inquiries/parse/preview-row")

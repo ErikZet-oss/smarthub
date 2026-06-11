@@ -8,6 +8,8 @@ import {
   catalogMismatchFields,
   inquiryCatalogMismatchMessages,
   inquiryRequiredFields,
+  normRequiresLength,
+  normRequiresVClass,
   type InquiryFilterField,
   type InquiryFilterOptions,
 } from "@/lib/inquiry-norm-rules";
@@ -80,6 +82,21 @@ function warningsEqual(a: string[] | null | undefined, b: string[] | null | unde
   return left.every((msg, i) => msg === right[i]);
 }
 
+function buildInquiryFilterPayload(row: InquiryLineParsed): Record<string, string | null> {
+  const payload: Record<string, string | null> = {
+    norma: row.norma || null,
+    surface: row.surface || null,
+    diameter: row.diameter || null,
+  };
+  if (normRequiresLength(row.norma, row.raw_text)) {
+    payload.length = row.length || null;
+  }
+  if (normRequiresVClass(row.norma, row.raw_text)) {
+    payload.v_class = row.v_class || null;
+  }
+  return payload;
+}
+
 function useInquiryEditorRowState({
   row,
   apiBase,
@@ -102,13 +119,7 @@ function useInquiryEditorRowState({
           const res = await apiFetch(`${apiBase}/api/inquiries/filter-options/conditional`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              norma: row.norma || null,
-              surface: row.surface || null,
-              diameter: row.diameter || null,
-              length: row.length || null,
-              v_class: row.v_class || null,
-            }),
+            body: JSON.stringify(buildInquiryFilterPayload(row)),
           });
           if (!res.ok || cancelled) return;
           const data = (await res.json()) as Partial<InquiryFilterOptions>;
