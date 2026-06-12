@@ -73,6 +73,10 @@ const NORMS_WITH_LENGTH_KEYS = new Set([
   "DIN6914",
   "1151",
   "DIN1151",
+  "6325",
+  "DIN6325",
+  "7979",
+  "DIN7979",
 ]);
 
 export function searchKey(value: string | null | undefined): string {
@@ -97,6 +101,7 @@ export function normRequiresLength(
     return false;
   if (NO_LENGTH_TEXT.test(rawText)) return false;
   if (SNAP_RING_TEXT.test(rawText)) return false;
+  if (PIN_TEXT.test(rawText)) return true;
   if (NORMS_WITH_LENGTH_KEYS.has(key)) return true;
   if (key.startsWith("DIN") && NORMS_WITH_LENGTH_KEYS.has(key.slice(3)))
     return true;

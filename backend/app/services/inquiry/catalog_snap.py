@@ -268,11 +268,11 @@ def resolve_washer_inner_diameter(bolt_m: str | None, options: list[str]) -> str
 
 
 def snap_value_to_options(value: str | None, options: list[str]) -> str | None:
-    """Vráti hodnotu len ak existuje v katalógu; inak None (neponechávaj halucinácie parsera)."""
+    """Zosúladí s katalógom; ak katalóg nemá zoznam, ponechá parsovanú hodnotu."""
     if not value:
         return value
     if not options:
-        return None
+        return value
     if value in options:
         return value
     val_key = search_key(value)
@@ -331,9 +331,7 @@ def _snap_fields_from_options(
         snapped = snap_value_to_options(str(current), field_opts)
         if snapped is not None:
             data[name] = snapped
-        elif not field_opts:
-            data[name] = None
-        else:
+        elif name == "v_class" and field_opts:
             data[name] = None
 
 

@@ -14,6 +14,7 @@ from app.services.inquiry.catalog_snap import (
 )
 from app.services.inquiry.normalize import apply_normalization, infer_surface_from_text
 from app.services.inquiry.norm_rules import (
+    extract_pin_dimensions,
     extract_snap_ring_diameter,
     is_pin_norm,
     is_snap_ring_norm,
@@ -189,17 +190,12 @@ def _heuristic_parse(raw_text: str) -> InquiryLineAIOutput | None:
 
     diameter = None
     length = None
-    m = re.search(
-        r"\bM\s*(\d+(?:[,.]\d+)?)\s*[x×]\s*(\d+(?:[,.]\d+)?)\b",
-        t,
-        re.IGNORECASE,
-    )
-    if m:
-        diameter = m.group(1).replace(",", ".")
-        length = m.group(2).replace(",", ".")
-    else:
+    pin_dims = extract_pin_dimensions(t)
+    if pin_dims:
+        diameter, length = pin_dims
+    if diameter is None and length is None:
         m = re.search(
-            r"\b(\d+(?:[,.]\d+)?)\s*[x×X]\s*(\d+(?:[,.]\d+)?)\b",
+            r"\bM\s*(\d+(?:[,.]\d+)?)\s*[x×]\s*(\d+(?:[,.]\d+)?)\b",
             t,
             re.IGNORECASE,
         )
@@ -207,9 +203,20 @@ def _heuristic_parse(raw_text: str) -> InquiryLineAIOutput | None:
             diameter = m.group(1).replace(",", ".")
             length = m.group(2).replace(",", ".")
         else:
-            m = re.search(r"\bM\s*(\d+(?:[,.]\d+)?)\b", t, re.IGNORECASE)
+            m = re.search(
+                r"\b(\d+(?:[,.]\d+)?)\s*[x×X]\s*(\d+(?:[,.]\d+)?)(?:\s*MM\b)?",
+                t,
+                re.IGNORECASE,
+            )
             if m:
                 diameter = m.group(1).replace(",", ".")
+                length = m.group(2).replace(",", ".")
+            else:
+                m = re.search(r"\bM\s*(\d+(?:[,.]\d+)?)\b", t, re.IGNORECASE)
+                if m:
+                    prefix = t[max(0, m.start() - 14) : m.start()].casefold()
+                    if "tolerancia" not in prefix:
+                        diameter = m.group(1).replace(",", ".")
 
     if length is None:
         m = re.search(r"\b(\d+(?:[,.]\d+)?)\s*mm\b", t, re.IGNORECASE)
@@ -235,6 +242,10 @@ def _heuristic_parse(raw_text: str) -> InquiryLineAIOutput | None:
         snap_d = extract_snap_ring_diameter(t)
         if snap_d:
             diameter = snap_d
+    elif is_pin_norm(norma, t) or pin_dims:
+        pin_d = extract_pin_dimensions(t)
+        if pin_d:
+            diameter, length = pin_d
 
     v_class = extract_explicit_v_class(t)
     if is_washer_text(t):

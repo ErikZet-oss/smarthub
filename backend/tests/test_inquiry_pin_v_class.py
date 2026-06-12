@@ -27,29 +27,43 @@ def test_norm_requires_v_class_false_for_din6325_pin() -> None:
     assert norm_requires_v_class("6325", raw) is False
 
 
-def test_parse_pin_does_not_take_hrc_as_v_class() -> None:
-    raw = "Valcový kolík (čapový kolík) kalený, tolerancia m6 DIN 6325 Oceľ 60±2HRC Nelegovaná 3X16MM"
+def test_parse_pin_extracts_dimensions_and_norm() -> None:
+    raw = "Valcový kolík (čapový kolík) kalený, tolerancia m6 DIN 6325 Oceľ 60±2HRC Nelegovaná 3x30MM"
     parsed = parse_inquiry_line(raw, row_index=13)
-    assert parsed.norma in ("6325", "DIN6325")
+    assert parsed.norma == "6325"
+    assert parsed.diameter == "3"
+    assert parsed.length == "30"
     assert parsed.v_class in (None, "")
+    assert parsed.surface
 
 
-def test_snap_pin_clears_invalid_v_class(session) -> None:
+def test_parse_pin_d7979() -> None:
+    raw = "Valcový kolík kalený s vnútorným závitom DIN 7979 D Oceľ 60±2HRC Nelegovaná 16X60MM"
+    parsed = parse_inquiry_line(raw, row_index=23)
+    assert parsed.norma == "7979"
+    assert parsed.diameter == "16"
+    assert parsed.length == "60"
+
+
+def test_snap_pin_keeps_values_when_catalog_empty(session) -> None:
     row = InquiryLineParsed(
         row_index=13,
-        raw_text="Valcový kolík DIN 6325 Oceľ 60±2HRC 3X16MM",
+        raw_text="Valcový kolík DIN 6325 Oceľ 60±2HRC 3x30MM",
         norma="6325",
         surface="Oceľ",
         diameter="3",
-        length="16",
+        length="30",
         v_class="60",
         quantity=10,
     )
     snapped = snap_inquiry_line_to_catalog(session, row)
+    assert snapped.norma == "6325"
+    assert snapped.diameter == "3"
+    assert snapped.length == "30"
     assert snapped.v_class in (None, "")
 
 
 def test_snap_value_drops_unknown_v_class() -> None:
     assert snap_value_to_options("60", ["8.8", "10.9"]) is None
-    assert snap_value_to_options("60", []) is None
+    assert snap_value_to_options("6325", []) == "6325"
     assert snap_value_to_options("8.8", ["8.8", "10.9"]) == "8.8"

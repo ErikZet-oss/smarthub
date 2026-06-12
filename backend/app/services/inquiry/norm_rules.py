@@ -136,6 +136,42 @@ def extract_snap_ring_diameter(raw_text: str) -> str | None:
     return None
 
 
+def extract_pin_dimensions(raw_text: str) -> tuple[str, str] | None:
+    """Priemer × dĺžka kolíka — typicky na konci textu (3x30MM, 16X60MM)."""
+    t = (raw_text or "").strip()
+    if not t:
+        return None
+    m = re.search(
+        r"(\d+(?:[,.]\d+)?)\s*[x×X]\s*(\d+(?:[,.]\d+)?)\s*MM\s*$",
+        t,
+        re.IGNORECASE,
+    )
+    if m:
+        return m.group(1).replace(",", "."), m.group(2).replace(",", ".")
+    m = re.search(
+        r"(\d+(?:[,.]\d+)?)\s*[x×X]\s*(\d+(?:[,.]\d+)?)\s*MM\b",
+        t,
+        re.IGNORECASE,
+    )
+    if m:
+        return m.group(1).replace(",", "."), m.group(2).replace(",", ".")
+    last: tuple[str, str] | None = None
+    for m in re.finditer(
+        r"(\d+(?:[,.]\d+)?)\s*[x×X]\s*(\d+(?:[,.]\d+)?)(?:\s*MM\b)?",
+        t,
+        re.IGNORECASE,
+    ):
+        d = m.group(1).replace(",", ".")
+        ln = m.group(2).replace(",", ".")
+        try:
+            if float(d) > 80 or float(ln) > 500:
+                continue
+        except ValueError:
+            continue
+        last = (d, ln)
+    return last
+
+
 _NORMS_WITH_LENGTH_KEYS: frozenset[str] = frozenset(
     {
         "933",
@@ -150,6 +186,10 @@ _NORMS_WITH_LENGTH_KEYS: frozenset[str] = frozenset(
         "DIN6914",
         "1151",
         "DIN1151",
+        "6325",
+        "DIN6325",
+        "7979",
+        "DIN7979",
     }
 )
 
@@ -163,6 +203,8 @@ def norm_requires_length(norma: str | None, raw_text: str = "") -> bool:
         return False
     if is_snap_ring_norm(norma, raw_text):
         return False
+    if is_pin_norm(norma, raw_text):
+        return True
     if key in _NORMS_WITH_LENGTH_KEYS:
         return True
     if key.startswith("DIN") and key[3:] in _NORMS_WITH_LENGTH_KEYS:
