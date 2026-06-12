@@ -126,6 +126,7 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ rows: nextRows }),
         });
+        if (!res.ok) return nextRows;
         const parsed = await readApiJsonOrText(res);
         if (!parsed.ok) return nextRows;
         const data = parsed.data as { rows?: Record<string, unknown>[] };
@@ -161,14 +162,16 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
       .map((r) => `${r.row_index}:${r.norma}:${r.diameter}:${r.length}:${r.surface}`)
       .join("|");
     if (enrichAttemptKeyRef.current === attemptKey) return;
-    enrichAttemptKeyRef.current = attemptKey;
     let cancelled = false;
     void enrichRowsWithSmartCodes(rows).then((enriched) => {
       if (cancelled) return;
       const changed = enriched.some(
         (r, i) => r.internal_code !== rows[i]?.internal_code || r.norma !== rows[i]?.norma,
       );
-      if (changed) persistDraft(enriched);
+      if (changed) {
+        enrichAttemptKeyRef.current = attemptKey;
+        persistDraft(enriched);
+      }
     });
     return () => {
       cancelled = true;
@@ -221,6 +224,7 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
 
   const onFileSelected = async (file: File | null) => {
     if (!file || !apiToken) return;
+    enrichAttemptKeyRef.current = "";
     setParsing(true);
     setProgressPct(0);
     setStatus(`Nahrávam ${file.name}…`);

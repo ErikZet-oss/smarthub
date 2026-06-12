@@ -89,6 +89,14 @@ function warningsEqual(a: string[] | null | undefined, b: string[] | null | unde
   return left.every((msg, i) => msg === right[i]);
 }
 
+function mergeRowUpdate(current: InquiryLineParsed, updated: InquiryLineParsed): InquiryLineParsed {
+  const merged: InquiryLineParsed = { ...current, ...updated };
+  if (!updated.internal_code?.trim() && current.internal_code?.trim()) {
+    merged.internal_code = current.internal_code;
+  }
+  return merged;
+}
+
 function buildInquiryFilterPayload(row: InquiryLineParsed): Record<string, string | null> {
   const payload: Record<string, string | null> = {
     norma: row.norma || null,
@@ -148,7 +156,7 @@ function useInquiryEditorRowState({
           });
           const code = data.internal_code?.[0];
           if (code && !row.internal_code?.trim() && data.internal_code?.length === 1) {
-            onChange({ ...row, internal_code: code, catalog_warnings: null });
+            onChange(mergeRowUpdate(row, { ...row, internal_code: code, catalog_warnings: null }));
           }
         } catch {
           if (!cancelled) setOpts(EMPTY_OPTS);
@@ -162,18 +170,63 @@ function useInquiryEditorRowState({
   }, [apiBase, apiFetch, row.norma, row.surface, row.diameter, row.length, row.v_class, row.internal_code]);
 
   useEffect(() => {
+    if (row.internal_code?.trim()) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const res = await apiFetch(`${apiBase}/api/inquiries/rows/enrich-codes`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ rows: [row] }),
+          });
+          if (!res.ok || cancelled) return;
+          const data = (await res.json()) as { rows?: InquiryLineParsed[] };
+          const enriched = data.rows?.[0];
+          if (!enriched?.internal_code?.trim() || cancelled) return;
+          onChange(
+            mergeRowUpdate(row, {
+              ...row,
+              internal_code: enriched.internal_code,
+              norma: enriched.norma ?? row.norma,
+              catalog_warnings: null,
+            }),
+          );
+        } catch {
+          /* ignore */
+        }
+      })();
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- resolve Smart code once per row fingerprint
+  }, [
+    apiBase,
+    apiFetch,
+    row.row_index,
+    row.norma,
+    row.surface,
+    row.diameter,
+    row.length,
+    row.v_class,
+    row.internal_code,
+  ]);
+
+  useEffect(() => {
     const nextWarnings = catalogMessages.length ? catalogMessages : null;
     if (!warningsEqual(row.catalog_warnings, nextWarnings)) {
-      onChange({ ...row, catalog_warnings: nextWarnings });
+      onChange(mergeRowUpdate(row, { ...row, catalog_warnings: nextWarnings }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- sync warnings when catalog opts change
-  }, [catalogMessages.join("|"), row.row_index]);
+  }, [catalogMessages.join("|"), row.row_index, row.internal_code]);
 
   useEffect(() => {
     const vc = row.v_class?.trim();
     if (!vc) return;
     if (opts.v_class.length === 0 || !opts.v_class.includes(vc)) {
-      onChange({ ...row, v_class: null, catalog_warnings: null });
+      onChange(mergeRowUpdate(row, { ...row, v_class: null, catalog_warnings: null }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- drop class not in catalog
   }, [opts.v_class.join("|"), row.norma, row.v_class]);
@@ -439,8 +492,18 @@ export function InquiryEditorTable({ rows, apiBase, apiFetch, onChange }: Props)
     [],
   );
 
+  // Zruš čakajúci debounce keď parent aktualizuje riadky (napr. enrich Smart čísel).
+  useEffect(() => {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+  }, [rows]);
+
   const handleRowChange = (updated: InquiryLineParsed) => {
-    const next = rows.map((r) => (r.row_index === updated.row_index ? updated : r));
+    const next = rows.map((r) =>
+      r.row_index === updated.row_index ? mergeRowUpdate(r, updated) : r,
+    );
     emitChange(next);
   };
 
