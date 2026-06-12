@@ -82,6 +82,23 @@ def test_resolve_439_2_norma(session: Session) -> None:
     )
 
 
+def test_enrich_snaps_before_lookup(session: Session) -> None:
+    """Enrich musí najprv zosúladiť riadok s katalógom (norma 439 → 439 2, povrch…)."""
+    raw = "Šesťhranná matica nízka DIN 439-2 Oceľ Pozinkované 04 M12"
+    row = InquiryLineParsed(
+        row_index=1,
+        raw_text=raw,
+        norma="439",
+        surface="Oceľ pozinkovaná",
+        diameter="12",
+        v_class="0",
+        quantity=10,
+    )
+    enriched = enrich_inquiry_rows_internal_codes(session, [row])
+    assert enriched[0].internal_code == "311403250120"
+    assert enriched[0].norma == "439 2"
+
+
 def test_enrich_rows_fills_missing_codes(session: Session) -> None:
     rows = [
         InquiryLineParsed(

@@ -1,9 +1,10 @@
 "use client";
 
 import { X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { SearchableSelect } from "@/components/SearchableSelect";
+import { readApiJsonOrText } from "@/lib/api-errors";
 import {
   catalogMismatchFields,
   inquiryCatalogMismatchMessages,
@@ -17,7 +18,11 @@ import {
   type InquirySelectField,
 } from "@/lib/inquiry-norm-rules";
 import { cn } from "@/lib/utils";
-import { inquiryMissingFields, type InquiryLineParsed } from "@/types/inquiry";
+import {
+  inquiryMissingFields,
+  normalizeInquiryRowFromApi,
+  type InquiryLineParsed,
+} from "@/types/inquiry";
 
 const EMPTY_OPTS: InquiryFilterOptions = {
   norma: [],
@@ -181,17 +186,23 @@ function useInquiryEditorRowState({
             body: JSON.stringify({ rows: [row] }),
           });
           if (!res.ok || cancelled) return;
-          const data = (await res.json()) as { rows?: InquiryLineParsed[] };
-          const enriched = data.rows?.[0];
+          const parsed = await readApiJsonOrText(res);
+          if (!parsed.ok || cancelled) return;
+          const data = parsed.data as { rows?: Record<string, unknown>[] };
+          const enriched = data.rows?.[0]
+            ? normalizeInquiryRowFromApi(data.rows[0])
+            : null;
           if (!enriched?.internal_code?.trim() || cancelled) return;
-          onChange(
-            mergeRowUpdate(row, {
-              ...row,
-              internal_code: enriched.internal_code,
-              norma: enriched.norma ?? row.norma,
-              catalog_warnings: null,
-            }),
-          );
+          onChange({
+            ...row,
+            internal_code: enriched.internal_code,
+            norma: enriched.norma ?? row.norma,
+            surface: enriched.surface ?? row.surface,
+            diameter: enriched.diameter ?? row.diameter,
+            length: enriched.length ?? row.length,
+            v_class: enriched.v_class ?? row.v_class,
+            catalog_warnings: enriched.catalog_warnings ?? null,
+          });
         } catch {
           /* ignore */
         }
@@ -467,48 +478,28 @@ function InquiryEditorRow({ row, apiBase, apiFetch, onChange, onDelete, variant 
   );
 }
 
+export type InquiryRowsChangeHandler = (
+  next: InquiryLineParsed[] | ((prev: InquiryLineParsed[]) => InquiryLineParsed[]),
+) => void;
+
 type Props = {
   rows: InquiryLineParsed[];
   apiBase: string;
   apiFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
-  onChange: (rows: InquiryLineParsed[]) => void;
+  onChange: InquiryRowsChangeHandler;
 };
 
 export function InquiryEditorTable({ rows, apiBase, apiFetch, onChange }: Props) {
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const emitChange = useCallback(
-    (next: InquiryLineParsed[]) => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => onChange(next), 400);
-    },
-    [onChange],
-  );
-
-  useEffect(
-    () => () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    },
-    [],
-  );
-
-  // Zruš čakajúci debounce keď parent aktualizuje riadky (napr. enrich Smart čísel).
-  useEffect(() => {
-    if (debounceRef.current) {
-      clearTimeout(debounceRef.current);
-      debounceRef.current = null;
-    }
-  }, [rows]);
-
-  const handleRowChange = (updated: InquiryLineParsed) => {
-    const next = rows.map((r) =>
-      r.row_index === updated.row_index ? mergeRowUpdate(r, updated) : r,
+  const patchRow = (updated: InquiryLineParsed) => {
+    onChange((prev) =>
+      prev.map((r) =>
+        r.row_index === updated.row_index ? mergeRowUpdate(r, updated) : r,
+      ),
     );
-    emitChange(next);
   };
 
   const handleDelete = (rowIndex: number) => {
-    onChange(rows.filter((r) => r.row_index !== rowIndex));
+    onChange((prev) => prev.filter((r) => r.row_index !== rowIndex));
   };
 
   const headerFields: Array<InquirySelectField | "quantity"> = [
@@ -520,7 +511,7 @@ export function InquiryEditorTable({ rows, apiBase, apiFetch, onChange }: Props)
     row,
     apiBase,
     apiFetch,
-    onChange: handleRowChange,
+    onChange: patchRow,
     onDelete: () => handleDelete(row.row_index),
   });
 

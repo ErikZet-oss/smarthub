@@ -717,17 +717,15 @@ def enrich_inquiry_rows_internal_codes(
         if (row.internal_code or "").strip():
             out.append(row)
             continue
-        code = _lookup_unique_internal_code(session, row, snap_cache)
-        if not code:
-            out.append(row)
+        snapped = snap_inquiry_line_to_catalog(session, row, cache=snap_cache)
+        if (snapped.internal_code or "").strip():
+            out.append(snapped)
             continue
-        variant = _resolve_catalog_norma_spaced_variant(
-            row.norma, row.raw_text, known=snap_cache.norma_values
-        )
-        updates: dict[str, object] = {"internal_code": code}
-        if variant and variant != row.norma:
-            updates["norma"] = variant
-        out.append(row.model_copy(update=updates))
+        code = _lookup_unique_internal_code(session, snapped, snap_cache)
+        if not code:
+            out.append(snapped)
+            continue
+        out.append(snapped.model_copy(update={"internal_code": code}))
     return out
 
 

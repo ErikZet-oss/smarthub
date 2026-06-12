@@ -3,7 +3,10 @@
 import { ClipboardList, Loader2, Upload } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { InquiryEditorTable } from "@/components/inquiries/InquiryEditorTable";
+import {
+  InquiryEditorTable,
+  type InquiryRowsChangeHandler,
+} from "@/components/inquiries/InquiryEditorTable";
 import { InquiryResultsTable } from "@/components/inquiries/InquiryResultsTable";
 import {
   InquirySupplierPicker,
@@ -117,6 +120,23 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
 
   const enrichAttemptKeyRef = useRef("");
 
+  const mergeEnrichedRows = useCallback(
+    (current: InquiryLineParsed[], enriched: InquiryLineParsed[]): InquiryLineParsed[] => {
+      const byIndex = new Map(enriched.map((r) => [r.row_index, r]));
+      return current.map((row) => {
+        const patch = byIndex.get(row.row_index);
+        if (!patch) return row;
+        return {
+          ...row,
+          ...patch,
+          raw_text: row.raw_text,
+          row_index: row.row_index,
+        };
+      });
+    },
+    [],
+  );
+
   const enrichRowsWithSmartCodes = useCallback(
     async (nextRows: InquiryLineParsed[]): Promise<InquiryLineParsed[]> => {
       if (!nextRows.some((r) => !r.internal_code?.trim())) return nextRows;
@@ -131,12 +151,15 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
         if (!parsed.ok) return nextRows;
         const data = parsed.data as { rows?: Record<string, unknown>[] };
         if (!Array.isArray(data.rows)) return nextRows;
-        return data.rows.map(normalizeInquiryRowFromApi);
+        return mergeEnrichedRows(
+          nextRows,
+          data.rows.map(normalizeInquiryRowFromApi),
+        );
       } catch {
         return nextRows;
       }
     },
-    [apiBase, apiFetch],
+    [apiBase, apiFetch, mergeEnrichedRows],
   );
 
   const persistDraft = useCallback(
@@ -154,6 +177,24 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
     [selectedSupplierIds, sourceFileName, userId],
   );
 
+  const applyRowsChange: InquiryRowsChangeHandler = useCallback(
+    (updater) => {
+      setRows((prev) => {
+        const next = typeof updater === "function" ? updater(prev) : updater;
+        if (next.length || selectedSupplierIds.length) {
+          saveDraft(userId, {
+            savedAt: new Date().toISOString(),
+            sourceFileName,
+            rows: next,
+            selectedSupplierIds,
+          });
+        }
+        return next;
+      });
+    },
+    [selectedSupplierIds, sourceFileName, userId],
+  );
+
   useEffect(() => {
     if (!authReady || !apiToken || rows.length === 0) return;
     const missing = rows.filter((r) => !r.internal_code?.trim());
@@ -165,24 +206,22 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
     let cancelled = false;
     void enrichRowsWithSmartCodes(rows).then((enriched) => {
       if (cancelled) return;
+      enrichAttemptKeyRef.current = attemptKey;
       const changed = enriched.some(
         (r, i) => r.internal_code !== rows[i]?.internal_code || r.norma !== rows[i]?.norma,
       );
-      if (changed) {
-        enrichAttemptKeyRef.current = attemptKey;
-        persistDraft(enriched);
-      }
+      if (changed) persistDraft(enriched);
     });
     return () => {
       cancelled = true;
     };
   }, [authReady, apiToken, rows, enrichRowsWithSmartCodes, persistDraft]);
 
-  const persistRows = useCallback(
-    (nextRows: InquiryLineParsed[], fileName?: string) => {
-      persistDraft(nextRows, fileName);
+  const handleEditorChange: InquiryRowsChangeHandler = useCallback(
+    (updater) => {
+      applyRowsChange(updater);
     },
-    [persistDraft],
+    [applyRowsChange],
   );
 
   const handleSupplierChange = useCallback(
@@ -202,6 +241,7 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
 
   const restoreDraft = async () => {
     if (!draftPrompt) return;
+    enrichAttemptKeyRef.current = "";
     const enriched = await enrichRowsWithSmartCodes(draftPrompt.rows);
     setRows(enriched);
     setSourceFileName(draftPrompt.sourceFileName);
@@ -511,7 +551,7 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
             rows={filteredRows}
             apiBase={apiBase}
             apiFetch={apiFetch}
-            onChange={persistRows}
+            onChange={handleEditorChange}
           />
 
           {/* Desktop: akcie pod tabuľkou */}
