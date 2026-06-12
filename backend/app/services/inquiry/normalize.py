@@ -10,6 +10,7 @@ from app.services.inquiry.norm_rules import (
     _norm_num_key,
     extract_pin_catalog_norma,
     extract_pin_tolerance_fit,
+    extract_snap_ring_diameter,
     is_pin_norm,
     is_snap_ring_norm,
 )
@@ -94,6 +95,8 @@ def normalize_surface(value: str | None) -> str | None:
         ("mosadz", "Mosadz"),
         ("polyamid", "Polyamid"),
         ("nylon", "Polyamid"),
+        ("pružin", "Oceľ čierna"),
+        ("pruzin", "Oceľ čierna"),
         ("oceľ", "Oceľ"),
         ("ocel", "Oceľ"),
     )
@@ -120,6 +123,8 @@ def infer_surface_from_text(text: str) -> str | None:
         return "Oceľ pozinkovaná"
     if "mosadz" in low:
         return "Mosadz"
+    if re.search(r"pr[uú]žinov", low) and ("ocel" in low or "oceľ" in low):
+        return "Oceľ čierna"
     if "ocel" in low or "oceľ" in low:
         return "Oceľ"
     return None
@@ -172,6 +177,16 @@ def apply_normalization(parsed: InquiryLineParsed) -> InquiryLineParsed:
         data["norma"] = pin_catalog_norm
     elif is_snap_ring_norm(final_norma, parsed.raw_text):
         data["norma"] = _norm_num_key(str(final_norma or "")) or final_norma
+        data["v_class"] = None
+        if not data.get("diameter"):
+            snap_d = extract_snap_ring_diameter(parsed.raw_text)
+            if snap_d:
+                data["diameter"] = normalize_diameter(snap_d)
+        surf = str(data.get("surface") or "").strip()
+        if not surf or surf.casefold() in ("oceľ", "ocel"):
+            inferred = infer_surface_from_text(parsed.raw_text)
+            if inferred:
+                data["surface"] = inferred
     elif is_pin_norm(final_norma, parsed.raw_text):
         if not pin_catalog_norm:
             data["norma"] = _norm_num_key(str(final_norma or "")) or final_norma

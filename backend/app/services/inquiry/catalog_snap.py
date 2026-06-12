@@ -112,6 +112,7 @@ class CatalogSnapCache:
                 (filters.diameter or "").strip(),
                 (filters.length or "").strip(),
                 (filters.v_class or "").strip(),
+                (filters.internal_code or "").strip(),
             ]
         )
 
@@ -319,6 +320,10 @@ def snap_value_to_options(value: str | None, options: list[str]) -> str | None:
         for opt in options:
             if opt == bare or search_key(opt) == search_key(bare):
                 return opt
+    if value.casefold() in ("oceľ", "ocel"):
+        steel = [o for o in options if o.casefold().startswith(("oceľ", "ocel"))]
+        if len(steel) == 1:
+            return steel[0]
     return None
 
 
@@ -347,7 +352,26 @@ def _row_to_filters(row: InquiryLineParsed) -> ProductSearchFilters:
         diameter=row.diameter,
         length=row.length,
         v_class=row.v_class,
+        internal_code=row.internal_code,
     )
+
+
+def _apply_internal_code_product(session: Session, data: dict[str, object]) -> bool:
+    code = str(data.get("internal_code") or "").strip()
+    if not code:
+        return False
+    product = session.exec(select(Product).where(Product.internal_code == code)).first()
+    if product is None:
+        return False
+    data["norma"] = product.norma
+    data["surface"] = product.surface
+    data["diameter"] = product.diameter
+    data["length"] = product.length
+    if is_snap_ring_norm(product.norma):
+        data["v_class"] = None
+    else:
+        data["v_class"] = product.v_class or None
+    return True
 
 
 def _snap_fields_from_options(
@@ -374,6 +398,7 @@ _FIELD_LABELS = {
     "diameter": "Priemer",
     "length": "Dĺžka",
     "v_class": "Class",
+    "internal_code": "Číslo Smart",
 }
 
 
@@ -520,6 +545,17 @@ def snap_inquiry_line_to_catalog(
 
     if not norm_requires_length(str(data.get("norma") or ""), row.raw_text):  # type: ignore[arg-type]
         data["length"] = snap_value_to_options(str(data.get("length") or "0"), opts.get("length", [])) or "0"
+
+    codes = opts.get("internal_code", [])
+    if not data.get("internal_code") and len(codes) == 1:
+        data["internal_code"] = codes[0]
+    if data.get("internal_code"):
+        if _apply_internal_code_product(session, data):
+            base = InquiryLineParsed.model_validate({**data, "raw_text": row.raw_text})
+            opts = snap_cache.filter_options(session, _row_to_filters(base))
+
+    if is_snap_ring_norm(str(data.get("norma") or ""), row.raw_text):
+        data["v_class"] = None
 
     snapped = InquiryLineParsed.model_validate({**data, "raw_text": row.raw_text})
     warnings = _catalog_mismatch_warnings(session, snapped, snap_cache)

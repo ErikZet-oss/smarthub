@@ -6,6 +6,7 @@ export type InquiryLineParsed = {
   diameter: string | null;
   length: string | null;
   v_class: string | null;
+  internal_code: string | null;
   quantity: number | null;
   parse_error: string | null;
   catalog_warnings: string[] | null;
@@ -91,6 +92,7 @@ export function normalizeInquiryRowFromApi(raw: Record<string, unknown>): Inquir
       (raw.v_class as string | null) ??
       (raw.class as string | null) ??
       null,
+    internal_code: (raw.internal_code as string | null) ?? null,
     quantity:
       raw.quantity === null || raw.quantity === undefined
         ? null

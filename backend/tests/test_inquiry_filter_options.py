@@ -45,6 +45,21 @@ def test_din471_conditional_surfaces(session) -> None:
     prepared = prepare_inquiry_catalog_filters(raw, known_norma=known)
     opts = _build_conditional_filter_options(session, prepared)
     assert "Oceľ čierna" in opts["surface"]
+    assert "internal_code" in opts
+
+
+def test_pin_filter_internal_codes(session) -> None:
+    known = CatalogSnapCache.load(session).norma_values
+    raw = ProductSearchFilters(
+        norma="6325 M6",
+        surface="Oceľ čierna",
+        diameter="3",
+        length="30",
+        v_class="M6",
+    )
+    prepared = prepare_inquiry_catalog_filters(raw, known_norma=known)
+    opts = _build_conditional_filter_options(session, prepared)
+    assert len(opts.get("internal_code", [])) >= 1
 
 
 def test_snap_ring_din471_to_catalog(session) -> None:
@@ -59,4 +74,22 @@ def test_snap_ring_din471_to_catalog(session) -> None:
     snapped = snap_inquiry_line_to_catalog(session, row)
     assert snapped.norma == "471"
     assert snapped.length == "0"
+    assert snapped.v_class is None
+
+
+def test_snap_ring_din471_pruzinova_snap_to_catalog(session) -> None:
+    raw = "Poistný hriadeľový krúžok - normálny typ DIN 471 Pružinová oceľ 36MM"
+    row = InquiryLineParsed(
+        row_index=4,
+        raw_text=raw,
+        norma="471",
+        surface="Oceľ čierna",
+        diameter="36",
+        length="0",
+        quantity=10,
+    )
+    snapped = snap_inquiry_line_to_catalog(session, row)
+    assert snapped.norma == "471"
+    assert snapped.surface == "Oceľ čierna"
+    assert snapped.diameter == "36"
     assert snapped.v_class is None

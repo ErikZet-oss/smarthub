@@ -133,6 +133,7 @@ def _filter_opts_cache_key(filters: "ProductSearchFilters") -> str:
             "diameter": filters.diameter or "",
             "length": filters.length or "",
             "v_class": filters.v_class or "",
+            "internal_code": filters.internal_code or "",
             "y_money_name": filters.y_money_name or "",
             "image_filename": filters.image_filename or "",
         },
@@ -1006,9 +1007,12 @@ def _apply_search_filters(
     skip_v_class: bool = False,
     skip_y_money_name: bool = False,
     skip_image_filename: bool = False,
+    skip_internal_code: bool = False,
 ):
     if not skip_code and filters.code:
         statement = statement.where(Product.internal_code.contains(filters.code))
+    if not skip_internal_code and filters.internal_code:
+        statement = statement.where(Product.internal_code == filters.internal_code.strip())
     if not skip_norma and filters.norma:
         statement = statement.where(Product.norma == filters.norma)
     if not skip_surface and filters.surface:
@@ -1058,6 +1062,7 @@ def _distinct_conditional(
     skip_length: bool,
     skip_v_class: bool,
     skip_y_money_name: bool,
+    skip_internal_code: bool = False,
     column,
     max_values: int = FILTER_OPTION_VALUE_LIMIT,
 ) -> list[str]:
@@ -1072,6 +1077,7 @@ def _distinct_conditional(
         skip_length=skip_length,
         skip_v_class=skip_v_class,
         skip_y_money_name=skip_y_money_name,
+        skip_internal_code=skip_internal_code,
     )
     stmt = stmt.where(column.isnot(None)).where(column != "")
     rows = session.exec(stmt).all()
@@ -1142,6 +1148,19 @@ def _build_conditional_filter_options(
             skip_v_class=True,
             skip_y_money_name=False,
             column=Product.v_class,
+        ),
+        "internal_code": _distinct_conditional(
+            session,
+            filters,
+            skip_code=True,
+            skip_norma=False,
+            skip_surface=False,
+            skip_diameter=False,
+            skip_length=False,
+            skip_v_class=False,
+            skip_y_money_name=True,
+            skip_internal_code=True,
+            column=Product.internal_code,
         ),
         "y_money_name": _distinct_conditional(
             session,
@@ -2554,8 +2573,17 @@ def mapping_profile(
     payload: ExcelProfilePayload,
     _: AuthUserContext = Depends(require_sections_unlock),
 ):
+    import logging
+
+    log = logging.getLogger(__name__)
+    log.info("mapping/profile: sheet=%r path=%r", payload.sheet_name, payload.file_path)
     try:
         result = profile_excel_columns(payload.file_path, payload.sheet_name)
+        log.info(
+            "mapping/profile OK: %s stĺpcov, %s unique stĺpcov",
+            len(result.columns),
+            len(result.unique_values),
+        )
         return {
             "sheet": result.sheet,
             "columns": result.columns,
@@ -2566,7 +2594,13 @@ def mapping_profile(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except MemoryError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Načítanie Excelu spotrebovalo príliš veľa pamäte. Skús znova o pár minút.",
+        ) from exc
     except Exception as exc:
+        log.exception("mapping/profile zlyhal")
         raise HTTPException(
             status_code=500,
             detail=f"Profil stĺpcov zlyhal: {exc}",

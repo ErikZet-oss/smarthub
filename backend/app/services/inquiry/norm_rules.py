@@ -138,6 +138,20 @@ def extract_snap_ring_diameter(raw_text: str) -> str | None:
     )
     if m:
         return m.group(1).replace(",", ".")
+    m = re.search(
+        r"(?:ocel|oce[lľ]|nerez|mosadz|pr[uú]žinov(?:[áa]|a))[^0-9]{0,48}(\d+(?:[,.]\d+)?)\s*MM\b",
+        t,
+        re.IGNORECASE,
+    )
+    if m:
+        val = m.group(1).replace(",", ".")
+        if val not in ("471", "472"):
+            return val
+    m = re.search(r"(\d+(?:[,.]\d+)?)\s*MM\s*$", t.strip(), re.IGNORECASE)
+    if m:
+        val = m.group(1).replace(",", ".")
+        if val not in ("471", "472"):
+            return val
     return None
 
 

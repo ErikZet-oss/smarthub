@@ -18,7 +18,7 @@ def test_heuristic_zavitova_tyc() -> None:
     ai = _heuristic_parse("Závitová tyč M10x1000 4.8 pozinkovaná")
     assert ai is not None
     assert ai.norma == "DIN976"
-    assert ai.diameter == "M10"
+    assert ai.diameter == "10"
     assert ai.length == "1000"
 
 

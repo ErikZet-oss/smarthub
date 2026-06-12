@@ -328,7 +328,7 @@ def _heuristic_parse(raw_text: str) -> InquiryLineAIOutput | None:
         elif "ocel" in low or "oceľ" in low:
             surface = "Oceľ"
 
-    if not v_class and surface and not is_pin_norm(norma, t):
+    if not v_class and surface and not is_pin_norm(norma, t) and not is_snap_ring_norm(norma, t):
         v_class = infer_v_class_for_row(norma=norma, surface=surface, raw_text=t)
 
     if not norm_requires_length(norma, t):

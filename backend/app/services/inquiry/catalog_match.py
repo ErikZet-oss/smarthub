@@ -93,6 +93,13 @@ def find_catalog_products(
     if parsed.parse_error:
         return []
 
+    code = (parsed.internal_code or "").strip()
+    if code:
+        direct = session.exec(select(Product).where(Product.internal_code == code)).first()
+        if direct is not None:
+            return _prefer_products_with_mappings(session, [direct], supplier_ids)[:limit]
+        return []
+
     cache = CatalogSnapCache.load(session)
     catalog_norma = resolve_catalog_norma(parsed.norma, known=cache.norma_values) or parsed.norma
     norm_row = parsed.model_copy(update={"norma": catalog_norma})

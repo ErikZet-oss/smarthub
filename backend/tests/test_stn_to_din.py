@@ -164,3 +164,23 @@ def test_heuristic_parse_snap_ring_d100() -> None:
     assert ai.norma == "DIN471"
     assert ai.diameter == "100"
     assert ai.v_class is None
+
+
+def test_heuristic_parse_snap_ring_din471_pruzinova_36mm() -> None:
+    from app.services.inquiry.norm_rules import extract_snap_ring_diameter
+    from app.services.inquiry.normalize import infer_surface_from_text
+
+    raw = "Poistný hriadeľový krúžok - normálny typ DIN 471 Pružinová oceľ 36MM"
+    assert extract_snap_ring_diameter(raw) == "36"
+    assert infer_surface_from_text(raw) == "Oceľ čierna"
+    ai = _heuristic_parse(raw)
+    assert ai is not None
+    assert ai.norma == "DIN471"
+    assert ai.diameter == "36"
+    assert ai.surface == "Oceľ čierna"
+    assert ai.v_class is None
+    parsed = parse_inquiry_line(raw)
+    assert parsed.norma == "471"
+    assert parsed.diameter == "36"
+    assert parsed.surface == "Oceľ čierna"
+    assert parsed.v_class is None

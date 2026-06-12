@@ -6,10 +6,11 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.api.deps import AuthUserContext, get_current_user
 from app.db import get_session
+from app.models.entities import Product
 from app.schemas.common import ProductSearchFilters
 from app.schemas.inquiry import InquiryParseTaskResult, InquiryRunRequest, InquiryRunTaskResult
 from app.services.inquiry.catalog_snap import (
@@ -202,6 +203,29 @@ def inquiry_filter_options_conditional(
     cache = CatalogSnapCache.load(session)
     prepared = prepare_inquiry_catalog_filters(filters, known_norma=cache.norma_values)
     return _build_conditional_filter_options(session, prepared)
+
+
+@router.get("/inquiries/catalog-product/{internal_code}")
+def inquiry_catalog_product(
+    internal_code: str,
+    session: Session = Depends(get_session),
+    _: AuthUserContext = Depends(get_current_user),
+):
+    """Pole produktu podľa čísla Smart — na doplnenie riadku dopytu."""
+    code = internal_code.strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="Prázdne číslo Smart.")
+    product = session.exec(select(Product).where(Product.internal_code == code)).first()
+    if product is None:
+        raise HTTPException(status_code=404, detail="Produkt sa nenašiel.")
+    return {
+        "internal_code": product.internal_code,
+        "norma": product.norma,
+        "surface": product.surface,
+        "diameter": product.diameter,
+        "length": product.length,
+        "v_class": product.v_class,
+    }
 
 
 @router.post("/inquiries/parse/preview-row")

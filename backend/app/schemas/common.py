@@ -12,6 +12,7 @@ class ProductSearchFilters(BaseModel):
     y_money_name: Optional[str] = None
     image_filename: Optional[str] = None
     code: Optional[str] = None
+    internal_code: Optional[str] = None
     limit: Optional[int] = 50
     # Ak True, search volá Playwright/HTTP pre každú ponuku (veľmi pomalé). Predvolene len DB + ceny po rozbalení riadku.
     prefetch_live_prices: bool = False

@@ -23,15 +23,17 @@ const EMPTY_OPTS: InquiryFilterOptions = {
   diameter: [],
   length: [],
   v_class: [],
+  internal_code: [],
 };
 
-const FIELD_LABELS: Record<InquiryFilterField | "raw_text", string> = {
+const FIELD_LABELS: Record<InquiryFilterField | "raw_text" | "internal_code", string> = {
   raw_text: "Text dopytu",
   norma: "Norma",
   surface: "Povrchová úprava",
   diameter: "Priemer",
   length: "Dĺžka",
   v_class: "Class",
+  internal_code: "Číslo Smart",
   quantity: "Ks",
 };
 
@@ -41,6 +43,7 @@ const SELECT_FIELDS: (keyof InquiryFilterOptions)[] = [
   "diameter",
   "length",
   "v_class",
+  "internal_code",
 ];
 
 /** Kratšie popisky pre úzke mobilné stĺpce (3 vedľa seba). */
@@ -50,6 +53,7 @@ const COMPACT_FIELD_LABELS: Record<(typeof SELECT_FIELDS)[number], string> = {
   diameter: "Priem.",
   length: "Dĺžka",
   v_class: "Class",
+  internal_code: "Smart č.",
 };
 
 type RowProps = {
@@ -88,6 +92,7 @@ function buildInquiryFilterPayload(row: InquiryLineParsed): Record<string, strin
     norma: row.norma || null,
     surface: row.surface || null,
     diameter: row.diameter || null,
+    internal_code: row.internal_code || null,
   };
   if (normRequiresLength(row.norma, row.raw_text)) {
     payload.length = row.length || null;
@@ -131,6 +136,7 @@ function useInquiryEditorRowState({
             diameter: data.diameter ?? [],
             length: data.length ?? [],
             v_class: data.v_class ?? [],
+            internal_code: data.internal_code ?? [],
           });
         } catch {
           if (!cancelled) setOpts(EMPTY_OPTS);
@@ -141,7 +147,7 @@ function useInquiryEditorRowState({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [apiBase, apiFetch, row.norma, row.surface, row.diameter, row.length, row.v_class]);
+  }, [apiBase, apiFetch, row.norma, row.surface, row.diameter, row.length, row.v_class, row.internal_code]);
 
   useEffect(() => {
     const nextWarnings = catalogMessages.length ? catalogMessages : null;
@@ -160,7 +166,39 @@ function useInquiryEditorRowState({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- drop class not in catalog
   }, [opts.v_class.join("|"), row.norma, row.v_class]);
 
-  const handleField = (field: keyof InquiryLineParsed, value: string) => {
+  useEffect(() => {
+    if (row.internal_code?.trim()) return;
+    if (opts.internal_code.length !== 1) return;
+    if (missing.size > 0) return;
+    onChange({ ...row, internal_code: opts.internal_code[0], catalog_warnings: null });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- auto-fill unique Smart number
+  }, [opts.internal_code.join("|"), missing.size, row.norma, row.diameter, row.length, row.surface, row.v_class]);
+
+  const handleField = async (field: keyof InquiryLineParsed, value: string) => {
+    if (field === "internal_code" && value.trim()) {
+      try {
+        const res = await apiFetch(
+          `${apiBase}/api/inquiries/catalog-product/${encodeURIComponent(value.trim())}`,
+        );
+        if (res.ok) {
+          const product = (await res.json()) as Partial<InquiryLineParsed>;
+          onChange({
+            ...row,
+            internal_code: product.internal_code ?? value.trim(),
+            norma: product.norma ?? row.norma,
+            surface: product.surface ?? row.surface,
+            diameter: product.diameter ?? row.diameter,
+            length: product.length ?? row.length,
+            v_class: product.v_class ?? row.v_class,
+            parse_error: null,
+            catalog_warnings: null,
+          });
+          return;
+        }
+      } catch {
+        /* fallback to plain field update */
+      }
+    }
     onChange(updateRowField(row, field, value));
   };
 
@@ -173,7 +211,7 @@ function useInquiryEditorRowState({
     const isRequired = required.has(field);
     const isMissing = isRequired && missing.has(field);
     const isCatalogBad = catalogBad.has(field);
-    const cell = row[field];
+    const cell = row[field as keyof InquiryLineParsed];
     const skipLengthZero =
       field === "length" &&
       !normRequiresLength(row.norma, row.raw_text) &&

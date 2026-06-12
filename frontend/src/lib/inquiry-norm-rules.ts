@@ -157,6 +157,7 @@ export type InquiryFilterOptions = {
   diameter: string[];
   length: string[];
   v_class: string[];
+  internal_code: string[];
 };
 
 export function optionsWithCurrent(
@@ -175,6 +176,7 @@ const CATALOG_FIELD_LABELS: Record<keyof InquiryFilterOptions, string> = {
   diameter: "Priemer",
   length: "Dĺžka",
   v_class: "Class",
+  internal_code: "Číslo Smart",
 };
 
 export function inquiryCatalogMismatchMessages(
@@ -184,6 +186,7 @@ export function inquiryCatalogMismatchMessages(
     diameter: string | null;
     length: string | null;
     v_class: string | null;
+    internal_code: string | null;
   },
   opts: InquiryFilterOptions,
 ): string[] {
@@ -209,6 +212,7 @@ export function catalogMismatchFields(
     diameter: string | null;
     length: string | null;
     v_class: string | null;
+    internal_code: string | null;
   },
   opts: InquiryFilterOptions,
 ): (keyof InquiryFilterOptions)[] {
