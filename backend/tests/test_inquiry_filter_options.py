@@ -93,3 +93,23 @@ def test_snap_ring_din471_pruzinova_snap_to_catalog(session) -> None:
     assert snapped.surface == "Oceľ čierna"
     assert snapped.diameter == "36"
     assert snapped.v_class is None
+    assert snapped.internal_code == "311930000036"
+    assert snapped.catalog_warnings is None
+
+
+def test_din471_catalog_mismatch_ignores_length_zero(session) -> None:
+    from app.services.inquiry.catalog_snap import CatalogSnapCache, _catalog_mismatch_warnings
+
+    raw = "Poistný hriadeľový krúžok - normálny typ DIN 471 Pružinová oceľ 19MM"
+    row = InquiryLineParsed(
+        row_index=3,
+        raw_text=raw,
+        norma="471",
+        surface="Oceľ čierna",
+        diameter="19",
+        length="0",
+        v_class="0",
+        quantity=10,
+    )
+    cache = CatalogSnapCache.load(session)
+    assert _catalog_mismatch_warnings(session, row, cache) == []

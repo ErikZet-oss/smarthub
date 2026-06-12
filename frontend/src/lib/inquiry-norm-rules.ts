@@ -45,7 +45,7 @@ const NO_LENGTH_TEXT =
   /\b(matic(?:a|e|ou|i|ami)?|podložk(?:a|y|ou|ami)?|washer|mutter|nut)\b/i;
 
 const SNAP_RING_TEXT =
-  /\b(kru[žz]ok\s+poistn|kruzok\s+poistn|poistn(?:[ýy])?\s+kru[žz]ok|segerring|snap\s*ring)\b/i;
+  /\b(kr[uú][žz]ok\s+poistn|kruzok\s+poistn|poistn(?:[ýy])?(?:\s+\w+){0,4}\s+kr[uú][žz]ok|hriade[lľ]ov[ýy]\s+kr[uú][žz]ok|segerring|snap\s*ring)\b/i;
 
 const BOLT_TEXT =
   /\b(skrutk(?:a|y|ou|ami)?|šroub|bolt|screw|vrut|skrutka)\b/i;
@@ -191,6 +191,38 @@ const CATALOG_FIELD_LABELS: Record<keyof InquiryFilterOptions, string> = {
   internal_code: "Číslo Smart",
 };
 
+export function inquiryCatalogFieldsToValidate(
+  norma: string | null | undefined,
+  rawText: string,
+  row: {
+    length: string | null;
+    v_class: string | null;
+    internal_code: string | null;
+  },
+): (keyof InquiryFilterOptions)[] {
+  const fields: (keyof InquiryFilterOptions)[] = ["norma", "surface", "diameter"];
+  if (normRequiresLength(norma, rawText) && String(row.length ?? "").trim()) {
+    fields.push("length");
+  }
+  if (normRequiresVClass(norma, rawText) && String(row.v_class ?? "").trim()) {
+    fields.push("v_class");
+  }
+  if (String(row.internal_code ?? "").trim()) {
+    fields.push("internal_code");
+  }
+  return fields;
+}
+
+export function catalogValueInOptions(value: string, options: string[]): boolean {
+  if (options.includes(value)) return true;
+  const key = searchKey(value);
+  const bare = key.startsWith("DIN") ? key.slice(3) : key;
+  return options.some((opt) => {
+    const ok = searchKey(opt);
+    return ok === key || ok === bare || (ok.startsWith("DIN") && ok.slice(3) === bare);
+  });
+}
+
 export function inquiryCatalogMismatchMessages(
   row: {
     norma: string | null;
@@ -199,16 +231,17 @@ export function inquiryCatalogMismatchMessages(
     length: string | null;
     v_class: string | null;
     internal_code: string | null;
+    raw_text: string;
   },
   opts: InquiryFilterOptions,
 ): string[] {
   const messages: string[] = [];
-  for (const field of Object.keys(CATALOG_FIELD_LABELS) as (keyof InquiryFilterOptions)[]) {
+  for (const field of inquiryCatalogFieldsToValidate(row.norma, row.raw_text, row)) {
     const val = String(row[field] ?? "").trim();
     if (!val) continue;
     const catalog = opts[field];
     if (catalog.length === 0) continue;
-    if (!catalog.includes(val)) {
+    if (!catalogValueInOptions(val, catalog)) {
       messages.push(
         `${CATALOG_FIELD_LABELS[field]} „${val}" v katalógu pre túto kombináciu neexistuje`,
       );
@@ -225,16 +258,17 @@ export function catalogMismatchFields(
     length: string | null;
     v_class: string | null;
     internal_code: string | null;
+    raw_text: string;
   },
   opts: InquiryFilterOptions,
 ): (keyof InquiryFilterOptions)[] {
   const bad: (keyof InquiryFilterOptions)[] = [];
-  for (const field of Object.keys(CATALOG_FIELD_LABELS) as (keyof InquiryFilterOptions)[]) {
+  for (const field of inquiryCatalogFieldsToValidate(row.norma, row.raw_text, row)) {
     const val = String(row[field] ?? "").trim();
     if (!val) continue;
     const catalog = opts[field];
     if (catalog.length === 0) continue;
-    if (!catalog.includes(val)) bad.push(field);
+    if (!catalogValueInOptions(val, catalog)) bad.push(field);
   }
   return bad;
 }

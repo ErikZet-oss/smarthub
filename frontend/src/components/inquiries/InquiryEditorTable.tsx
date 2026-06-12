@@ -140,6 +140,10 @@ function useInquiryEditorRowState({
             v_class: data.v_class ?? [],
             internal_code: data.internal_code ?? [],
           });
+          const code = data.internal_code?.[0];
+          if (code && !row.internal_code?.trim() && data.internal_code?.length === 1) {
+            onChange({ ...row, internal_code: code, catalog_warnings: null });
+          }
         } catch {
           if (!cancelled) setOpts(EMPTY_OPTS);
         }
@@ -167,14 +171,6 @@ function useInquiryEditorRowState({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- drop class not in catalog
   }, [opts.v_class.join("|"), row.norma, row.v_class]);
-
-  useEffect(() => {
-    if (row.internal_code?.trim()) return;
-    if (opts.internal_code.length !== 1) return;
-    if (missing.size > 0) return;
-    onChange({ ...row, internal_code: opts.internal_code[0], catalog_warnings: null });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- auto-fill unique Smart number
-  }, [opts.internal_code.join("|"), missing.size, row.norma, row.diameter, row.length, row.surface, row.v_class]);
 
   const handleField = async (field: keyof InquiryLineParsed, value: string) => {
     if (field === "internal_code" && value.trim()) {

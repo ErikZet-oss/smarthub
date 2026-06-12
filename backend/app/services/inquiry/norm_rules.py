@@ -69,7 +69,9 @@ _NO_LENGTH_TEXT = re.compile(
 
 _SNAP_RING_TEXT = re.compile(
     r"\b("
-    r"kru[žz]ok\s+poistn|kruzok\s+poistn|poistn(?:[ýy])?\s+kru[žz]ok|"
+    r"kr[uú][žz]ok\s+poistn|kruzok\s+poistn|"
+    r"poistn(?:[ýy])?(?:\s+\w+){0,4}\s+kr[uú][žz]ok|"
+    r"hriade[lľ]ov[ýy]\s+kr[uú][žz]ok|"
     r"segerring|snap\s*ring"
     r")\b",
     re.IGNORECASE,
@@ -106,7 +108,12 @@ def _pin_base_norm(norma: str | None) -> str:
 def is_snap_ring_norm(norma: str | None, raw_text: str = "") -> bool:
     if _norm_num_key(norma) in ("471", "472"):
         return True
-    return bool(_SNAP_RING_TEXT.search(raw_text or ""))
+    text = raw_text or ""
+    if _SNAP_RING_TEXT.search(text):
+        return True
+    if re.search(r"(?:poistn|hriade[lľ]).*?kr[uú][žz]ok|kr[uú][žz]ok.*?poistn", text, re.IGNORECASE):
+        return True
+    return False
 
 
 def is_pin_norm(norma: str | None, raw_text: str = "") -> bool:
@@ -125,14 +132,14 @@ def extract_snap_ring_diameter(raw_text: str) -> str | None:
     if m:
         return m.group(1).replace(",", ".")
     m = re.search(
-        r"\b(?:kru[žz]ok|kruzok)\s+poistn(?:[ýy])?\s+D\s*(\d+(?:[,.]\d+)?)\b",
+        r"\b(?:kr[uú][žz]ok|kruzok)\s+poistn(?:[ýy])?\s+D\s*(\d+(?:[,.]\d+)?)\b",
         t,
         re.IGNORECASE,
     )
     if m:
         return m.group(1).replace(",", ".")
     m = re.search(
-        r"\b(?:kru[žz]ok|kruzok)\s+poistn(?:[ýy])?\s+(\d+(?:[,.]\d+)?)\b",
+        r"\b(?:kr[uú][žz]ok|kruzok)\s+poistn(?:[ýy])?\s+(\d+(?:[,.]\d+)?)\b",
         t,
         re.IGNORECASE,
     )
@@ -282,3 +289,36 @@ def inquiry_required_field_names(norma: str | None, raw_text: str = "") -> list[
     if norm_requires_v_class(norma, raw_text):
         required.append("v_class")
     return required
+
+
+def inquiry_catalog_fields_to_validate(
+    norma: str | None,
+    raw_text: str,
+    *,
+    length: str | None = None,
+    v_class: str | None = None,
+    internal_code: str | None = None,
+) -> tuple[str, ...]:
+    """Polia na kontrolu voči katalógu — rovnaká logika ako conditional filtre."""
+    fields: list[str] = ["norma", "surface", "diameter"]
+    if norm_requires_length(norma, raw_text) and (length or "").strip():
+        fields.append("length")
+    if norm_requires_v_class(norma, raw_text) and (v_class or "").strip():
+        fields.append("v_class")
+    if (internal_code or "").strip():
+        fields.append("internal_code")
+    return tuple(fields)
+
+
+def catalog_value_in_options(value: str, options: list[str]) -> bool:
+    if value in options:
+        return True
+    key = search_key(value)
+    bare = key[3:] if key.startswith("DIN") else key
+    for opt in options:
+        if opt == value:
+            return True
+        ok = search_key(opt)
+        if ok == key or ok == bare or (ok.startswith("DIN") and ok[3:] == bare):
+            return True
+    return False

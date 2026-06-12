@@ -11,9 +11,11 @@ from app.schemas.inquiry import InquiryLineParsed
 from app.services.inquiry.norm_rules import (
     _norm_num_key,
     _pin_base_norm,
+    catalog_value_in_options,
     extract_pin_catalog_norma,
     extract_pin_tolerance_fit,
     extract_snap_ring_diameter,
+    inquiry_catalog_fields_to_validate,
     is_pin_norm,
     is_snap_ring_norm,
     norm_requires_length,
@@ -402,20 +404,53 @@ _FIELD_LABELS = {
 }
 
 
+def _lookup_unique_internal_code(
+    session: Session,
+    row: InquiryLineParsed,
+    cache: CatalogSnapCache,
+) -> str | None:
+    prep = prepare_inquiry_catalog_filters(_row_to_filters(row), known_norma=cache.norma_values)
+    query = select(Product)
+    if prep.norma:
+        query = query.where(Product.norma == prep.norma)
+    if prep.surface:
+        query = query.where(Product.surface == prep.surface)
+    if prep.diameter:
+        query = query.where(Product.diameter == prep.diameter)
+    if prep.length:
+        query = query.where(Product.length == prep.length)
+    if prep.v_class:
+        query = query.where(Product.v_class == prep.v_class)
+    products = session.exec(query.limit(2)).all()
+    if len(products) == 1:
+        return products[0].internal_code
+    return None
+
+
 def _catalog_mismatch_warnings(
     session: Session,
     row: InquiryLineParsed,
     cache: CatalogSnapCache,
 ) -> list[str]:
     warnings: list[str] = []
-    for field, label in _FIELD_LABELS.items():
+    validate_fields = inquiry_catalog_fields_to_validate(
+        row.norma,
+        row.raw_text,
+        length=row.length,
+        v_class=row.v_class,
+        internal_code=row.internal_code,
+    )
+    prep = prepare_inquiry_catalog_filters(_row_to_filters(row), known_norma=cache.norma_values)
+    opts = cache.filter_options(session, prep)
+    for field in validate_fields:
+        label = _FIELD_LABELS.get(field, field)
         val = getattr(row, field, None)
         if not (val or "").strip():
             continue
-        opts = cache.filter_options(session, _row_to_filters(row)).get(field, [])
-        if not opts:
+        field_opts = opts.get(field, [])
+        if not field_opts:
             continue
-        if str(val) not in opts:
+        if not catalog_value_in_options(str(val), field_opts):
             warnings.append(f'{label} „{val}" v katalógu pre túto kombináciu neexistuje')
     if warnings:
         return warnings
@@ -549,6 +584,14 @@ def snap_inquiry_line_to_catalog(
     codes = opts.get("internal_code", [])
     if not data.get("internal_code") and len(codes) == 1:
         data["internal_code"] = codes[0]
+    if not data.get("internal_code"):
+        unique_code = _lookup_unique_internal_code(
+            session,
+            InquiryLineParsed.model_validate({**data, "raw_text": row.raw_text}),
+            snap_cache,
+        )
+        if unique_code:
+            data["internal_code"] = unique_code
     if data.get("internal_code"):
         if _apply_internal_code_product(session, data):
             base = InquiryLineParsed.model_validate({**data, "raw_text": row.raw_text})
