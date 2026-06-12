@@ -44,14 +44,26 @@ NORMS_WITHOUT_LENGTH_KEYS: frozenset[str] = frozenset(
     }
 )
 
-# Bez povinného class (poistné krúžky DIN 471/472, …).
+# Bez povinného class (poistné krúžky, kolíky bez triedy v katalógu, …).
 NORMS_WITHOUT_V_CLASS_KEYS: frozenset[str] = frozenset(
     {
         "471",
         "DIN471",
         "472",
         "DIN472",
+        "6325",
+        "DIN6325",
+        "7979",
+        "DIN7979",
     }
+)
+
+_PIN_TEXT = re.compile(
+    r"\b("
+    r"kol[íi]k|capov[ýy]\s+kol[íi]k|valcov[ýy]\s+kol[íi]k|"
+    r"cylindrical\s+pin|dowel\s+pin|spring\s+pin"
+    r")\b",
+    re.IGNORECASE,
 )
 
 _NO_LENGTH_TEXT = re.compile(
@@ -93,6 +105,12 @@ def is_snap_ring_norm(norma: str | None, raw_text: str = "") -> bool:
     if _norm_num_key(norma) in ("471", "472"):
         return True
     return bool(_SNAP_RING_TEXT.search(raw_text or ""))
+
+
+def is_pin_norm(norma: str | None, raw_text: str = "") -> bool:
+    if _norm_num_key(norma) in ("6325", "7979", "1481", "7346"):
+        return True
+    return bool(_PIN_TEXT.search(raw_text or ""))
 
 
 def extract_snap_ring_diameter(raw_text: str) -> str | None:
@@ -165,6 +183,8 @@ def norm_requires_v_class(norma: str | None, raw_text: str = "") -> bool:
     if _norm_num_key(norma) in ("471", "472"):
         return False
     if is_snap_ring_norm(norma, raw_text):
+        return False
+    if is_pin_norm(norma, raw_text):
         return False
     if key in NORMS_WITHOUT_LENGTH_KEYS:
         return True

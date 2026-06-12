@@ -36,7 +36,14 @@ const NORMS_WITHOUT_V_CLASS = new Set([
   "DIN471",
   "472",
   "DIN472",
+  "6325",
+  "DIN6325",
+  "7979",
+  "DIN7979",
 ]);
+
+const PIN_TEXT =
+  /\b(kol[íi]k|capov[ýy]\s+kol[íi]k|valcov[ýy]\s+kol[íi]k|cylindrical\s+pin|dowel\s+pin|spring\s+pin)\b/i;
 
 const NO_LENGTH_TEXT =
   /\b(matic(?:a|e|ou|i|ami)?|podložk(?:a|y|ou|ami)?|washer|mutter|nut)\b/i;
@@ -107,6 +114,7 @@ export function normRequiresVClass(
   if (key.startsWith("DIN") && NORMS_WITHOUT_V_CLASS.has(key.slice(3)))
     return false;
   if (SNAP_RING_TEXT.test(rawText)) return false;
+  if (PIN_TEXT.test(rawText)) return false;
   if (NORMS_WITHOUT_LENGTH_KEYS.has(key)) return true;
   if (key.startsWith("DIN") && NORMS_WITHOUT_LENGTH_KEYS.has(key.slice(3)))
     return true;

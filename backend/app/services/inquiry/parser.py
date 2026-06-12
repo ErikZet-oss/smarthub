@@ -15,6 +15,7 @@ from app.services.inquiry.catalog_snap import (
 from app.services.inquiry.normalize import apply_normalization, infer_surface_from_text
 from app.services.inquiry.norm_rules import (
     extract_snap_ring_diameter,
+    is_pin_norm,
     is_snap_ring_norm,
     norm_requires_length,
 )
@@ -253,7 +254,7 @@ def _heuristic_parse(raw_text: str) -> InquiryLineAIOutput | None:
         v_class = None  # A2/A4 ide do surface
     elif infer_surface_from_text(t) == "Polyamid":
         v_class = "0"
-    elif is_snap_ring_norm(norma, t):
+    elif is_snap_ring_norm(norma, t) or is_pin_norm(norma, t):
         v_class = None
     elif not v_class:
         norm_digits = ""
@@ -279,6 +280,10 @@ def _heuristic_parse(raw_text: str) -> InquiryLineAIOutput | None:
                 continue
             if re.search(rf"\bM\s*{re.escape(val)}\b", t, re.IGNORECASE):
                 continue
+            if re.search(rf"\b{re.escape(val)}\s*±?\s*\d*\s*HRC\b", t, re.IGNORECASE):
+                continue
+            if re.search(rf"\b{re.escape(val)}\s*HV\b", t, re.IGNORECASE):
+                continue
             if re.fullmatch(r"\d+(?:\.\d+)?", val):
                 v_class = val
                 break
@@ -303,7 +308,7 @@ def _heuristic_parse(raw_text: str) -> InquiryLineAIOutput | None:
         elif "ocel" in low or "oceľ" in low:
             surface = "Oceľ"
 
-    if not v_class and surface:
+    if not v_class and surface and not is_pin_norm(norma, t):
         v_class = infer_v_class_for_row(norma=norma, surface=surface, raw_text=t)
 
     if not norm_requires_length(norma, t):

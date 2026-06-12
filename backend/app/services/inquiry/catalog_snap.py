@@ -10,6 +10,7 @@ from app.schemas.common import ProductSearchFilters
 from app.schemas.inquiry import InquiryLineParsed
 from app.services.inquiry.norm_rules import (
     extract_snap_ring_diameter,
+    is_pin_norm,
     is_snap_ring_norm,
     norm_requires_length,
     norm_requires_v_class,
@@ -267,8 +268,11 @@ def resolve_washer_inner_diameter(bolt_m: str | None, options: list[str]) -> str
 
 
 def snap_value_to_options(value: str | None, options: list[str]) -> str | None:
+    """Vráti hodnotu len ak existuje v katalógu; inak None (neponechávaj halucinácie parsera)."""
     if not value:
         return value
+    if not options:
+        return None
     if value in options:
         return value
     val_key = search_key(value)
@@ -282,7 +286,7 @@ def snap_value_to_options(value: str | None, options: list[str]) -> str | None:
         for opt in options:
             if opt == bare or search_key(opt) == search_key(bare):
                 return opt
-    return value
+    return None
 
 
 def prepare_inquiry_catalog_filters(
@@ -323,9 +327,14 @@ def _snap_fields_from_options(
         current = data.get(name)
         if current is None:
             continue
-        snapped = snap_value_to_options(str(current), opts.get(name, []))
+        field_opts = opts.get(name, [])
+        snapped = snap_value_to_options(str(current), field_opts)
         if snapped is not None:
             data[name] = snapped
+        elif not field_opts:
+            data[name] = None
+        else:
+            data[name] = None
 
 
 _FIELD_LABELS = {
@@ -408,7 +417,7 @@ def snap_inquiry_line_to_catalog(
         data["v_class"] = washer_v_class
     elif not data.get("v_class") and not is_snap_ring_norm(
         str(data.get("norma") or ""), row.raw_text
-    ):
+    ) and not is_pin_norm(str(data.get("norma") or ""), row.raw_text):
         inferred = infer_v_class_for_row(
             norma=str(data.get("norma") or ""),
             surface=str(data.get("surface") or "") or None,
@@ -421,6 +430,9 @@ def snap_inquiry_line_to_catalog(
         snap_d = extract_snap_ring_diameter(row.raw_text)
         if snap_d and not data.get("diameter"):
             data["diameter"] = snap_d
+        data["v_class"] = None
+
+    if is_pin_norm(str(data.get("norma") or ""), row.raw_text):
         data["v_class"] = None
 
     if not norm_requires_length(catalog_norma or row.norma, row.raw_text) and not data.get("length"):
@@ -442,19 +454,22 @@ def snap_inquiry_line_to_catalog(
     _snap_fields_from_options(data, opts)
 
     if washer and washer_v_class:
-        data["v_class"] = snap_value_to_options(washer_v_class, opts.get("v_class", [])) or washer_v_class
+        data["v_class"] = snap_value_to_options(washer_v_class, opts.get("v_class", []))
     elif not data.get("v_class") and not is_snap_ring_norm(
         str(data.get("norma") or ""), row.raw_text
-    ):
+    ) and not is_pin_norm(str(data.get("norma") or ""), row.raw_text):
         inferred = infer_v_class_for_row(
             norma=str(data.get("norma") or ""),
             surface=str(data.get("surface") or "") or None,
             raw_text=row.raw_text,
         )
         if inferred:
-            data["v_class"] = snap_value_to_options(inferred, opts.get("v_class", [])) or inferred
+            data["v_class"] = snap_value_to_options(inferred, opts.get("v_class", []))
 
     if is_snap_ring_norm(str(data.get("norma") or ""), row.raw_text):
+        data["v_class"] = None
+
+    if is_pin_norm(str(data.get("norma") or ""), row.raw_text) or not opts.get("v_class"):
         data["v_class"] = None
 
     if not norm_requires_length(data.get("norma"), row.raw_text):  # type: ignore[arg-type]

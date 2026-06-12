@@ -151,6 +151,15 @@ function useInquiryEditorRowState({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- sync warnings when catalog opts change
   }, [catalogMessages.join("|"), row.row_index]);
 
+  useEffect(() => {
+    const vc = row.v_class?.trim();
+    if (!vc) return;
+    if (opts.v_class.length === 0 || !opts.v_class.includes(vc)) {
+      onChange({ ...row, v_class: null, catalog_warnings: null });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- drop class not in catalog
+  }, [opts.v_class.join("|"), row.norma, row.v_class]);
+
   const handleField = (field: keyof InquiryLineParsed, value: string) => {
     onChange(updateRowField(row, field, value));
   };
@@ -169,7 +178,16 @@ function useInquiryEditorRowState({
       field === "length" &&
       !normRequiresLength(row.norma, row.raw_text) &&
       (cell === "0" || cell === "");
-    const selectValue = skipLengthZero || cell == null ? "" : String(cell);
+    const skipVClass =
+      field === "v_class" &&
+      (!normRequiresVClass(row.norma, row.raw_text) ||
+        opts.v_class.length === 0 ||
+        (cell != null &&
+          String(cell).trim() !== "" &&
+          opts.v_class.length > 0 &&
+          !opts.v_class.includes(String(cell))));
+    const selectValue =
+      skipLengthZero || skipVClass || cell == null ? "" : String(cell);
     return (
       <div key={field} className={compact ? "min-w-0 overflow-hidden" : undefined}>
         {compact ? (
