@@ -11,8 +11,10 @@ import {
   normRequiresLength,
   normRequiresVClass,
   optionsWithCurrent,
+  isInquiryRequiredField,
   type InquiryFilterField,
   type InquiryFilterOptions,
+  type InquirySelectField,
 } from "@/lib/inquiry-norm-rules";
 import { cn } from "@/lib/utils";
 import { inquiryMissingFields, type InquiryLineParsed } from "@/types/inquiry";
@@ -37,7 +39,7 @@ const FIELD_LABELS: Record<InquiryFilterField | "raw_text" | "internal_code", st
   quantity: "Ks",
 };
 
-const SELECT_FIELDS: (keyof InquiryFilterOptions)[] = [
+const SELECT_FIELDS: InquirySelectField[] = [
   "norma",
   "surface",
   "diameter",
@@ -207,11 +209,11 @@ function useInquiryEditorRowState({
     (catalogMessages[0] ?? null) ??
     (hasError ? "Doplniť" : null);
 
-  const renderSelect = (field: keyof InquiryFilterOptions, compact?: boolean) => {
-    const isRequired = required.has(field);
+  const renderSelect = (field: InquirySelectField, compact?: boolean) => {
+    const isRequired = isInquiryRequiredField(field) && required.has(field);
     const isMissing = isRequired && missing.has(field);
     const isCatalogBad = catalogBad.has(field);
-    const cell = row[field as keyof InquiryLineParsed];
+    const cell = row[field];
     const skipLengthZero =
       field === "length" &&
       !normRequiresLength(row.norma, row.raw_text) &&
@@ -250,7 +252,7 @@ function useInquiryEditorRowState({
         {isCatalogBad ? (
           <p
             className="mt-px line-clamp-1 text-[8px] leading-tight text-amber-700 md:text-[10px]"
-            title={catalogMessages.find((m) => m.includes(FIELD_LABELS[field as InquiryFilterField]))}
+            title={catalogMessages.find((m) => m.includes(FIELD_LABELS[field]))}
           >
             Mimo katalógu
           </p>
@@ -444,7 +446,7 @@ export function InquiryEditorTable({ rows, apiBase, apiFetch, onChange }: Props)
     onChange(rows.filter((r) => r.row_index !== rowIndex));
   };
 
-  const headerFields: Array<InquiryFilterField | "quantity"> = [
+  const headerFields: Array<InquirySelectField | "quantity"> = [
     ...SELECT_FIELDS,
     "quantity",
   ];

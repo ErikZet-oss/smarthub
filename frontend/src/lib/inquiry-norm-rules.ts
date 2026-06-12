@@ -160,6 +160,18 @@ export type InquiryFilterOptions = {
   internal_code: string[];
 };
 
+/** Select polia v editore dopytu (filtre + voliteľné číslo Smart). */
+export type InquirySelectField = keyof InquiryFilterOptions;
+
+/** Povinné select polia (bez quantity a internal_code). */
+export type InquiryRequiredSelectField = Exclude<InquiryFilterField, "quantity">;
+
+export function isInquiryRequiredField(
+  field: InquirySelectField,
+): field is InquiryRequiredSelectField {
+  return field !== "internal_code";
+}
+
 export function optionsWithCurrent(
   current: string | null | undefined,
   options: string[],
