@@ -96,11 +96,17 @@ function buildInquiryFilterPayload(row: InquiryLineParsed): Record<string, strin
     diameter: row.diameter || null,
     internal_code: row.internal_code || null,
   };
+  const length = String(row.length ?? "").trim();
+  const vClass = String(row.v_class ?? "").trim();
   if (normRequiresLength(row.norma, row.raw_text)) {
-    payload.length = row.length || null;
+    payload.length = length || null;
+  } else if (length && length !== "0") {
+    payload.length = length;
   }
   if (normRequiresVClass(row.norma, row.raw_text)) {
-    payload.v_class = row.v_class || null;
+    payload.v_class = vClass || null;
+  } else if (vClass) {
+    payload.v_class = vClass;
   }
   return payload;
 }

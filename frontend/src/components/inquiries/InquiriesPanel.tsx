@@ -115,6 +115,27 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
     return rows;
   }, [rows, showOkOnly, showErrorsOnly]);
 
+  const enrichRowsWithSmartCodes = useCallback(
+    async (nextRows: InquiryLineParsed[]): Promise<InquiryLineParsed[]> => {
+      if (!nextRows.some((r) => !r.internal_code?.trim())) return nextRows;
+      try {
+        const res = await apiFetch(`${apiBase}/api/inquiries/rows/enrich-codes`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rows: nextRows }),
+        });
+        const parsed = await readApiJsonOrText(res);
+        if (!parsed.ok) return nextRows;
+        const data = parsed.data as { rows?: Record<string, unknown>[] };
+        if (!Array.isArray(data.rows)) return nextRows;
+        return data.rows.map(normalizeInquiryRowFromApi);
+      } catch {
+        return nextRows;
+      }
+    },
+    [apiBase, apiFetch],
+  );
+
   const persistDraft = useCallback(
     (nextRows: InquiryLineParsed[], fileName?: string, supplierIds?: number[]) => {
       const ids = supplierIds ?? selectedSupplierIds;
@@ -152,15 +173,21 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
     [rows, sourceFileName, userId],
   );
 
-  const restoreDraft = () => {
+  const restoreDraft = async () => {
     if (!draftPrompt) return;
-    setRows(draftPrompt.rows);
+    const enriched = await enrichRowsWithSmartCodes(draftPrompt.rows);
+    setRows(enriched);
     setSourceFileName(draftPrompt.sourceFileName);
     if (draftPrompt.selectedSupplierIds?.length) {
       setSelectedSupplierIds(draftPrompt.selectedSupplierIds);
     }
+    saveDraft(userId, {
+      ...draftPrompt,
+      rows: enriched,
+      savedAt: new Date().toISOString(),
+    });
     setDraftPrompt(null);
-    setStatus(`Obnovený rozpracovaný dopyt (${draftPrompt.rows.length} riadkov).`);
+    setStatus(`Obnovený rozpracovaný dopyt (${enriched.length} riadkov).`);
   };
 
   const discardDraft = () => {
@@ -205,10 +232,11 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
         setProgressPct(typeof st.progress_pct === "number" ? st.progress_pct : null);
         if (st.state === "done" && st.result?.rows) {
           const parsed = st.result.rows.map(normalizeInquiryRowFromApi);
-          persistDraft(parsed, st.result.source_filename ?? file.name);
+          const enriched = await enrichRowsWithSmartCodes(parsed);
+          persistDraft(enriched, st.result.source_filename ?? file.name);
           setShowOkOnly(false);
           setShowErrorsOnly(false);
-          setStatus(formatInquiryParseCompleteMessage(parsed));
+          setStatus(formatInquiryParseCompleteMessage(enriched));
           break;
         }
         if (st.state === "error") {

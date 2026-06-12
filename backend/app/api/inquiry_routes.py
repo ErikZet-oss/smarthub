@@ -12,9 +12,10 @@ from app.api.deps import AuthUserContext, get_current_user
 from app.db import get_session
 from app.models.entities import Product
 from app.schemas.common import ProductSearchFilters
-from app.schemas.inquiry import InquiryParseTaskResult, InquiryRunRequest, InquiryRunTaskResult
+from app.schemas.inquiry import InquiryLineParsed, InquiryParseTaskResult, InquiryRunRequest, InquiryRunTaskResult
 from app.services.inquiry.catalog_snap import (
     CatalogSnapCache,
+    enrich_inquiry_rows_internal_codes,
     prepare_inquiry_catalog_filters,
     snap_inquiry_batch_to_catalog,
 )
@@ -203,6 +204,21 @@ def inquiry_filter_options_conditional(
     cache = CatalogSnapCache.load(session)
     prepared = prepare_inquiry_catalog_filters(filters, known_norma=cache.norma_values)
     return _build_conditional_filter_options(session, prepared)
+
+
+@router.post("/inquiries/rows/enrich-codes")
+def inquiry_enrich_internal_codes(
+    payload: dict[str, object],
+    session: Session = Depends(get_session),
+    _: AuthUserContext = Depends(get_current_user),
+):
+    """Doplní číslo Smart pre riadky, kde kombinácia jednoznačne určí produkt."""
+    raw_rows = payload.get("rows")
+    if not isinstance(raw_rows, list):
+        raise HTTPException(status_code=400, detail="Chýba pole rows.")
+    rows = [InquiryLineParsed.model_validate(r) for r in raw_rows]
+    enriched = enrich_inquiry_rows_internal_codes(session, rows)
+    return {"rows": [r.model_dump(mode="json", by_alias=True) for r in enriched]}
 
 
 @router.get("/inquiries/catalog-product/{internal_code}")

@@ -57,6 +57,8 @@ const THREADED_ROD_TEXT =
   /závitov(?:á|é|ých|ou|e|y)?\s+ty|zavitov(?:a|e|ych|ou|y)?\s+ty|threaded\s+rod/i;
 
 const NORMS_WITH_LENGTH_KEYS = new Set([
+  "912",
+  "DIN912",
   "933",
   "DIN933",
   "975",
@@ -65,6 +67,8 @@ const NORMS_WITH_LENGTH_KEYS = new Set([
   "DIN976",
   "931",
   "DIN931",
+  "6912",
+  "DIN6912",
   "6914",
   "DIN6914",
   "1151",

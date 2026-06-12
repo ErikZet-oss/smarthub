@@ -404,24 +404,38 @@ _FIELD_LABELS = {
 }
 
 
+def _product_query_from_row(
+    row: InquiryLineParsed,
+    *,
+    known_norma: list[str] | None = None,
+):
+    query = select(Product)
+    norma = row.norma
+    if known_norma is not None:
+        norma = resolve_catalog_norma(row.norma, known=known_norma) or row.norma
+    if norma:
+        query = query.where(Product.norma == norma)
+    if row.surface:
+        query = query.where(Product.surface == row.surface)
+    if row.diameter:
+        query = query.where(Product.diameter == row.diameter)
+    length = str(row.length or "").strip()
+    if length:
+        query = query.where(Product.length == length)
+    elif is_snap_ring_norm(norma, row.raw_text):
+        query = query.where(Product.length == "0")
+    v_class = str(row.v_class or "").strip()
+    if v_class and norm_requires_v_class(norma, row.raw_text):
+        query = query.where(Product.v_class == v_class)
+    return query
+
+
 def _lookup_unique_internal_code(
     session: Session,
     row: InquiryLineParsed,
     cache: CatalogSnapCache,
 ) -> str | None:
-    prep = prepare_inquiry_catalog_filters(_row_to_filters(row), known_norma=cache.norma_values)
-    query = select(Product)
-    if prep.norma:
-        query = query.where(Product.norma == prep.norma)
-    if prep.surface:
-        query = query.where(Product.surface == prep.surface)
-    if prep.diameter:
-        query = query.where(Product.diameter == prep.diameter)
-    if prep.length:
-        query = query.where(Product.length == prep.length)
-    if prep.v_class:
-        query = query.where(Product.v_class == prep.v_class)
-    products = session.exec(query.limit(2)).all()
+    products = session.exec(_product_query_from_row(row, known_norma=cache.norma_values).limit(2)).all()
     if len(products) == 1:
         return products[0].internal_code
     return None
@@ -464,18 +478,7 @@ def _catalog_mismatch_warnings(
 
 
 def _product_exists(session: Session, row: InquiryLineParsed) -> bool:
-    query = select(Product)
-    if row.norma:
-        query = query.where(Product.norma == row.norma)
-    if row.surface:
-        query = query.where(Product.surface == row.surface)
-    if row.diameter:
-        query = query.where(Product.diameter == row.diameter)
-    if row.length:
-        query = query.where(Product.length == row.length)
-    if row.v_class:
-        query = query.where(Product.v_class == row.v_class)
-    return session.exec(query.limit(1)).first() is not None
+    return session.exec(_product_query_from_row(row).limit(1)).first() is not None
 
 
 def snap_inquiry_line_to_catalog(
@@ -603,6 +606,27 @@ def snap_inquiry_line_to_catalog(
     snapped = InquiryLineParsed.model_validate({**data, "raw_text": row.raw_text})
     warnings = _catalog_mismatch_warnings(session, snapped, snap_cache)
     return snapped.model_copy(update={"catalog_warnings": warnings or None})
+
+
+def enrich_inquiry_rows_internal_codes(
+    session: Session,
+    rows: list[InquiryLineParsed],
+    *,
+    cache: CatalogSnapCache | None = None,
+) -> list[InquiryLineParsed]:
+    """Doplní číslo Smart tam, kde kombinácia jednoznačne určí produkt."""
+    snap_cache = cache or CatalogSnapCache.load(session)
+    out: list[InquiryLineParsed] = []
+    for row in rows:
+        if (row.internal_code or "").strip():
+            out.append(row)
+            continue
+        code = _lookup_unique_internal_code(session, row, snap_cache)
+        if code:
+            out.append(row.model_copy(update={"internal_code": code}))
+        else:
+            out.append(row)
+    return out
 
 
 def snap_inquiry_batch_to_catalog(

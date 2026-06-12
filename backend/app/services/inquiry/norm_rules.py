@@ -218,6 +218,8 @@ def extract_pin_catalog_norma(raw_text: str, *, base_norm: str | None = None) ->
 
 _NORMS_WITH_LENGTH_KEYS: frozenset[str] = frozenset(
     {
+        "912",
+        "DIN912",
         "933",
         "DIN933",
         "975",
@@ -226,6 +228,8 @@ _NORMS_WITH_LENGTH_KEYS: frozenset[str] = frozenset(
         "DIN976",
         "931",
         "DIN931",
+        "6912",
+        "DIN6912",
         "6914",
         "DIN6914",
         "1151",
