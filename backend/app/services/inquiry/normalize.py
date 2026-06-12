@@ -6,7 +6,13 @@ from app.schemas.inquiry import InquiryLineParsed
 from app.services.inquiry.norm_rules import norm_requires_length, search_key
 from app.services.inquiry.product_norm_hints import infer_norma_from_text
 from app.services.inquiry.stn_suffix import infer_material_from_stn_text
-from app.services.inquiry.norm_rules import _norm_num_key, is_pin_norm, is_snap_ring_norm
+from app.services.inquiry.norm_rules import (
+    _norm_num_key,
+    extract_pin_catalog_norma,
+    extract_pin_tolerance_fit,
+    is_pin_norm,
+    is_snap_ring_norm,
+)
 from app.services.inquiry.stn_to_din import map_standard_to_catalog_din
 
 
@@ -161,10 +167,17 @@ def apply_normalization(parsed: InquiryLineParsed) -> InquiryLineParsed:
             if remapped:
                 data["norma"] = remapped
     final_norma = data.get("norma")
-    if is_snap_ring_norm(final_norma, parsed.raw_text):
+    pin_catalog_norm = extract_pin_catalog_norma(parsed.raw_text, base_norm=str(final_norma or ""))
+    if pin_catalog_norm:
+        data["norma"] = pin_catalog_norm
+    elif is_snap_ring_norm(final_norma, parsed.raw_text):
         data["norma"] = _norm_num_key(str(final_norma or "")) or final_norma
     elif is_pin_norm(final_norma, parsed.raw_text):
-        data["norma"] = _norm_num_key(str(final_norma or "")) or final_norma
+        if not pin_catalog_norm:
+            data["norma"] = _norm_num_key(str(final_norma or "")) or final_norma
+        tol = extract_pin_tolerance_fit(parsed.raw_text)
+        if tol:
+            data["v_class"] = tol
     if not norm_requires_length(final_norma, parsed.raw_text) and not data.get("length"):
         data["length"] = "0"
     return InquiryLineParsed.model_validate(data)

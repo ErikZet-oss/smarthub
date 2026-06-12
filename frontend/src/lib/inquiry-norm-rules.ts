@@ -36,10 +36,6 @@ const NORMS_WITHOUT_V_CLASS = new Set([
   "DIN471",
   "472",
   "DIN472",
-  "6325",
-  "DIN6325",
-  "7979",
-  "DIN7979",
 ]);
 
 const PIN_TEXT =
@@ -119,7 +115,12 @@ export function normRequiresVClass(
   if (key.startsWith("DIN") && NORMS_WITHOUT_V_CLASS.has(key.slice(3)))
     return false;
   if (SNAP_RING_TEXT.test(rawText)) return false;
-  if (PIN_TEXT.test(rawText)) return false;
+  if (PIN_TEXT.test(rawText)) {
+    const key = normKey(norma);
+    const base = key.startsWith("DIN") ? key.slice(3) : key;
+    if (base.startsWith("6325") || base === "6325") return true;
+    return false;
+  }
   if (NORMS_WITHOUT_LENGTH_KEYS.has(key)) return true;
   if (key.startsWith("DIN") && NORMS_WITHOUT_LENGTH_KEYS.has(key.slice(3)))
     return true;

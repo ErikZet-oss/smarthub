@@ -9,6 +9,10 @@ from app.models.entities import Product
 from app.schemas.common import ProductSearchFilters
 from app.schemas.inquiry import InquiryLineParsed
 from app.services.inquiry.norm_rules import (
+    _norm_num_key,
+    _pin_base_norm,
+    extract_pin_catalog_norma,
+    extract_pin_tolerance_fit,
     extract_snap_ring_diameter,
     is_pin_norm,
     is_snap_ring_norm,
@@ -178,6 +182,35 @@ def _infer_washer_v_class(surface: str | None, raw_text: str) -> str | None:
     if "hliník" in surf or "hlinik" in low:
         return "P40"
     return infer_v_class_from_surface(surface)
+
+
+def resolve_pin_catalog_norma(
+    norma: str | None,
+    *,
+    v_class: str | None,
+    raw_text: str,
+    known: list[str],
+) -> str | None:
+    """6325 + M6 → „6325 M6“, DIN 7979 D → „7979 D“ podľa katalógu."""
+    pin_norm = extract_pin_catalog_norma(raw_text, base_norm=norma)
+    if pin_norm and pin_norm in known:
+        return pin_norm
+    if pin_norm:
+        for val in known:
+            if search_key(val) == search_key(pin_norm):
+                return val
+
+    base = _pin_base_norm(norma)
+    if base == "6325":
+        fit = (v_class or "").strip().upper() or extract_pin_tolerance_fit(raw_text)
+        if fit:
+            candidate = f"6325 {fit}"
+            if candidate in known:
+                return candidate
+            for val in known:
+                if search_key(val) == search_key(candidate):
+                    return val
+    return None
 
 
 def resolve_catalog_norma(norma: str | None, *, known: list[str] | None = None) -> str | None:
@@ -402,8 +435,23 @@ def snap_inquiry_line_to_catalog(
             data["surface"] = inferred_surface
 
     catalog_norma = resolve_catalog_norma(row.norma, known=snap_cache.norma_values)
-    if catalog_norma:
+    pin_norma = resolve_pin_catalog_norma(
+        catalog_norma or row.norma,
+        v_class=str(row.v_class or "") or None,
+        raw_text=row.raw_text,
+        known=snap_cache.norma_values,
+    )
+    if pin_norma:
+        data["norma"] = pin_norma
+    elif catalog_norma:
         data["norma"] = catalog_norma
+
+    if is_pin_norm(data.get("norma"), row.raw_text) or is_pin_norm(row.norma, row.raw_text):
+        tol = extract_pin_tolerance_fit(row.raw_text)
+        if tol:
+            data["v_class"] = tol
+        elif _norm_num_key(str(data.get("norma") or "")) == "7979" or str(data.get("norma") or "").startswith("7979"):
+            data["v_class"] = "0"
 
     washer = _is_washer_norm(str(data.get("norma") or ""), row.raw_text)
     washer_v_class = infer_v_class_for_row(
@@ -430,10 +478,7 @@ def snap_inquiry_line_to_catalog(
             data["diameter"] = snap_d
         data["v_class"] = None
 
-    if is_pin_norm(str(data.get("norma") or ""), row.raw_text):
-        data["v_class"] = None
-
-    if not norm_requires_length(catalog_norma or row.norma, row.raw_text) and not data.get("length"):
+    if not norm_requires_length(str(data.get("norma") or catalog_norma or row.norma or ""), row.raw_text) and not data.get("length"):
         data["length"] = "0"
 
     base = InquiryLineParsed.model_validate({**data, "raw_text": row.raw_text})
@@ -466,11 +511,14 @@ def snap_inquiry_line_to_catalog(
 
     if is_snap_ring_norm(str(data.get("norma") or ""), row.raw_text):
         data["v_class"] = None
+    elif is_pin_norm(str(data.get("norma") or ""), row.raw_text):
+        valid = opts.get("v_class", [])
+        tol = extract_pin_tolerance_fit(row.raw_text)
+        current = str(data.get("v_class") or "")
+        candidate = tol or (current if re.fullmatch(r"[MH]\d+", current, re.IGNORECASE) else None)
+        data["v_class"] = snap_value_to_options(candidate, valid) if candidate else None
 
-    if is_pin_norm(str(data.get("norma") or ""), row.raw_text) or not opts.get("v_class"):
-        data["v_class"] = None
-
-    if not norm_requires_length(data.get("norma"), row.raw_text):  # type: ignore[arg-type]
+    if not norm_requires_length(str(data.get("norma") or ""), row.raw_text):  # type: ignore[arg-type]
         data["length"] = snap_value_to_options(str(data.get("length") or "0"), opts.get("length", [])) or "0"
 
     snapped = InquiryLineParsed.model_validate({**data, "raw_text": row.raw_text})

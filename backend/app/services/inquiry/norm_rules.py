@@ -44,17 +44,13 @@ NORMS_WITHOUT_LENGTH_KEYS: frozenset[str] = frozenset(
     }
 )
 
-# Bez povinného class (poistné krúžky, kolíky bez triedy v katalógu, …).
+# Bez povinného class (poistné krúžky, … — nie kolíky DIN 6325 s M6/H6).
 NORMS_WITHOUT_V_CLASS_KEYS: frozenset[str] = frozenset(
     {
         "471",
         "DIN471",
         "472",
         "DIN472",
-        "6325",
-        "DIN6325",
-        "7979",
-        "DIN7979",
     }
 )
 
@@ -101,6 +97,12 @@ def _norm_num_key(norma: str | None) -> str:
     return key
 
 
+def _pin_base_norm(norma: str | None) -> str:
+    num = _norm_num_key(norma)
+    m = re.match(r"^(\d+)", num)
+    return m.group(1) if m else num
+
+
 def is_snap_ring_norm(norma: str | None, raw_text: str = "") -> bool:
     if _norm_num_key(norma) in ("471", "472"):
         return True
@@ -108,7 +110,10 @@ def is_snap_ring_norm(norma: str | None, raw_text: str = "") -> bool:
 
 
 def is_pin_norm(norma: str | None, raw_text: str = "") -> bool:
-    if _norm_num_key(norma) in ("6325", "7979", "1481", "7346"):
+    num = _norm_num_key(norma)
+    if num in ("6325", "7979", "1481", "7346"):
+        return True
+    if num.startswith("6325") or num.startswith("7979"):
         return True
     return bool(_PIN_TEXT.search(raw_text or ""))
 
@@ -172,6 +177,24 @@ def extract_pin_dimensions(raw_text: str) -> tuple[str, str] | None:
     return last
 
 
+def extract_pin_tolerance_fit(raw_text: str) -> str | None:
+    """Tolerancia hriadeľa pre kolík DIN 6325 — „tolerancia m6“ → M6 (v katalógu aj v class)."""
+    t = raw_text or ""
+    m = re.search(r"toleranc(?:ia|ie|iou)?\s+([mh])(\d+)\b", t, re.IGNORECASE)
+    if m:
+        return f"{m.group(1).upper()}{m.group(2)}"
+    return None
+
+
+def extract_pin_catalog_norma(raw_text: str, *, base_norm: str | None = None) -> str | None:
+    """DIN 7979 D → „7979 D“ (suffix v poli norma v DB)."""
+    t = raw_text or ""
+    base = _norm_num_key(base_norm)
+    if base == "7979" or re.search(r"\bDIN\s*7979\s+D\b", t, re.IGNORECASE):
+        return "7979 D"
+    return None
+
+
 _NORMS_WITH_LENGTH_KEYS: frozenset[str] = frozenset(
     {
         "933",
@@ -227,7 +250,7 @@ def norm_requires_v_class(norma: str | None, raw_text: str = "") -> bool:
     if is_snap_ring_norm(norma, raw_text):
         return False
     if is_pin_norm(norma, raw_text):
-        return False
+        return _pin_base_norm(norma) == "6325"
     if key in NORMS_WITHOUT_LENGTH_KEYS:
         return True
     if key.startswith("DIN") and key[3:] in NORMS_WITHOUT_LENGTH_KEYS:

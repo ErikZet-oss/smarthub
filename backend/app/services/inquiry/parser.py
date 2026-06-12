@@ -15,6 +15,8 @@ from app.services.inquiry.catalog_snap import (
 from app.services.inquiry.normalize import apply_normalization, infer_surface_from_text
 from app.services.inquiry.norm_rules import (
     extract_pin_dimensions,
+    extract_pin_tolerance_fit,
+    extract_pin_catalog_norma,
     extract_snap_ring_diameter,
     is_pin_norm,
     is_snap_ring_norm,
@@ -228,9 +230,13 @@ def _heuristic_parse(raw_text: str) -> InquiryLineAIOutput | None:
     if m:
         norma = "DIN125"
     else:
-        m = re.search(r"\bDIN\s*[-]?\s*(\d+)\b", t, re.IGNORECASE)
+        m = re.search(r"\bDIN\s*7979\s+D\b", t, re.IGNORECASE)
         if m:
-            norma = f"DIN{m.group(1)}"
+            norma = "7979 D"
+        else:
+            m = re.search(r"\bDIN\s*[-]?\s*(\d+)\b", t, re.IGNORECASE)
+            if m:
+                norma = f"DIN{m.group(1)}"
     if norma is None:
         stn_base = extract_stn_base(t)
         if stn_base:
@@ -265,8 +271,11 @@ def _heuristic_parse(raw_text: str) -> InquiryLineAIOutput | None:
         v_class = None  # A2/A4 ide do surface
     elif infer_surface_from_text(t) == "Polyamid":
         v_class = "0"
-    elif is_snap_ring_norm(norma, t) or is_pin_norm(norma, t):
+    elif is_snap_ring_norm(norma, t):
         v_class = None
+    elif is_pin_norm(norma, t):
+        tol = extract_pin_tolerance_fit(t)
+        v_class = tol
     elif not v_class:
         norm_digits = ""
         if norma:
