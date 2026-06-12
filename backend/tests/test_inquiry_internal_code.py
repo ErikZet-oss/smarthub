@@ -56,6 +56,32 @@ def test_lookup_internal_code_din471(session: Session) -> None:
     assert _lookup_unique_internal_code(session, row, cache) == "311930000019"
 
 
+def test_lookup_439_2_m12(session: Session) -> None:
+    raw = "Šesťhranná matica nízka DIN 439-2 Oceľ Pozinkované 04 M12"
+    row = InquiryLineParsed(
+        row_index=1,
+        raw_text=raw,
+        norma="439",
+        surface="Oceľ pozinkovaná",
+        diameter="12",
+        v_class="0",
+        quantity=10,
+    )
+    cache = CatalogSnapCache.load(session)
+    code = _lookup_unique_internal_code(session, row, cache)
+    assert code == "311403250120"
+
+
+def test_resolve_439_2_norma(session: Session) -> None:
+    from app.services.inquiry.catalog_snap import _resolve_catalog_norma_spaced_variant
+
+    cache = CatalogSnapCache.load(session)
+    assert (
+        _resolve_catalog_norma_spaced_variant("439", "DIN 439-2", known=cache.norma_values)
+        == "439 2"
+    )
+
+
 def test_enrich_rows_fills_missing_codes(session: Session) -> None:
     rows = [
         InquiryLineParsed(

@@ -256,6 +256,25 @@ def resolve_catalog_norma(norma: str | None, *, known: list[str] | None = None) 
     return raw
 
 
+def _resolve_catalog_norma_spaced_variant(
+    norma: str | None,
+    raw_text: str,
+    *,
+    known: list[str],
+) -> str | None:
+    """DIN 439-2 / 439-2 → „439 2“ podľa zápisu v DB."""
+    blob = f"{norma or ''} {raw_text or ''}"
+    for m in re.finditer(r"\b(\d{3,4})\s*[-]\s*(\d+)\b", blob):
+        candidate = f"{m.group(1)} {m.group(2)}"
+        if candidate in known:
+            return candidate
+        cand_key = search_key(candidate)
+        for val in known:
+            if search_key(val) == cand_key:
+                return val
+    return None
+
+
 def _resolve_catalog_norma_suffix_a(raw: str, *, known: list[str]) -> str | None:
     """
     DIN 125 / DIN125 / DIN 125-1A → 125a (v DB bez prefixu DIN).
@@ -426,8 +445,71 @@ def _product_query_from_row(
         query = query.where(Product.length == "0")
     v_class = str(row.v_class or "").strip()
     if v_class and norm_requires_v_class(norma, row.raw_text):
-        query = query.where(Product.v_class == v_class)
+        if not (v_class == "0" and _is_nut_row(norma, row.raw_text)):
+            query = query.where(Product.v_class == v_class)
     return query
+
+
+def _match_product_by_raw_text(products: list[Product], raw_text: str) -> Product | None:
+    if len(products) == 1:
+        return products[0]
+    if not products:
+        return None
+    text = (raw_text or "").casefold()
+    if not text.strip():
+        return None
+    if not re.search(r"\bx\s*\d", text, re.IGNORECASE):
+        plain = [
+            p
+            for p in products
+            if not re.search(r"\bx\s*\d", p.y_money_name or "", re.IGNORECASE)
+        ]
+        if len(plain) == 1:
+            return plain[0]
+        if len(plain) > 1 and "lava" not in text:
+            non_lava = [p for p in plain if "lava" not in (p.y_money_name or "").casefold()]
+            if len(non_lava) == 1:
+                return non_lava[0]
+    best_score = 0
+    best: list[Product] = []
+    for product in products:
+        name = (product.y_money_name or "").casefold()
+        if not name:
+            continue
+        score = 0
+        if re.search(r"\bx\s*1[,.]5\b", text) and "x1,5" in name.replace(".", ","):
+            score += 5
+        elif re.search(r"\bx\s*1[,.]25\b", text) and "x1,25" in name.replace(".", ","):
+            score += 5
+        elif re.search(r"\bx\s*1\b", text) and re.search(r"\bx\s*1\b", name):
+            score += 5
+        for token in re.findall(r"[a-záäčďéíĺľňóôŕšťúýž0-9]+", name):
+            if len(token) >= 2 and token in text:
+                score += 1
+        if score > best_score:
+            best_score = score
+            best = [product]
+        elif score == best_score and score > 0:
+            best.append(product)
+    if len(best) == 1:
+        return best[0]
+    return None
+
+
+def _row_norma_candidates(row: InquiryLineParsed, *, known: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+
+    def add(val: str | None) -> None:
+        v = (val or "").strip()
+        if v and v not in seen:
+            seen.add(v)
+            out.append(v)
+
+    add(row.norma)
+    add(resolve_catalog_norma(row.norma, known=known))
+    add(_resolve_catalog_norma_spaced_variant(row.norma, row.raw_text, known=known))
+    return out
 
 
 def _lookup_unique_internal_code(
@@ -435,9 +517,16 @@ def _lookup_unique_internal_code(
     row: InquiryLineParsed,
     cache: CatalogSnapCache,
 ) -> str | None:
-    products = session.exec(_product_query_from_row(row, known_norma=cache.norma_values).limit(2)).all()
-    if len(products) == 1:
-        return products[0].internal_code
+    for norma in _row_norma_candidates(row, known=cache.norma_values):
+        candidate_row = row.model_copy(update={"norma": norma})
+        products = session.exec(
+            _product_query_from_row(candidate_row, known_norma=cache.norma_values).limit(20)
+        ).all()
+        if len(products) == 1:
+            return products[0].internal_code
+        matched = _match_product_by_raw_text(products, row.raw_text)
+        if matched is not None:
+            return matched.internal_code
     return None
 
 
@@ -508,6 +597,13 @@ def snap_inquiry_line_to_catalog(
         data["norma"] = pin_norma
     elif catalog_norma:
         data["norma"] = catalog_norma
+    spaced = _resolve_catalog_norma_spaced_variant(
+        str(data.get("norma") or row.norma or ""),
+        row.raw_text,
+        known=snap_cache.norma_values,
+    )
+    if spaced:
+        data["norma"] = spaced
 
     if is_pin_norm(data.get("norma"), row.raw_text) or is_pin_norm(row.norma, row.raw_text):
         tol = extract_pin_tolerance_fit(row.raw_text)
@@ -622,10 +718,16 @@ def enrich_inquiry_rows_internal_codes(
             out.append(row)
             continue
         code = _lookup_unique_internal_code(session, row, snap_cache)
-        if code:
-            out.append(row.model_copy(update={"internal_code": code}))
-        else:
+        if not code:
             out.append(row)
+            continue
+        variant = _resolve_catalog_norma_spaced_variant(
+            row.norma, row.raw_text, known=snap_cache.norma_values
+        )
+        updates: dict[str, object] = {"internal_code": code}
+        if variant and variant != row.norma:
+            updates["norma"] = variant
+        out.append(row.model_copy(update=updates))
     return out
 
 

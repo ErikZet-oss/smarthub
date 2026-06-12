@@ -1,7 +1,7 @@
 "use client";
 
 import { ClipboardList, Loader2, Upload } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { InquiryEditorTable } from "@/components/inquiries/InquiryEditorTable";
 import { InquiryResultsTable } from "@/components/inquiries/InquiryResultsTable";
@@ -115,6 +115,8 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
     return rows;
   }, [rows, showOkOnly, showErrorsOnly]);
 
+  const enrichAttemptKeyRef = useRef("");
+
   const enrichRowsWithSmartCodes = useCallback(
     async (nextRows: InquiryLineParsed[]): Promise<InquiryLineParsed[]> => {
       if (!nextRows.some((r) => !r.internal_code?.trim())) return nextRows;
@@ -150,6 +152,28 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
     },
     [selectedSupplierIds, sourceFileName, userId],
   );
+
+  useEffect(() => {
+    if (!authReady || !apiToken || rows.length === 0) return;
+    const missing = rows.filter((r) => !r.internal_code?.trim());
+    if (missing.length === 0) return;
+    const attemptKey = missing
+      .map((r) => `${r.row_index}:${r.norma}:${r.diameter}:${r.length}:${r.surface}`)
+      .join("|");
+    if (enrichAttemptKeyRef.current === attemptKey) return;
+    enrichAttemptKeyRef.current = attemptKey;
+    let cancelled = false;
+    void enrichRowsWithSmartCodes(rows).then((enriched) => {
+      if (cancelled) return;
+      const changed = enriched.some(
+        (r, i) => r.internal_code !== rows[i]?.internal_code || r.norma !== rows[i]?.norma,
+      );
+      if (changed) persistDraft(enriched);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [authReady, apiToken, rows, enrichRowsWithSmartCodes, persistDraft]);
 
   const persistRows = useCallback(
     (nextRows: InquiryLineParsed[], fileName?: string) => {
