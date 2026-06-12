@@ -9,6 +9,7 @@ from app.services.inquiry.catalog_snap import (
     CatalogSnapCache,
     _WASHER_BOLT_TO_INNER,
     _is_washer_norm,
+    _row_norma_candidates,
     infer_v_class_for_row,
     resolve_catalog_norma,
     resolve_washer_inner_diameter,
@@ -126,18 +127,25 @@ def find_catalog_products(
         cache=cache,
     )
 
-    for norm in norm_display_candidates(norm_row):
-        products = _query_products(
-            session,
-            norma=norm,
-            diameter=diameter,
-            length=length,
-            v_class=v_class,
-            surface=surface,
-            limit=limit,
-        )
-        if products:
-            return _prefer_products_with_mappings(session, products, supplier_ids)[:limit]
+    norm_keys = _row_norma_candidates(norm_row, known=cache.norma_values)
+    seen_norm_queries: set[str] = set()
+    for base_norm in norm_keys:
+        candidate = norm_row.model_copy(update={"norma": base_norm})
+        for norm in norm_display_candidates(candidate):
+            if norm in seen_norm_queries:
+                continue
+            seen_norm_queries.add(norm)
+            products = _query_products(
+                session,
+                norma=norm,
+                diameter=diameter,
+                length=length,
+                v_class=v_class,
+                surface=surface,
+                limit=limit,
+            )
+            if products:
+                return _prefer_products_with_mappings(session, products, supplier_ids)[:limit]
 
     target_norm = search_key(catalog_norma)
     if not target_norm:

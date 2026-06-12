@@ -251,6 +251,17 @@ export function inquiryCatalogMismatchMessages(
       );
     }
   }
+  const hasCore =
+    String(row.norma ?? "").trim() &&
+    String(row.diameter ?? "").trim() &&
+    String(row.surface ?? "").trim();
+  if (hasCore && !String(row.internal_code ?? "").trim()) {
+    if (opts.internal_code.length === 0) {
+      messages.push("Táto kombinácia parametrov v katalógu neexistuje");
+    } else if (opts.internal_code.length > 1) {
+      messages.push("Vyber jednoznačné číslo Smart z filtra");
+    }
+  }
   return messages;
 }
 

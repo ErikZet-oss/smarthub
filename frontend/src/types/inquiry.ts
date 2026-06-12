@@ -53,7 +53,8 @@ export function inquiryRowIsValid(row: InquiryLineParsed): boolean {
   return (
     !row.parse_error &&
     inquiryMissingFields(row).length === 0 &&
-    !(row.catalog_warnings && row.catalog_warnings.length > 0)
+    !(row.catalog_warnings && row.catalog_warnings.length > 0) &&
+    Boolean(row.internal_code?.trim())
   );
 }
 
