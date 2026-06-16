@@ -12,6 +12,7 @@ import random
 import re
 import sys
 import time
+import weakref
 from datetime import datetime, timezone
 from typing import Any, Optional
 from urllib.parse import parse_qsl, quote, urlencode, urljoin, urlparse, urlunparse
@@ -280,7 +281,19 @@ _HTTP_SUPPLIER_CLIENT_TTL_SEC = float(
 _supplier_http_clients: dict[
     tuple[str, int, int], tuple[float, Any]
 ] = {}
-_supplier_http_clients_lock = asyncio.Lock()
+_supplier_http_clients_locks_by_loop: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock]" = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _supplier_http_clients_lock() -> asyncio.Lock:
+    """Loop-safe lock; --reload môže vytvoriť nový event loop."""
+    loop = asyncio.get_running_loop()
+    lock = _supplier_http_clients_locks_by_loop.get(loop)
+    if lock is None:
+        lock = asyncio.Lock()
+        _supplier_http_clients_locks_by_loop[loop] = lock
+    return lock
 
 
 async def _supplier_http_client_get_or_create(
@@ -301,7 +314,7 @@ async def _supplier_http_client_get_or_create(
         return client
 
     key = (provider, int(supplier.id), int(user_id))
-    async with _supplier_http_clients_lock:
+    async with _supplier_http_clients_lock():
         item = _supplier_http_clients.get(key)
         now = time.monotonic()
         if item is not None:
@@ -334,7 +347,7 @@ async def _supplier_http_client_invalidate(
     if supplier_id is None:
         return
     sid = int(supplier_id)
-    async with _supplier_http_clients_lock:
+    async with _supplier_http_clients_lock():
         keys = [
             k for k in _supplier_http_clients
             if k[0] == provider
@@ -418,7 +431,19 @@ _PRICE_STOCK_CACHE_TTL_SEC = float(
     os.environ.get("PRICE_STOCK_CACHE_TTL_SEC", "90").strip() or "90"
 )
 _price_stock_cache: dict[tuple[int, int, str], tuple[float, dict[str, Any]]] = {}
-_price_stock_cache_lock = asyncio.Lock()
+_price_stock_cache_locks_by_loop: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock]" = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _price_stock_cache_lock() -> asyncio.Lock:
+    """Loop-safe lock; predíde `bound to a different event loop`."""
+    loop = asyncio.get_running_loop()
+    lock = _price_stock_cache_locks_by_loop.get(loop)
+    if lock is None:
+        lock = asyncio.Lock()
+        _price_stock_cache_locks_by_loop[loop] = lock
+    return lock
 
 
 def _price_stock_cache_enabled() -> bool:
@@ -444,7 +469,7 @@ async def _price_stock_cache_get(
     key = _price_stock_cache_key(supplier_id, user_id, product_code)
     if key is None:
         return None
-    async with _price_stock_cache_lock:
+    async with _price_stock_cache_lock():
         item = _price_stock_cache.get(key)
         if not item:
             return None
@@ -471,7 +496,7 @@ async def _price_stock_cache_set(
     key = _price_stock_cache_key(supplier_id, user_id, product_code)
     if key is None:
         return
-    async with _price_stock_cache_lock:
+    async with _price_stock_cache_lock():
         _price_stock_cache[key] = (
             time.monotonic() + _PRICE_STOCK_CACHE_TTL_SEC,
             copy.deepcopy(payload),
@@ -492,7 +517,7 @@ async def _price_stock_cache_invalidate(
 ) -> None:
     if not _price_stock_cache_enabled():
         return
-    async with _price_stock_cache_lock:
+    async with _price_stock_cache_lock():
         if supplier_id is None:
             _price_stock_cache.clear()
             return
