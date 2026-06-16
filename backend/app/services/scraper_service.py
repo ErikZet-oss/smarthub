@@ -1326,8 +1326,13 @@ def _hopefix_narrow_catalog_paths(product_code: str, enc: str) -> list[str]:
             ]
         )
     elif re.match(r"^D7507", k):
-        # DIN 7507 (napr. D7507Z60140C1) — tabuľka je v /sortiment/vruty, nie v podložkách ani srouby.
-        _extend(["vruty"])
+        # DIN 7507Z (napr. D7507Z60140C1) — presná podstránka vrutov do dreva TORX, nie všeobecné /vruty.
+        _extend(
+            [
+                "stavebni-vruty-do-dreva-se-zapustenou-hlavou-torx-hruby-cas",
+                "vruty",
+            ]
+        )
     if re.match(r"^D12[0-9]", k) or k.startswith("D9021"):
         _extend(
             [
@@ -1427,9 +1432,10 @@ def _hopefix_fallback_category_segments(product_code: str) -> list[str]:
         ]
         rest = [s for s in all_seg if s not in first]
         return first + rest
-    # DIN 7507 (vŕty / konštrukčné vruty, napr. D7507Z60140C1) — /sortiment/vruty
+    # DIN 7507Z (stavebné vruty do dreva TORX) — presná podstránka, nie len /sortiment/vruty
     if re.match(r"^D7507", k):
         first = [
+            "stavebni-vruty-do-dreva-se-zapustenou-hlavou-torx-hruby-cas",
             "vruty",
             "srouby",
             "podlozky",
