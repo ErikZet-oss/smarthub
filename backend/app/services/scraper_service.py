@@ -1325,6 +1325,9 @@ def _hopefix_narrow_catalog_paths(product_code: str, enc: str) -> list[str]:
                 "kotevni-okenni-srouby",
             ]
         )
+    elif re.match(r"^D7507", k):
+        # DIN 7507 (napr. D7507Z60140C1) — tabuľka je v /sortiment/vruty, nie v podložkách ani srouby.
+        _extend(["vruty"])
     if re.match(r"^D12[0-9]", k) or k.startswith("D9021"):
         _extend(
             [
@@ -1420,6 +1423,17 @@ def _hopefix_fallback_category_segments(product_code: str) -> list[str]:
             "vruty",
             "matice",
             "podlozky",
+            "zavitove-tyce",
+        ]
+        rest = [s for s in all_seg if s not in first]
+        return first + rest
+    # DIN 7507 (vŕty / konštrukčné vruty, napr. D7507Z60140C1) — /sortiment/vruty
+    if re.match(r"^D7507", k):
+        first = [
+            "vruty",
+            "srouby",
+            "podlozky",
+            "matice",
             "zavitove-tyce",
         ]
         rest = [s for s in all_seg if s not in first]
