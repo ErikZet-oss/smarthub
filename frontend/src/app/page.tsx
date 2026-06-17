@@ -898,18 +898,77 @@ function scrapeCacheKey(internalCode: string, supplierId: number): string {
   return `${internalCode}:${supplierId}`;
 }
 
-function productHasScrapableOffers(product: ProductSearchRow): boolean {
+const STORAGE_SEARCH_SCRAPE_SUPPLIER_IDS = "smarthub_search_scrape_supplier_ids";
+const STORAGE_SEARCH_SCRAPE_COMPETITOR_IDS = "smarthub_search_scrape_competitor_ids";
+
+function loadSearchScrapePartyIds(
+  storageKey: string,
+  validIds: number[],
+): Set<number> {
+  if (validIds.length === 0) {
+    return new Set();
+  }
+  if (typeof window !== "undefined") {
+    try {
+      const raw = window.localStorage.getItem(storageKey);
+      if (raw) {
+        const parsed = JSON.parse(raw) as unknown;
+        if (Array.isArray(parsed)) {
+          const kept = parsed.filter(
+            (id): id is number =>
+              typeof id === "number" && validIds.includes(id),
+          );
+          if (kept.length > 0) {
+            return new Set(kept);
+          }
+        }
+      }
+    } catch {
+      // ignore corrupt storage
+    }
+  }
+  return new Set(validIds);
+}
+
+function persistSearchScrapePartyIds(storageKey: string, ids: Set<number>): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.setItem(storageKey, JSON.stringify([...ids]));
+}
+
+function offerMatchesPartyFilter(
+  offer: ProductSearchRow["offers"][number],
+  partyIds: Set<number> | null | undefined,
+): boolean {
+  if (!partyIds) {
+    return true;
+  }
+  return offer.supplier_id != null && partyIds.has(offer.supplier_id);
+}
+
+function productHasScrapableOffers(
+  product: ProductSearchRow,
+  partyIds?: Set<number> | null,
+): boolean {
   return product.offers.some(
-    (o) => o.supplier_id != null && Boolean(o.supplier_code?.trim()),
+    (o) =>
+      o.supplier_id != null &&
+      Boolean(o.supplier_code?.trim()) &&
+      offerMatchesPartyFilter(o, partyIds),
   );
 }
 
 function productSupplierScrapeLoading(
   product: ProductSearchRow,
   scrapeByKey: Record<string, SupplierScrapeState>,
+  partyIds?: Set<number> | null,
 ): boolean {
   return product.offers.some((offer) => {
     if (offer.supplier_id == null || !offer.supplier_code?.trim()) {
+      return false;
+    }
+    if (!offerMatchesPartyFilter(offer, partyIds)) {
       return false;
     }
     return (
@@ -919,19 +978,68 @@ function productSupplierScrapeLoading(
   });
 }
 
+function SearchScrapePartyFilter({
+  items,
+  selectedIds,
+  onToggle,
+  modeLabel,
+}: {
+  items: { id: number; name: string }[];
+  selectedIds: Set<number>;
+  onToggle: (id: number) => void;
+  modeLabel: string;
+}) {
+  if (items.length === 0) {
+    return null;
+  }
+  return (
+    <div className="mt-3 border-t border-slate-100 pt-3">
+      <p className="mb-2 text-xs font-medium text-slate-600">
+        {modeLabel} — cenu a sklad načítame len u označených
+      </p>
+      <div className="flex flex-wrap gap-2">
+        {items.map((item) => {
+          const checked = selectedIds.has(item.id);
+          return (
+            <label
+              key={item.id}
+              className={cn(
+                "inline-flex cursor-pointer select-none items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors",
+                checked
+                  ? "border-sky-300 bg-sky-50 text-sky-900"
+                  : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
+              )}
+            >
+              <input
+                type="checkbox"
+                className="h-3.5 w-3.5 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                checked={checked}
+                onChange={() => onToggle(item.id)}
+              />
+              {item.name}
+            </label>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function ProductScrapeReloadButton({
   product,
   scrapeByKey,
   onReload,
+  partyIds,
 }: {
   product: ProductSearchRow;
   scrapeByKey: Record<string, SupplierScrapeState>;
   onReload: (product: ProductSearchRow) => void;
+  partyIds?: Set<number> | null;
 }) {
-  if (!productHasScrapableOffers(product)) {
+  if (!productHasScrapableOffers(product, partyIds)) {
     return null;
   }
-  const loading = productSupplierScrapeLoading(product, scrapeByKey);
+  const loading = productSupplierScrapeLoading(product, scrapeByKey, partyIds);
   return (
     <button
       type="button"
@@ -1839,6 +1947,8 @@ type ProductSupplierExpandedTableRowProps = {
   product: ProductSearchRow;
   colSpan: number;
   isCompetitorMode?: boolean;
+  /** Len vyhľadávanie: zobraziť a scrapovať len týchto dodávateľov / konkurentov. */
+  visiblePartyIds?: Set<number> | null;
   scrapeByKey: Record<string, SupplierScrapeState>;
   cartQuantityByKey: Record<string, number>;
   setCartQuantityByKey: Dispatch<SetStateAction<Record<string, number>>>;
@@ -1873,6 +1983,7 @@ function ProductSupplierExpandedTableRow({
   product,
   colSpan,
   isCompetitorMode = false,
+  visiblePartyIds = null,
   scrapeByKey,
   cartQuantityByKey,
   setCartQuantityByKey,
@@ -1885,6 +1996,9 @@ function ProductSupplierExpandedTableRow({
   onRequestAddToOffer,
   addToCart,
 }: ProductSupplierExpandedTableRowProps) {
+  const visibleOffers = visiblePartyIds
+    ? product.offers.filter((offer) => offerMatchesPartyFilter(offer, visiblePartyIds))
+    : product.offers;
   return (
                             <tr className="bg-slate-50/80">
                               <td className="px-2.5 py-2 sm:px-3 sm:py-2.5" colSpan={colSpan}>
@@ -1894,8 +2008,12 @@ function ProductSupplierExpandedTableRow({
                                       className="inline-block max-w-full cursor-help text-[9px] font-semibold uppercase tracking-wider text-sky-900/70 underline decoration-dotted decoration-slate-400/70 underline-offset-2 sm:text-[11px]"
                                       title={
                                         isCompetitorMode
-                                          ? "Po otvorení riadku sa načíta verejná cena z e-shopu konkurencie (HTTP, bez prihlásenia)."
-                                          : "Po otvorení riadku sa pre každého dodávateľa spustí Playwright (cena / sklad podľa JSON selektorov). Kód dodávateľa je z mapovania v databáze."
+                                          ? visiblePartyIds
+                                            ? "Po otvorení riadku sa načíta verejná cena len u označenej konkurencie (HTTP, bez prihlásenia)."
+                                            : "Po otvorení riadku sa načíta verejná cena z e-shopu konkurencie (HTTP, bez prihlásenia)."
+                                          : visiblePartyIds
+                                            ? "Po otvorení riadku sa cena a sklad načítajú len u dodávateľov označených vo filtri vyššie."
+                                            : "Po otvorení riadku sa pre každého dodávateľa spustí Playwright (cena / sklad podľa JSON selektorov). Kód dodávateľa je z mapovania v databáze."
                                       }
                                     >
                                       {isCompetitorMode
@@ -1904,7 +2022,16 @@ function ProductSupplierExpandedTableRow({
                                     </p>
                                   </div>
                                   <div className="flex flex-col gap-2 p-2 sm:gap-2 sm:p-2.5">
-                                    {product.offers.map((offer, offerIndex) => {
+                                    {visibleOffers.length === 0 ? (
+                                      <p className="px-1 py-2 text-xs text-slate-500">
+                                        {visiblePartyIds
+                                          ? isCompetitorMode
+                                            ? "Označ aspoň jednu konkurenciu vo filtri vyššie."
+                                            : "Označ aspoň jedného dodávateľa vo filtri vyššie."
+                                          : "Pre tento produkt nie sú v databáze žiadne ponuky."}
+                                      </p>
+                                    ) : null}
+                                    {visibleOffers.map((offer, offerIndex) => {
                                       const scrape =
                                         offer.supplier_id != null
                                           ? scrapeByKey[
@@ -3722,6 +3849,13 @@ export default function Home() {
     "suppliers",
   );
   const [priceSourceMode, setPriceSourceMode] = useState<PriceSourceMode>("suppliers");
+  /** Vyhľadávanie: pre ktorých dodávateľov / konkurentov načítať živú cenu a sklad. */
+  const [searchScrapeSupplierIds, setSearchScrapeSupplierIds] = useState<Set<number>>(
+    () => new Set(),
+  );
+  const [searchScrapeCompetitorIds, setSearchScrapeCompetitorIds] = useState<
+    Set<number>
+  >(() => new Set());
   const [expandedCompetitorKeys, setExpandedCompetitorKeys] = useState<Set<string>>(
     () => new Set(),
   );
@@ -4712,8 +4846,17 @@ export default function Home() {
   const reloadProductSupplierScrapes = useCallback(
     (product: ProductSearchRow) => {
       const internalCode = product.internal_code;
+      const partyFilter =
+        activeView === "vyhladavanie"
+          ? priceSourceMode === "suppliers"
+            ? searchScrapeSupplierIds
+            : searchScrapeCompetitorIds
+          : null;
       for (const offer of product.offers) {
         if (offer.supplier_id == null || !offer.supplier_code?.trim()) {
+          continue;
+        }
+        if (!offerMatchesPartyFilter(offer, partyFilter)) {
           continue;
         }
         const key = scrapeCacheKey(internalCode, offer.supplier_id);
@@ -4926,7 +5069,13 @@ export default function Home() {
         })();
       }
     },
-    [apiFetch, priceSourceMode],
+    [
+      apiFetch,
+      priceSourceMode,
+      activeView,
+      searchScrapeSupplierIds,
+      searchScrapeCompetitorIds,
+    ],
   );
 
   useEffect(() => {
@@ -4950,7 +5099,15 @@ export default function Home() {
     }
 
     reloadProductSupplierScrapes(product);
-  }, [openProduct, activeView, listOpenProductRow, reloadProductSupplierScrapes]);
+  }, [
+    openProduct,
+    activeView,
+    listOpenProductRow,
+    reloadProductSupplierScrapes,
+    searchScrapeSupplierIds,
+    searchScrapeCompetitorIds,
+    priceSourceMode,
+  ]);
 
   const refreshDevStepScreenshots = useCallback(async () => {
     try {
@@ -5540,14 +5697,110 @@ export default function Home() {
   }, [priceSourceMode]);
 
   useEffect(() => {
-    if (activeView !== "dodavatelia") {
+    if (activeView !== "dodavatelia" && activeView !== "vyhladavanie") {
       return;
     }
     void refetchSuppliersList();
-    if (dodavateliaTab === "competitors") {
+    if (
+      (activeView === "dodavatelia" && dodavateliaTab === "competitors") ||
+      (activeView === "vyhladavanie" && priceSourceMode === "competitors")
+    ) {
       void refetchCompetitorsList();
     }
-  }, [activeView, dodavateliaTab, refetchSuppliersList, refetchCompetitorsList]);
+  }, [
+    activeView,
+    dodavateliaTab,
+    priceSourceMode,
+    refetchSuppliersList,
+    refetchCompetitorsList,
+  ]);
+
+  const searchScrapePartyItems = useMemo(() => {
+    if (priceSourceMode === "suppliers") {
+      return [...supplierForms]
+        .filter((s) => s.id != null)
+        .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+        .map((s) => ({ id: s.id!, name: s.name }));
+    }
+    return [...competitorForms]
+      .filter((c) => c.id != null && c.isActive)
+      .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+      .map((c) => ({ id: c.id!, name: c.name }));
+  }, [priceSourceMode, supplierForms, competitorForms]);
+
+  const activeSearchScrapePartyIds = useMemo(
+    () =>
+      priceSourceMode === "suppliers"
+        ? searchScrapeSupplierIds
+        : searchScrapeCompetitorIds,
+    [priceSourceMode, searchScrapeSupplierIds, searchScrapeCompetitorIds],
+  );
+
+  useEffect(() => {
+    const ids = supplierForms
+      .map((s) => s.id)
+      .filter((id): id is number => id != null);
+    if (ids.length === 0) {
+      return;
+    }
+    setSearchScrapeSupplierIds((prev) => {
+      if (prev.size > 0) {
+        const kept = new Set([...prev].filter((id) => ids.includes(id)));
+        if (kept.size > 0) {
+          return kept;
+        }
+      }
+      return loadSearchScrapePartyIds(STORAGE_SEARCH_SCRAPE_SUPPLIER_IDS, ids);
+    });
+  }, [supplierForms]);
+
+  useEffect(() => {
+    const ids = competitorForms
+      .filter((c) => c.isActive)
+      .map((c) => c.id)
+      .filter((id): id is number => id != null);
+    if (ids.length === 0) {
+      return;
+    }
+    setSearchScrapeCompetitorIds((prev) => {
+      if (prev.size > 0) {
+        const kept = new Set([...prev].filter((id) => ids.includes(id)));
+        if (kept.size > 0) {
+          return kept;
+        }
+      }
+      return loadSearchScrapePartyIds(STORAGE_SEARCH_SCRAPE_COMPETITOR_IDS, ids);
+    });
+  }, [competitorForms]);
+
+  const toggleSearchScrapeParty = useCallback(
+    (partyId: number) => {
+      if (priceSourceMode === "suppliers") {
+        setSearchScrapeSupplierIds((prev) => {
+          const next = new Set(prev);
+          if (next.has(partyId)) {
+            next.delete(partyId);
+          } else {
+            next.add(partyId);
+          }
+          persistSearchScrapePartyIds(STORAGE_SEARCH_SCRAPE_SUPPLIER_IDS, next);
+          return next;
+        });
+        return;
+      }
+      setSearchScrapeCompetitorIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(partyId)) {
+          next.delete(partyId);
+        } else {
+          next.add(partyId);
+        }
+        persistSearchScrapePartyIds(STORAGE_SEARCH_SCRAPE_COMPETITOR_IDS, next);
+        return next;
+      });
+    },
+    [priceSourceMode],
+  );
 
   const addToCart = async (
     supplierId: number,
@@ -7651,6 +7904,14 @@ export default function Home() {
                       />
                     </div>
                   )}
+                <SearchScrapePartyFilter
+                  items={searchScrapePartyItems}
+                  selectedIds={activeSearchScrapePartyIds}
+                  onToggle={toggleSearchScrapeParty}
+                  modeLabel={
+                    priceSourceMode === "competitors" ? "Konkurencia" : "Dodávatelia"
+                  }
+                />
                 </div>
               </Card>
 
@@ -7736,6 +7997,7 @@ export default function Home() {
                                     product={product}
                                     scrapeByKey={scrapeByKey}
                                     onReload={reloadProductSupplierScrapes}
+                                    partyIds={activeSearchScrapePartyIds}
                                   />
                                 ) : null}
                               </div>
@@ -7774,6 +8036,7 @@ export default function Home() {
                             product={product}
                             colSpan={colSpan}
                             isCompetitorMode={priceSourceMode === "competitors"}
+                            visiblePartyIds={activeSearchScrapePartyIds}
                             scrapeByKey={scrapeByKey}
                             cartQuantityByKey={cartQuantityByKey}
                             setCartQuantityByKey={setCartQuantityByKey}
