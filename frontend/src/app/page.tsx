@@ -982,42 +982,60 @@ function SearchScrapePartyFilter({
   items,
   selectedIds,
   onToggle,
-  modeLabel,
+  onSelectAll,
+  onSelectNone,
 }: {
   items: { id: number; name: string }[];
   selectedIds: Set<number>;
   onToggle: (id: number) => void;
-  modeLabel: string;
+  onSelectAll: () => void;
+  onSelectNone: () => void;
 }) {
   if (items.length === 0) {
     return null;
   }
+  const selectedCount = items.reduce(
+    (acc, item) => acc + (selectedIds.has(item.id) ? 1 : 0),
+    0,
+  );
   return (
-    <div className="mt-3 border-t border-slate-100 pt-3">
-      <p className="mb-2 text-xs font-medium text-slate-600">
-        {modeLabel} — cenu a sklad načítame len u označených
-      </p>
-      <div className="flex flex-wrap gap-2">
+    <div className="mt-2 border-t border-slate-100 pt-2">
+      <div className="mb-1.5 flex items-center justify-end gap-1.5">
+        <button
+          type="button"
+          onClick={onSelectAll}
+          className="inline-flex h-6 items-center rounded border border-slate-200 bg-white px-2 text-[10px] font-medium text-slate-600 hover:bg-slate-50"
+        >
+          Všetko
+        </button>
+        <button
+          type="button"
+          onClick={onSelectNone}
+          className="inline-flex h-6 items-center rounded border border-slate-200 bg-white px-2 text-[10px] font-medium text-slate-600 hover:bg-slate-50"
+        >
+          Nič
+        </button>
+        <span className="text-[10px] text-slate-500">
+          {selectedCount}/{items.length}
+        </span>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
         {items.map((item) => {
           const checked = selectedIds.has(item.id);
           return (
-            <label
+            <button
+              type="button"
               key={item.id}
+              onClick={() => onToggle(item.id)}
               className={cn(
-                "inline-flex cursor-pointer select-none items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors",
+                "inline-flex h-7 select-none items-center rounded-md border px-2 text-[11px] font-medium transition-colors",
                 checked
                   ? "border-sky-300 bg-sky-50 text-sky-900"
                   : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
               )}
             >
-              <input
-                type="checkbox"
-                className="h-3.5 w-3.5 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
-                checked={checked}
-                onChange={() => onToggle(item.id)}
-              />
               {item.name}
-            </label>
+            </button>
           );
         })}
       </div>
@@ -5802,6 +5820,30 @@ export default function Home() {
     [priceSourceMode],
   );
 
+  const selectAllSearchScrapeParties = useCallback(() => {
+    if (priceSourceMode === "suppliers") {
+      const next = new Set(searchScrapePartyItems.map((item) => item.id));
+      setSearchScrapeSupplierIds(next);
+      persistSearchScrapePartyIds(STORAGE_SEARCH_SCRAPE_SUPPLIER_IDS, next);
+      return;
+    }
+    const next = new Set(searchScrapePartyItems.map((item) => item.id));
+    setSearchScrapeCompetitorIds(next);
+    persistSearchScrapePartyIds(STORAGE_SEARCH_SCRAPE_COMPETITOR_IDS, next);
+  }, [priceSourceMode, searchScrapePartyItems]);
+
+  const selectNoneSearchScrapeParties = useCallback(() => {
+    if (priceSourceMode === "suppliers") {
+      const next = new Set<number>();
+      setSearchScrapeSupplierIds(next);
+      persistSearchScrapePartyIds(STORAGE_SEARCH_SCRAPE_SUPPLIER_IDS, next);
+      return;
+    }
+    const next = new Set<number>();
+    setSearchScrapeCompetitorIds(next);
+    persistSearchScrapePartyIds(STORAGE_SEARCH_SCRAPE_COMPETITOR_IDS, next);
+  }, [priceSourceMode]);
+
   const addToCart = async (
     supplierId: number,
     supplierCode: string,
@@ -7908,9 +7950,8 @@ export default function Home() {
                   items={searchScrapePartyItems}
                   selectedIds={activeSearchScrapePartyIds}
                   onToggle={toggleSearchScrapeParty}
-                  modeLabel={
-                    priceSourceMode === "competitors" ? "Konkurencia" : "Dodávatelia"
-                  }
+                  onSelectAll={selectAllSearchScrapeParties}
+                  onSelectNone={selectNoneSearchScrapeParties}
                 />
                 </div>
               </Card>
