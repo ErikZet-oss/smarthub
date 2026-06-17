@@ -7698,7 +7698,7 @@ export default function Home() {
                     <div className="min-w-0 space-y-1">
                       <label className="text-xs text-slate-600">Kód</label>
                       <Input
-                        placeholder="Časť interného kódu…"
+                        placeholder="Interný alebo dodávateľský kód…"
                         value={searchFilters.code}
                         onChange={(event) =>
                           setSearchFilters((prev) => ({

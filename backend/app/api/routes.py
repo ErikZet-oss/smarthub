@@ -798,7 +798,19 @@ async def search_products(
 ):
     query = select(Product)
     if filters.code:
-        query = query.where(Product.internal_code.contains(filters.code))
+        code = filters.code.strip()
+        use_competitors = (filters.price_source or "suppliers") == "competitors"
+        if use_competitors:
+            mapped_product_ids = select(CompetitorProductMapping.product_id).where(
+                CompetitorProductMapping.competitor_code.contains(code)
+            )
+        else:
+            mapped_product_ids = select(ProductMapping.product_id).where(
+                ProductMapping.supplier_code.contains(code)
+            )
+        query = query.where(
+            Product.internal_code.contains(code) | Product.id.in_(mapped_product_ids)
+        )
     if filters.norma:
         query = query.where(Product.norma == filters.norma)
     if filters.diameter:
@@ -1010,7 +1022,19 @@ def _apply_search_filters(
     skip_internal_code: bool = False,
 ):
     if not skip_code and filters.code:
-        statement = statement.where(Product.internal_code.contains(filters.code))
+        code = filters.code.strip()
+        use_competitors = (filters.price_source or "suppliers") == "competitors"
+        if use_competitors:
+            mapped_product_ids = select(CompetitorProductMapping.product_id).where(
+                CompetitorProductMapping.competitor_code.contains(code)
+            )
+        else:
+            mapped_product_ids = select(ProductMapping.product_id).where(
+                ProductMapping.supplier_code.contains(code)
+            )
+        statement = statement.where(
+            Product.internal_code.contains(code) | Product.id.in_(mapped_product_ids)
+        )
     if not skip_internal_code and filters.internal_code:
         statement = statement.where(Product.internal_code == filters.internal_code.strip())
     if not skip_norma and filters.norma:
