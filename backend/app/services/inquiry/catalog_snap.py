@@ -229,6 +229,12 @@ def resolve_catalog_norma(norma: str | None, *, known: list[str] | None = None) 
     for val in known:
         if search_key(val) == key:
             return val
+    # Parser / STN mapovanie vracia „471“, katalóg po importe často „DIN 471“.
+    if re.fullmatch(r"\d{3,4}a?", key, re.IGNORECASE):
+        din_key = f"DIN{key}"
+        for val in known:
+            if search_key(val) == din_key:
+                return val
     parsed = InquiryLineParsed(row_index=0, raw_text="", norma=raw)
     for candidate in norm_display_candidates(parsed):
         if candidate in known:
@@ -249,7 +255,8 @@ def resolve_catalog_norma(norma: str | None, *, known: list[str] | None = None) 
         if alt in known:
             return alt
         for val in known:
-            if search_key(val) == base:
+            vk = search_key(val)
+            if vk == base or vk == f"DIN{base}":
                 return val
         # Katalóg ukladá normu bez prefixu DIN — DIN471 → 471 aj keď known zoznam mešká.
         return base

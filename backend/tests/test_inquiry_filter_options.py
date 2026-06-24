@@ -30,13 +30,19 @@ def test_prepare_filters_resolves_din471_and_drops_length(session) -> None:
     known = CatalogSnapCache.load(session).norma_values
     raw = ProductSearchFilters(norma="DIN471", diameter="12", length="0", v_class="0")
     prepared = prepare_inquiry_catalog_filters(raw, known_norma=known)
-    assert prepared.norma == "471"
+    assert prepared.norma in ("471", "DIN 471", "DIN471")
     assert prepared.length is None
     assert prepared.v_class is None
 
 
 def test_resolve_catalog_norma_din471_without_known_match() -> None:
     assert resolve_catalog_norma("DIN471", known=["934", "976"]) == "471"
+
+
+def test_resolve_catalog_norma_bare_471_to_din_spaced_in_catalog() -> None:
+    known = ["934", "DIN 471", "976"]
+    assert resolve_catalog_norma("471", known=known) == "DIN 471"
+    assert resolve_catalog_norma("DIN471", known=known) == "DIN 471"
 
 
 def test_din471_conditional_surfaces(session) -> None:
@@ -72,9 +78,16 @@ def test_snap_ring_din471_to_catalog(session) -> None:
         quantity=60,
     )
     snapped = snap_inquiry_line_to_catalog(session, row)
-    assert snapped.norma == "471"
+    assert snapped.norma in ("471", "DIN 471", "DIN471")
     assert snapped.length == "0"
     assert snapped.v_class is None
+    known = CatalogSnapCache.load(session).norma_values
+    prepared = prepare_inquiry_catalog_filters(
+        ProductSearchFilters(norma=snapped.norma, diameter=snapped.diameter, length=snapped.length),
+        known_norma=known,
+    )
+    opts = _build_conditional_filter_options(session, prepared)
+    assert len(opts.get("internal_code", [])) >= 1
 
 
 def test_snap_ring_din471_pruzinova_snap_to_catalog(session) -> None:
@@ -89,7 +102,7 @@ def test_snap_ring_din471_pruzinova_snap_to_catalog(session) -> None:
         quantity=10,
     )
     snapped = snap_inquiry_line_to_catalog(session, row)
-    assert snapped.norma == "471"
+    assert snapped.norma in ("471", "DIN 471", "DIN471")
     assert snapped.surface == "Oceľ čierna"
     assert snapped.diameter == "36"
     assert snapped.v_class is None

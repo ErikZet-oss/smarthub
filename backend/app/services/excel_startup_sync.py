@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 _DEFAULT_SHEET = "DIN"
 # Ak v DB chýba aspoň toľko riadkov oproti Excelu, spustí sa sync (nové normy / produkty).
 _MIN_MISSING_ROWS = 5000
+# Po štarte nechaj API najprv obslúžiť UI (Načítať stĺpce), až potom ťažký import.
+_STARTUP_SYNC_DELAY_SEC = 180.0
 
 
 def _excel_din_row_count(path: str) -> int:
@@ -65,7 +67,7 @@ def _run_excel_import(path: str) -> None:
         logger.exception("Excel startup sync zlyhal")
 
 
-def schedule_excel_sync_if_stale() -> None:
+def _start_excel_sync_if_stale() -> None:
     if os.getenv("SMARTHUB_DISABLE_AUTO_EXCEL_SYNC", "").strip().lower() in (
         "1",
         "true",
@@ -105,3 +107,9 @@ def schedule_excel_sync_if_stale() -> None:
         daemon=True,
     )
     thread.start()
+
+
+def schedule_excel_sync_if_stale() -> None:
+    timer = threading.Timer(_STARTUP_SYNC_DELAY_SEC, _start_excel_sync_if_stale)
+    timer.daemon = True
+    timer.start()
