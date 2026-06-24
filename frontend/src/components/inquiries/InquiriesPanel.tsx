@@ -1,6 +1,6 @@
 "use client";
 
-import { ClipboardList, Loader2, Upload } from "lucide-react";
+import { ClipboardList, Loader2, RefreshCw, Upload } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
@@ -80,6 +80,7 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
   const [ignoreErrors, setIgnoreErrors] = useState(false);
   const [showOkOnly, setShowOkOnly] = useState(false);
   const [showErrorsOnly, setShowErrorsOnly] = useState(false);
+  const [resnapping, setResnapping] = useState(false);
 
   useEffect(() => {
     if (!authReady) return;
@@ -223,6 +224,31 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
     },
     [applyRowsChange],
   );
+
+  const onResnapRows = useCallback(async () => {
+    if (!apiToken || rows.length === 0 || resnapping) return;
+    setResnapping(true);
+    setStatus("Znova párujem riadky s katalógom…");
+    try {
+      const res = await apiFetch(`${apiBase}/api/inquiries/rows/resnap`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rows }),
+      });
+      const parsed = await readApiJsonOrText(res);
+      if (!parsed.ok) throw new Error(parsed.detail);
+      const data = parsed.data as { rows?: Record<string, unknown>[] };
+      if (!Array.isArray(data.rows)) throw new Error("Neplatná odpoveď servera.");
+      const next = data.rows.map(normalizeInquiryRowFromApi);
+      enrichAttemptKeyRef.current = "";
+      persistDraft(next);
+      setStatus(formatInquiryParseCompleteMessage(next));
+    } catch (e) {
+      setStatus(e instanceof Error ? e.message : "Chyba pri opätovnom párovaní.");
+    } finally {
+      setResnapping(false);
+    }
+  }, [apiBase, apiFetch, apiToken, rows, resnapping, persistDraft]);
 
   const handleSupplierChange = useCallback(
     (ids: number[]) => {
@@ -545,6 +571,27 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
                 Len chybné
               </label>
             </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={resnapping || parsing || running}
+              onClick={() => void onResnapRows()}
+              title="Znova odvodí parametre a Smart kód z textu položiek podľa aktuálneho katalógu (bez nového uploadu)."
+              className="h-7 bg-white px-2 text-xs md:ml-auto md:h-8 md:text-sm"
+            >
+              {resnapping ? (
+                <>
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  Párujem…
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                  Znova napárovať s katalógom
+                </>
+              )}
+            </Button>
           </div>
 
           <InquiryEditorTable

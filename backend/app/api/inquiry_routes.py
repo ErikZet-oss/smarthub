@@ -264,6 +264,44 @@ def inquiry_enrich_internal_codes(
     return {"rows": [r.model_dump(mode="json", by_alias=True) for r in enriched]}
 
 
+@router.post("/inquiries/rows/resnap")
+def inquiry_resnap_rows(
+    payload: dict[str, object],
+    session: Session = Depends(get_session),
+    _: AuthUserContext = Depends(get_current_user),
+):
+    """
+    Znova napáruje už uložené riadky s katalógom bez nového uploadu.
+
+    Z `raw_text` heuristicky znova odvodí parametre (norma, povrch, priemer,
+    class — vrátane STN suffixu ako .55 → 8.8), zladí ich s katalógom a doplní
+    Smart kód. Použité po aktualizácii katalógu/pravidiel, keď staré riadky
+    nesú zastarané hodnoty. Beží bez AI, takže je rýchle aj pre veľa riadkov.
+    """
+    from app.services.inquiry.normalize import apply_normalization
+    from app.services.inquiry.parser import _heuristic_parse
+
+    raw_rows = payload.get("rows")
+    if not isinstance(raw_rows, list):
+        raise HTTPException(status_code=400, detail="Chýba pole rows.")
+    rows = [InquiryLineParsed.model_validate(r) for r in raw_rows]
+
+    reparsed: list[InquiryLineParsed] = []
+    for row in rows:
+        heuristic = _heuristic_parse(row.raw_text or "")
+        if heuristic is None:
+            reparsed.append(row)
+            continue
+        fresh = InquiryLineParsed.from_ai(row.row_index, row.raw_text or "", heuristic)
+        # Množstvo nie je v texte položky — zachovaj pôvodné z uploadu.
+        if row.quantity:
+            fresh.quantity = row.quantity
+        reparsed.append(apply_normalization(fresh))
+
+    enriched = enrich_inquiry_rows_internal_codes(session, reparsed)
+    return {"rows": [r.model_dump(mode="json", by_alias=True) for r in enriched]}
+
+
 @router.get("/inquiries/catalog-product/{internal_code}")
 def inquiry_catalog_product(
     internal_code: str,
