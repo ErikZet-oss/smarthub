@@ -1,7 +1,14 @@
-﻿**/__pycache__/
+**/__pycache__/
 *.pyc
 backend/.venv/
 backend/procurement.db
+backend/data/smarthub.db
 backend/data/dev_automation.ndjson
+backups/
 frontend/node_modules/
 frontend/.next/
+# Lokálne env súbory (obsahujú heslá)
+backend/.env
+frontend/.env.local
+# Debug a probe skripty
+backend/scripts/_*.py
