@@ -110,6 +110,34 @@ def read_inquiry_rows_from_path(path: str | Path) -> list[InquiryInputRow]:
     return read_inquiry_rows_from_bytes(p.read_bytes(), filename=p.name)
 
 
+def read_inquiry_rows_from_text(text: str) -> list[InquiryInputRow]:
+    """Riadky z textu prilepeného z Excelu (bunky oddelené tabulátorom / „;")."""
+    return _rows_from_matrix(_matrix_from_pasted_text(text))
+
+
+def _matrix_from_pasted_text(text: str) -> list[list[str]]:
+    raw = (text or "").replace("\r\n", "\n").replace("\r", "\n").strip("\n")
+    if not raw.strip():
+        return []
+    delimiter = _detect_paste_delimiter(raw)
+    if delimiter is None:
+        return [[line.strip()] for line in raw.split("\n") if line.strip()]
+    # csv.reader zvládne aj bunky s úvodzovkami / viacriadkové bunky z Excelu.
+    reader = csv.reader(io.StringIO(raw), delimiter=delimiter)
+    return [[_cell_to_str(cell) for cell in row] for row in reader]
+
+
+def _detect_paste_delimiter(raw: str) -> str | None:
+    """Excel kopíruje stĺpce tabulátorom; slovenské CSV často „;". Čiarku ignorujeme
+    (býva priamo v popise položky), nech sa text nerozbije na viac stĺpcov."""
+    if "\t" in raw:
+        return "\t"
+    lines = [ln for ln in raw.split("\n") if ln.strip()]
+    if lines and sum(1 for ln in lines if ";" in ln) >= max(1, len(lines) // 2):
+        return ";"
+    return None
+
+
 def _read_csv(data: bytes) -> list[InquiryInputRow]:
     text = data.decode("utf-8-sig", errors="replace")
     reader = csv.reader(io.StringIO(text))

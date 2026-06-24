@@ -81,6 +81,7 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
   const [showOkOnly, setShowOkOnly] = useState(false);
   const [showErrorsOnly, setShowErrorsOnly] = useState(false);
   const [resnapping, setResnapping] = useState(false);
+  const [pasteText, setPasteText] = useState("");
 
   useEffect(() => {
     if (!authReady) return;
@@ -288,6 +289,40 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
     setDraftPrompt(null);
   };
 
+  const pollParseTask = async (taskId: string, fallbackName: string) => {
+    while (true) {
+      await new Promise((r) => setTimeout(r, 1200));
+      const stRes = await apiFetch(`${apiBase}/api/inquiries/parse/${taskId}`);
+      const stParsed = await readApiJsonOrText(stRes);
+      if (!stParsed.ok) throw new Error(stParsed.detail);
+      const st = stParsed.data as {
+        state?: string;
+        phase?: string;
+        progress_pct?: number;
+        error?: string;
+        result?: { rows?: Record<string, unknown>[]; source_filename?: string };
+      };
+      setProgressPct(typeof st.progress_pct === "number" ? st.progress_pct : null);
+      if (st.state === "done" && st.result?.rows) {
+        const parsed = st.result.rows.map(normalizeInquiryRowFromApi);
+        const enriched = await enrichRowsWithSmartCodes(parsed);
+        persistDraft(enriched, st.result.source_filename ?? fallbackName);
+        setShowOkOnly(false);
+        setShowErrorsOnly(false);
+        setStatus(formatInquiryParseCompleteMessage(enriched));
+        return;
+      }
+      if (st.state === "error") {
+        throw new Error(st.error || "Parsovanie zlyhalo.");
+      }
+      if (st.phase === "catalog_snap") {
+        setStatus(`Zosúladzujem s katalógom… ${st.progress_pct ?? 0} %`);
+      } else {
+        setStatus(`AI parsuje riadky… ${st.progress_pct ?? 0} %`);
+      }
+    }
+  };
+
   const onFileSelected = async (file: File | null) => {
     if (!file || !apiToken) return;
     enrichAttemptKeyRef.current = "";
@@ -307,44 +342,41 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
       if (!startRes.ok || !startData.task_id) {
         throw new Error("Nepodarilo sa spustiť parsovanie.");
       }
-
-      const taskId = startData.task_id;
       setSourceFileName(file.name);
-
-      while (true) {
-        await new Promise((r) => setTimeout(r, 1200));
-        const stRes = await apiFetch(`${apiBase}/api/inquiries/parse/${taskId}`);
-        const stParsed = await readApiJsonOrText(stRes);
-        if (!stParsed.ok) throw new Error(stParsed.detail);
-        const st = stParsed.data as {
-          state?: string;
-          phase?: string;
-          progress_pct?: number;
-          error?: string;
-          result?: { rows?: Record<string, unknown>[]; source_filename?: string };
-        };
-        setProgressPct(typeof st.progress_pct === "number" ? st.progress_pct : null);
-        if (st.state === "done" && st.result?.rows) {
-          const parsed = st.result.rows.map(normalizeInquiryRowFromApi);
-          const enriched = await enrichRowsWithSmartCodes(parsed);
-          persistDraft(enriched, st.result.source_filename ?? file.name);
-          setShowOkOnly(false);
-          setShowErrorsOnly(false);
-          setStatus(formatInquiryParseCompleteMessage(enriched));
-          break;
-        }
-        if (st.state === "error") {
-          throw new Error(st.error || "Parsovanie zlyhalo.");
-        }
-        if (st.phase === "catalog_snap") {
-          setStatus(`Zosúladzujem s katalógom… ${st.progress_pct ?? 0} %`);
-        } else {
-          setStatus(`AI parsuje riadky… ${st.progress_pct ?? 0} %`);
-        }
-      }
+      await pollParseTask(startData.task_id, file.name);
     } catch (e) {
       setStatus(e instanceof Error ? e.message : "Chyba pri parsovaní.");
       setRows([]);
+    } finally {
+      setParsing(false);
+      setProgressPct(null);
+    }
+  };
+
+  const onPasteParse = async () => {
+    const text = pasteText.trim();
+    if (!text || !apiToken || parsing) return;
+    enrichAttemptKeyRef.current = "";
+    setParsing(true);
+    setProgressPct(0);
+    setStatus("Spracúvam prilepené riadky…");
+    try {
+      const startRes = await apiFetch(`${apiBase}/api/inquiries/parse/paste`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      const startParsed = await readApiJsonOrText(startRes);
+      if (!startParsed.ok) throw new Error(startParsed.detail);
+      const startData = startParsed.data as { task_id?: string };
+      if (!startRes.ok || !startData.task_id) {
+        throw new Error("Nepodarilo sa spustiť parsovanie.");
+      }
+      setSourceFileName("Prilepené bunky");
+      await pollParseTask(startData.task_id, "Prilepené bunky");
+      setPasteText("");
+    } catch (e) {
+      setStatus(e instanceof Error ? e.message : "Chyba pri parsovaní.");
     } finally {
       setParsing(false);
       setProgressPct(null);
@@ -514,6 +546,46 @@ export function InquiriesPanel({ apiBase, apiFetch, apiToken, authReady, userId 
             {parsing ? "Parsujem…" : "Nahrať a parsovať"}
           </span>
         </label>
+
+        <div className="flex items-center gap-2 pt-1">
+          <span className="h-px flex-1 bg-slate-200" />
+          <span className="text-[10px] font-medium uppercase tracking-wide text-slate-400 md:text-[11px]">
+            alebo prilep z Excelu
+          </span>
+          <span className="h-px flex-1 bg-slate-200" />
+        </div>
+
+        <textarea
+          value={pasteText}
+          onChange={(e) => setPasteText(e.target.value)}
+          disabled={parsing}
+          rows={4}
+          placeholder={
+            "Skopíruj bunky z Excelu (Ctrl+C) a sem prilep (Ctrl+V).\nDIN 933 M10x30 pozink\t100\nDIN 934 M8 nerez A2\t250"
+          }
+          className="w-full resize-y rounded-md border border-slate-200 bg-white px-2.5 py-2 font-mono text-[11px] leading-snug text-slate-700 outline-none placeholder:text-slate-300 focus:border-sky-400 focus:ring-1 focus:ring-sky-200 disabled:cursor-not-allowed disabled:opacity-60 md:rounded-lg md:text-xs"
+        />
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[10px] text-slate-400 md:text-[11px]">
+            {pasteText.trim()
+              ? `${pasteText.trim().split(/\r?\n/).filter((l) => l.trim()).length} riadkov`
+              : "Jeden popis na riadok; množstvo do ďalšieho stĺpca."}
+          </span>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={parsing || !pasteText.trim()}
+            onClick={() => void onPasteParse()}
+          >
+            {parsing ? (
+              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin md:h-4 md:w-4" />
+            ) : (
+              <ClipboardList className="mr-1.5 h-3.5 w-3.5 md:h-4 md:w-4" />
+            )}
+            Spracovať prilepené
+          </Button>
+        </div>
         {progressPct != null && parsing ? (
           <div className="h-1 w-full overflow-hidden rounded bg-slate-100 md:h-2">
             <div

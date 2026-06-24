@@ -12,14 +12,24 @@ from app.api.deps import AuthUserContext, get_current_user
 from app.db import get_session
 from app.models.entities import Product
 from app.schemas.common import ProductSearchFilters
-from app.schemas.inquiry import InquiryLineParsed, InquiryParseTaskResult, InquiryRunRequest, InquiryRunTaskResult
+from app.schemas.inquiry import (
+    InquiryInputRow,
+    InquiryLineParsed,
+    InquiryParseTaskResult,
+    InquiryRunRequest,
+    InquiryRunTaskResult,
+)
 from app.services.inquiry.catalog_snap import (
     CatalogSnapCache,
     enrich_inquiry_rows_internal_codes,
     prepare_inquiry_catalog_filters,
     snap_inquiry_batch_to_catalog,
 )
-from app.services.inquiry.file_reader import MAX_INQUIRY_ROWS, read_inquiry_rows_from_bytes
+from app.services.inquiry.file_reader import (
+    MAX_INQUIRY_ROWS,
+    read_inquiry_rows_from_bytes,
+    read_inquiry_rows_from_text,
+)
 from app.services.inquiry.parser import parse_inquiry_batch
 from app.services.inquiry.pipeline import run_inquiry_batch, validate_run_request
 
@@ -50,12 +60,11 @@ def _task_update(task_id: str, *, run: bool = False, **patch: object) -> None:
         task["updated_at"] = time.time()
 
 
-def _run_parse_task(task_id: str, file_bytes: bytes, filename: str) -> None:
+def _run_parse_task(task_id: str, input_rows: list[InquiryInputRow], filename: str) -> None:
     _task_update(task_id, state="running")
     try:
-        input_rows = read_inquiry_rows_from_bytes(file_bytes, filename=filename)
         if not input_rows:
-            raise ValueError("Súbor neobsahuje žiadne riadky s textom položky.")
+            raise ValueError("Žiadne riadky s textom položky.")
         total = len(input_rows)
         _task_update(task_id, total_rows=total, rows_scanned=0)
 
@@ -149,12 +158,63 @@ async def inquiry_parse_upload(
 
     thread = threading.Thread(
         target=_run_parse_task,
-        args=(task_id, data, filename),
+        args=(task_id, preview, filename),
         name=f"inquiry-parse-{task_id[:8]}",
         daemon=True,
     )
     thread.start()
     return {"task_id": task_id, "state": "queued", "total_rows": len(preview)}
+
+
+@router.post("/inquiries/parse/paste")
+def inquiry_parse_paste(
+    payload: dict[str, object],
+    _: AuthUserContext = Depends(get_current_user),
+):
+    """Parsovanie buniek prilepených z Excelu (bez nahrávania súboru)."""
+    raw_text = payload.get("text")
+    if not isinstance(raw_text, str) or not raw_text.strip():
+        raise HTTPException(status_code=400, detail="Prilep aspoň jeden riadok textu.")
+    if len(raw_text.encode("utf-8")) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=400, detail="Vstup je príliš veľký (max 5 MB).")
+
+    try:
+        input_rows = read_inquiry_rows_from_text(raw_text)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not input_rows:
+        raise HTTPException(status_code=400, detail="Nenašli sa žiadne riadky s textom položky.")
+    if len(input_rows) > MAX_INQUIRY_ROWS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Maximálne {MAX_INQUIRY_ROWS} riadkov na jeden dopyt.",
+        )
+
+    task_id = uuid4().hex
+    filename = "Prilepené bunky"
+    with _INQUIRY_PARSE_LOCK:
+        _INQUIRY_PARSE_TASKS[task_id] = {
+            "task_id": task_id,
+            "state": "queued",
+            "rows_scanned": 0,
+            "total_rows": len(input_rows),
+            "result": None,
+            "error": None,
+            "error_code": None,
+            "source_filename": filename,
+            "created_at": time.time(),
+            "updated_at": time.time(),
+            "finished_at": None,
+        }
+
+    thread = threading.Thread(
+        target=_run_parse_task,
+        args=(task_id, input_rows, filename),
+        name=f"inquiry-parse-{task_id[:8]}",
+        daemon=True,
+    )
+    thread.start()
+    return {"task_id": task_id, "state": "queued", "total_rows": len(input_rows)}
 
 
 @router.get("/inquiries/parse/{task_id}")

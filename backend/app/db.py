@@ -28,7 +28,22 @@ if IS_SQLITE:
         DATABASE_URL, echo=False, connect_args={"check_same_thread": False}
     )
 else:
-    engine = create_engine(DATABASE_URL, echo=False, pool_pre_ping=True)
+    # Neon/serverless Postgres zatvára nečinné spojenia a uspáva compute → spojenie
+    # odumrie aj počas behu. pool_pre_ping odchytí mŕtve spojenie pri checkoute,
+    # pool_recycle proaktívne zahodí staré spojenia a TCP keepalives držia SSL
+    # spojenie pri živote, nech ho Neon nezavrie pre nečinnosť.
+    engine = create_engine(
+        DATABASE_URL,
+        echo=False,
+        pool_pre_ping=True,
+        pool_recycle=280,
+        connect_args={
+            "keepalives": 1,
+            "keepalives_idle": 30,
+            "keepalives_interval": 10,
+            "keepalives_count": 5,
+        },
+    )
 
 
 def create_db_and_tables() -> None:
