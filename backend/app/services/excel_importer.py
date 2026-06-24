@@ -455,6 +455,20 @@ def _import_gamechanger_excel_locked(
     file_path = str(resolved)
     name = (sheet_name or "DIN").strip() or "DIN"
     wb = load_workbook(file_path, read_only=True, data_only=True)
+    try:
+        return _import_gamechanger_excel_inner(wb, name, file_path, session, progress_cb=progress_cb)
+    finally:
+        wb.close()
+
+
+def _import_gamechanger_excel_inner(
+    wb,
+    name: str,
+    file_path: str,
+    session: Session,
+    *,
+    progress_cb: Callable[[int, int], None] | None = None,
+) -> ImportResult:
     if name not in wb.sheetnames:
         preview = ", ".join(wb.sheetnames[:30])
         suffix = "…" if len(wb.sheetnames) > 30 else ""
