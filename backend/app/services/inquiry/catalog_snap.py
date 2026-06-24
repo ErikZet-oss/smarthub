@@ -89,12 +89,19 @@ def _norma_group_key(value: str) -> str:
     return re.sub(r"[^a-z0-9]", "", s)
 
 
+def _norma_numeric_base(group_key: str) -> str:
+    """Vedúce číslice kľúča normy (980v → 980, 7985tx → 7985)."""
+    m = re.match(r"\d+", group_key)
+    return m.group(0) if m else ""
+
+
 @dataclass
 class CatalogSnapCache:
     norma_values: list[str] = field(default_factory=list)
     norma_counts: dict[str, int] = field(default_factory=dict)
     _filter_opts: dict[str, dict[str, list[str]]] = field(default_factory=dict)
     _canonical: dict[str, str] = field(default_factory=dict)
+    _numeric_base: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def load(cls, session: Session) -> CatalogSnapCache:
@@ -122,8 +129,13 @@ class CatalogSnapCache:
         prázdny variant a nenašlo nič.
         """
         groups: dict[str, list[str]] = {}
+        base_groups: dict[str, list[str]] = {}
         for value in self.norma_values:
-            groups.setdefault(_norma_group_key(value), []).append(value)
+            gk = _norma_group_key(value)
+            groups.setdefault(gk, []).append(value)
+            base = _norma_numeric_base(gk)
+            if base:
+                base_groups.setdefault(base, []).append(value)
         for variants in groups.values():
             if len(variants) < 2:
                 continue
@@ -131,18 +143,42 @@ class CatalogSnapCache:
             for variant in variants:
                 if variant != best:
                     self._canonical[variant] = best
+        # Číselná báza → najpopulovanejší variant (980 → DIN 980V, keď „980" v katalógu nie je).
+        for base, variants in base_groups.items():
+            self._numeric_base[base] = max(
+                variants, key=lambda v: self.norma_counts.get(v, 0)
+            )
 
     def canonical_norma(self, norma: str | None) -> str | None:
-        """Mapuje stray variant normy na ten s najviac produktmi (inak nezmení)."""
+        """Mapuje normu na variant katalógu s najviac produktmi (inak nezmení).
+
+        Rieši dva prípady z nekonzistentného importu:
+        1) stray duplicitný variant (934 → DIN 934),
+        2) normu, ktorú katalóg vôbec nemá pod daným zápisom, ale drží ju so
+           sufixom (980 → DIN 980V) — podľa zhody vedúcich číslic.
+        """
         raw = (norma or "").strip()
         if not raw:
             return norma
-        return self._canonical.get(raw, raw)
+        if raw in self._canonical:
+            return self._canonical[raw]
+        if raw in self.norma_counts:
+            return raw
+        base = _norma_numeric_base(_norma_group_key(raw))
+        if len(base) >= 3:
+            mapped = self._numeric_base.get(base)
+            if mapped:
+                return mapped
+        return raw
 
     def filter_options(self, session: Session, filters: ProductSearchFilters) -> dict[str, list[str]]:
         from app.api.routes import _build_conditional_filter_options
 
         prepared = prepare_inquiry_catalog_filters(filters, known_norma=self.norma_values)
+        if prepared.norma:
+            canon = self.canonical_norma(prepared.norma)
+            if canon and canon != prepared.norma:
+                prepared = prepared.model_copy(update={"norma": canon})
         key = self._filters_key(prepared)
         cached = self._filter_opts.get(key)
         if cached is not None:

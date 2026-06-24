@@ -237,6 +237,12 @@ def inquiry_filter_options_conditional(
 
     cache = CatalogSnapCache.load(session)
     prepared = prepare_inquiry_catalog_filters(filters, known_norma=cache.norma_values)
+    # Normu zjednoť na variant katalógu s produktmi (napr. „980" → „DIN 980V"),
+    # inak by aj fallback ostal prázdny, lebo kotvou je práve norma.
+    if prepared.norma:
+        canon = cache.canonical_norma(prepared.norma)
+        if canon and canon != prepared.norma:
+            prepared = prepared.model_copy(update={"norma": canon})
     options = _build_conditional_filter_options(session, prepared)
     # Keď striktná kombinácia (napr. zo starých dát) nechá dropdown prázdny,
     # ponúkni širší výber, aby sa pole dalo ručne opraviť. Kotvou je norma.

@@ -76,7 +76,7 @@ def test_snap_pin_keeps_values_when_catalog_empty(session) -> None:
         quantity=10,
     )
     snapped = snap_inquiry_line_to_catalog(session, row)
-    assert snapped.norma == "6325"
+    assert snapped.norma == "DIN 6325 M6"
     assert snapped.diameter == "3"
     assert snapped.length == "30"
     assert snapped.v_class in (None, "")
