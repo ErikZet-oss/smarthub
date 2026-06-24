@@ -68,6 +68,16 @@ def _run_excel_import(path: str) -> None:
 
 
 def _start_excel_sync_if_stale() -> None:
+    # Auto-import pri štarte je VYPNUTÝ default-ne. Veľký katalóg (desiatky MB,
+    # 64k+ riadkov) by na malom hostingu (Render free, 512 MB) pri parse-ovaní
+    # vyčerpal pamäť a zhodil celú službu. Dáta sa do produkcie dostávajú cez
+    # manuálny import alebo migráciu DB. Zapneš výslovne premennou prostredia.
+    if os.getenv("SMARTHUB_ENABLE_AUTO_EXCEL_SYNC", "").strip().lower() not in (
+        "1",
+        "true",
+        "yes",
+    ):
+        return
     if os.getenv("SMARTHUB_DISABLE_AUTO_EXCEL_SYNC", "").strip().lower() in (
         "1",
         "true",
