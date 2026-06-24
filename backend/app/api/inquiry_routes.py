@@ -192,33 +192,37 @@ def inquiry_parse_status(
     }
 
 
-def _relaxed_internal_codes(
+# Najmenej spoľahlivé polia sa pri zotavovaní uvoľňujú ako prvé; norma + priemer
+# ostávajú ako kotvy čo najdlhšie.
+_RELAX_ORDER: tuple[str, ...] = ("v_class", "length", "surface", "diameter")
+
+
+def _field_options_with_fallback(
     session: Session,
     prepared: ProductSearchFilters,
+    field: str,
     *,
     build_options,
 ) -> list[str]:
     """
-    Záložné Smart kódy, keď striktná kaskáda nevráti nič — aby používateľ mohol
-    ručne vybrať kód aj pri nepresne napárovanej kombinácii. Postupne uvoľňuje
-    najmenej spoľahlivé polia (class → dĺžka → povrch), kým nezachová aspoň
-    normu + priemer.
+    Možnosti pre jedno pole, keď striktná kaskáda nič nevráti — aby sa prázdny
+    dropdown dal ručne vyplniť. Postupne uvoľní ostatné (menej dôležité) polia,
+    pričom samotné počítané pole zachová. Kotvou ostáva norma.
     """
     data = prepared.model_dump()
-    # Poradie uvoľňovania: vypusti class, potom dĺžku, potom povrch.
-    relax_steps: list[tuple[str, ...]] = [
-        ("v_class",),
-        ("v_class", "length"),
-        ("v_class", "length", "surface"),
-    ]
-    for drop in relax_steps:
+    dropped: list[str] = []
+    for candidate_field in _RELAX_ORDER:
+        if candidate_field == field:
+            continue
+        dropped.append(candidate_field)
         relaxed = {**data}
-        for field in drop:
-            relaxed[field] = None
-        candidate = ProductSearchFilters.model_validate(relaxed)
-        codes = build_options(session, candidate).get("internal_code", [])
-        if codes:
-            return codes
+        for name in dropped:
+            relaxed[name] = None
+        values = build_options(session, ProductSearchFilters.model_validate(relaxed)).get(
+            field, []
+        )
+        if values:
+            return values
     return []
 
 
@@ -234,12 +238,14 @@ def inquiry_filter_options_conditional(
     cache = CatalogSnapCache.load(session)
     prepared = prepare_inquiry_catalog_filters(filters, known_norma=cache.norma_values)
     options = _build_conditional_filter_options(session, prepared)
-    # Keď striktná kombinácia nemá žiadny Smart kód, ponúkni širší výber, aby sa
-    # prázdny dropdown dal ručne vyplniť (norma + priemer ako minimum).
-    if not options.get("internal_code") and (prepared.norma or prepared.diameter):
-        options["internal_code"] = _relaxed_internal_codes(
-            session, prepared, build_options=_build_conditional_filter_options
-        )
+    # Keď striktná kombinácia (napr. zo starých dát) nechá dropdown prázdny,
+    # ponúkni širší výber, aby sa pole dalo ručne opraviť. Kotvou je norma.
+    if prepared.norma:
+        for field in ("surface", "diameter", "length", "v_class", "internal_code"):
+            if not options.get(field):
+                options[field] = _field_options_with_fallback(
+                    session, prepared, field, build_options=_build_conditional_filter_options
+                )
     return options
 
 
