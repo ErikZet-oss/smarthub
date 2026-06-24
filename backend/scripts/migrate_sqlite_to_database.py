@@ -86,6 +86,12 @@ def _target_database_url() -> str:
         raise SystemExit(
             "Chýba TARGET_DATABASE_URL / DATABASE_URL. Nastav PostgreSQL URL (Neon)."
         )
+    # Render/Neon často ukazuje „postgresql://…" — SQLAlchemy + psycopg3 potrebuje
+    # explicitný driver. Doplníme ho, nech stačí skopírovať URL ako je.
+    if url.startswith("postgres://"):
+        url = "postgresql+psycopg://" + url[len("postgres://"):]
+    elif url.startswith("postgresql://"):
+        url = "postgresql+psycopg://" + url[len("postgresql://"):]
     return url
 
 
