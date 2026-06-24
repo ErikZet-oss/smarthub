@@ -193,8 +193,15 @@ def inquiry_parse_status(
 
 
 # Najmenej spoľahlivé polia sa pri zotavovaní uvoľňujú ako prvé; norma + priemer
-# ostávajú ako kotvy čo najdlhšie.
-_RELAX_ORDER: tuple[str, ...] = ("v_class", "length", "surface", "diameter")
+# ostávajú ako kotvy čo najdlhšie. `internal_code` sa uvoľňuje úplne prvé — keď je
+# riadok napárovaný na konkrétny produkt, ktorému v katalógu chýba hodnota (napr.
+# prázdny v_class), bez jeho uvoľnenia by dropdown ostal prázdny a nedal sa vyplniť.
+_RELAX_ORDER: tuple[str, ...] = ("internal_code", "v_class", "length", "surface", "diameter")
+
+
+def _clean_v_class_options(values: list[str] | None) -> list[str]:
+    """Odstráň placeholder triedy („0", prázdne) — nie sú reálnou pevnostnou triedou."""
+    return [v for v in (values or []) if v and v.strip() and v.strip() != "0"]
 
 
 def _field_options_with_fallback(
@@ -221,6 +228,8 @@ def _field_options_with_fallback(
         values = build_options(session, ProductSearchFilters.model_validate(relaxed)).get(
             field, []
         )
+        if field == "v_class":
+            values = _clean_v_class_options(values)
         if values:
             return values
     return []
@@ -244,14 +253,20 @@ def inquiry_filter_options_conditional(
         if canon and canon != prepared.norma:
             prepared = prepared.model_copy(update={"norma": canon})
     options = _build_conditional_filter_options(session, prepared)
+    # „0"/prázdne v_class je placeholder pre „bez triedy" — pre dropdown ho zahoď,
+    # nech sa pri napárovanom (no nevyplnenom) riadku dá vybrať reálna trieda.
+    options["v_class"] = _clean_v_class_options(options.get("v_class"))
     # Keď striktná kombinácia (napr. zo starých dát) nechá dropdown prázdny,
     # ponúkni širší výber, aby sa pole dalo ručne opraviť. Kotvou je norma.
     if prepared.norma:
         for field in ("surface", "diameter", "length", "v_class", "internal_code"):
             if not options.get(field):
-                options[field] = _field_options_with_fallback(
+                values = _field_options_with_fallback(
                     session, prepared, field, build_options=_build_conditional_filter_options
                 )
+                if field == "v_class":
+                    values = _clean_v_class_options(values)
+                options[field] = values
     return options
 
 
