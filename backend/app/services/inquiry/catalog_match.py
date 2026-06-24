@@ -10,7 +10,6 @@ from app.services.inquiry.catalog_snap import (
     _WASHER_BOLT_TO_INNER,
     _is_washer_norm,
     _row_norma_candidates,
-    infer_v_class_for_row,
     resolve_catalog_norma,
     resolve_washer_inner_diameter,
 )
@@ -46,6 +45,11 @@ def _resolve_inquiry_diameter(
         v_class=v_class,
     )
     diam_opts = cache.filter_options(session, filters).get("diameter", [])
+    # Novší katalóg drží podložky podľa veľkosti skrutky (M3 → „3"); ak je
+    # bolt-size priemer v katalógu, použijeme ho. Inak fallback na vnútorný
+    # priemer (starší formát, M3 → „3.2").
+    if diameter in diam_opts:
+        return diameter
     resolved = resolve_washer_inner_diameter(diameter, diam_opts)
     if resolved:
         return resolved
@@ -103,19 +107,17 @@ def find_catalog_products(
 
     cache = CatalogSnapCache.load(session)
     catalog_norma = resolve_catalog_norma(parsed.norma, known=cache.norma_values) or parsed.norma
+    catalog_norma = cache.canonical_norma(catalog_norma) or catalog_norma
     norm_row = parsed.model_copy(update={"norma": catalog_norma})
 
     length = normalize_length_mm(parsed.length)
     surface = (parsed.surface or "").strip() or None
     v_class = (parsed.v_class or "").strip() or None
     if _is_washer_norm(catalog_norma, parsed.raw_text):
-        washer_class = infer_v_class_for_row(
-            norma=catalog_norma,
-            surface=surface,
-            raw_text=parsed.raw_text,
-        )
-        if washer_class:
-            v_class = washer_class
+        # Katalóg drží pri podložkách triedu ako tvrdosť (140HV, 200HV) alebo
+        # materiál (A2-50), čo sa z dopytu spoľahlivo odvodiť nedá — preto pri
+        # podložkách podľa class nefiltrujeme a rozlíšime povrchom + názvom.
+        v_class = None
 
     diameter = _resolve_inquiry_diameter(
         session,
@@ -127,7 +129,7 @@ def find_catalog_products(
         cache=cache,
     )
 
-    norm_keys = _row_norma_candidates(norm_row, known=cache.norma_values)
+    norm_keys = _row_norma_candidates(norm_row, known=cache.norma_values, cache=cache)
     seen_norm_queries: set[str] = set()
     for base_norm in norm_keys:
         candidate = norm_row.model_copy(update={"norma": base_norm})

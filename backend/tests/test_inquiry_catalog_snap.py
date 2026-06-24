@@ -60,7 +60,7 @@ def test_snap_inquiry_matica_to_catalog(session) -> None:
         quantity=1,
     )
     snapped = snap_inquiry_line_to_catalog(session, row)
-    assert snapped.norma == "934"
+    assert snapped.norma == "DIN 934"
     assert snapped.diameter == "3"
     assert snapped.length == "0"
     assert snapped.v_class in (None, "")
@@ -92,8 +92,8 @@ def test_snap_inquiry_nerez_washer_din125(session) -> None:
         quantity=200,
     )
     snapped = snap_inquiry_line_to_catalog(session, row)
-    assert snapped.norma == "125a"
-    assert snapped.diameter == "4.3"
+    assert snapped.norma == "DIN 125a"
+    assert snapped.diameter == "4"
     assert snapped.surface == "Nerez A2"
     assert snapped.v_class == "A2-50"
     assert not snapped.catalog_warnings
@@ -110,8 +110,8 @@ def test_snap_inquiry_polyamid_washer_din125(session) -> None:
         quantity=200,
     )
     snapped = snap_inquiry_line_to_catalog(session, row)
-    assert snapped.norma == "125a"
-    assert snapped.diameter == "3.2"
+    assert snapped.norma == "DIN 125a"
+    assert snapped.diameter == "3"
     assert snapped.surface == "Polyamid"
     assert snapped.v_class == "0"
     assert not snapped.catalog_warnings

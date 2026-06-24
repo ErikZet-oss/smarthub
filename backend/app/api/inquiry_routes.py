@@ -192,6 +192,36 @@ def inquiry_parse_status(
     }
 
 
+def _relaxed_internal_codes(
+    session: Session,
+    prepared: ProductSearchFilters,
+    *,
+    build_options,
+) -> list[str]:
+    """
+    Záložné Smart kódy, keď striktná kaskáda nevráti nič — aby používateľ mohol
+    ručne vybrať kód aj pri nepresne napárovanej kombinácii. Postupne uvoľňuje
+    najmenej spoľahlivé polia (class → dĺžka → povrch), kým nezachová aspoň
+    normu + priemer.
+    """
+    data = prepared.model_dump()
+    # Poradie uvoľňovania: vypusti class, potom dĺžku, potom povrch.
+    relax_steps: list[tuple[str, ...]] = [
+        ("v_class",),
+        ("v_class", "length"),
+        ("v_class", "length", "surface"),
+    ]
+    for drop in relax_steps:
+        relaxed = {**data}
+        for field in drop:
+            relaxed[field] = None
+        candidate = ProductSearchFilters.model_validate(relaxed)
+        codes = build_options(session, candidate).get("internal_code", [])
+        if codes:
+            return codes
+    return []
+
+
 @router.post("/inquiries/filter-options/conditional")
 def inquiry_filter_options_conditional(
     filters: ProductSearchFilters,
@@ -203,7 +233,14 @@ def inquiry_filter_options_conditional(
 
     cache = CatalogSnapCache.load(session)
     prepared = prepare_inquiry_catalog_filters(filters, known_norma=cache.norma_values)
-    return _build_conditional_filter_options(session, prepared)
+    options = _build_conditional_filter_options(session, prepared)
+    # Keď striktná kombinácia nemá žiadny Smart kód, ponúkni širší výber, aby sa
+    # prázdny dropdown dal ručne vyplniť (norma + priemer ako minimum).
+    if not options.get("internal_code") and (prepared.norma or prepared.diameter):
+        options["internal_code"] = _relaxed_internal_codes(
+            session, prepared, build_options=_build_conditional_filter_options
+        )
+    return options
 
 
 @router.post("/inquiries/rows/enrich-codes")

@@ -32,7 +32,7 @@ def test_find_pozink_washer_maps_m3_to_inner_diameter(session) -> None:
     products = find_catalog_products(session, row, limit=3)
     assert products
     assert products[0].internal_code == "311702150032"
-    assert products[0].diameter == "3.2"
+    assert products[0].diameter == "3"
 
 
 def test_find_pozink_washer_prefers_product_with_supplier_mapping(session) -> None:
@@ -40,7 +40,7 @@ def test_find_pozink_washer_prefers_product_with_supplier_mapping(session) -> No
         row_index=36,
         raw_text="Plochá podložka DIN 125-1A Oceľ Pozinkované 140 HV M3",
         norma="125a",
-        diameter="3.2",
+        diameter="3",
         surface="Oceľ pozinkovaná",
         v_class="0",
         length="0",

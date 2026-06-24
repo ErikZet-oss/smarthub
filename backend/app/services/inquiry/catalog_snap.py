@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app.models.entities import Product
@@ -80,18 +81,63 @@ _WASHER_BOLT_TO_INNER: dict[str, str] = {
 }
 
 
+def _norma_group_key(value: str) -> str:
+    """Spoločný kľúč pre duplicitné normy (934 ↔ DIN 934, 439 2 ↔ DIN 439 2)."""
+    s = (value or "").strip().lower()
+    if s.startswith("din"):
+        s = s[3:]
+    return re.sub(r"[^a-z0-9]", "", s)
+
+
 @dataclass
 class CatalogSnapCache:
     norma_values: list[str] = field(default_factory=list)
+    norma_counts: dict[str, int] = field(default_factory=dict)
     _filter_opts: dict[str, dict[str, list[str]]] = field(default_factory=dict)
+    _canonical: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def load(cls, session: Session) -> CatalogSnapCache:
         rows = session.exec(
-            select(Product.norma).distinct().where(Product.norma.is_not(None))  # type: ignore[union-attr]
+            select(Product.norma, func.count())  # type: ignore[arg-type]
+            .where(Product.norma.is_not(None))  # type: ignore[union-attr]
+            .group_by(Product.norma)
         ).all()
-        norma_values = sorted({str(v).strip() for v in rows if v is not None and str(v).strip()})
-        return cls(norma_values=norma_values)
+        counts: dict[str, int] = {}
+        for norma, cnt in rows:
+            key = str(norma).strip()
+            if key:
+                counts[key] = int(cnt or 0)
+        norma_values = sorted(counts.keys())
+        cache = cls(norma_values=norma_values, norma_counts=counts)
+        cache._build_canonical()
+        return cache
+
+    def _build_canonical(self) -> None:
+        """Pre každú skupinu duplicitných noriem zvol variant s najviac produktmi.
+
+        Katalóg po importe drží normu konzistentne s prefixom (napr. „DIN 934"
+        = 621 produktov), ale zopár chybných riadkov ostane bez prefixu
+        („934" = 1). Bez tohto zjednotenia by párovanie/dropdown vybralo
+        prázdny variant a nenašlo nič.
+        """
+        groups: dict[str, list[str]] = {}
+        for value in self.norma_values:
+            groups.setdefault(_norma_group_key(value), []).append(value)
+        for variants in groups.values():
+            if len(variants) < 2:
+                continue
+            best = max(variants, key=lambda v: self.norma_counts.get(v, 0))
+            for variant in variants:
+                if variant != best:
+                    self._canonical[variant] = best
+
+    def canonical_norma(self, norma: str | None) -> str | None:
+        """Mapuje stray variant normy na ten s najviac produktmi (inak nezmení)."""
+        raw = (norma or "").strip()
+        if not raw:
+            return norma
+        return self._canonical.get(raw, raw)
 
     def filter_options(self, session: Session, filters: ProductSearchFilters) -> dict[str, list[str]]:
         from app.api.routes import _build_conditional_filter_options
@@ -503,7 +549,12 @@ def _match_product_by_raw_text(products: list[Product], raw_text: str) -> Produc
     return None
 
 
-def _row_norma_candidates(row: InquiryLineParsed, *, known: list[str]) -> list[str]:
+def _row_norma_candidates(
+    row: InquiryLineParsed,
+    *,
+    known: list[str],
+    cache: CatalogSnapCache | None = None,
+) -> list[str]:
     seen: set[str] = set()
     out: list[str] = []
 
@@ -516,6 +567,10 @@ def _row_norma_candidates(row: InquiryLineParsed, *, known: list[str]) -> list[s
     add(row.norma)
     add(resolve_catalog_norma(row.norma, known=known))
     add(_resolve_catalog_norma_spaced_variant(row.norma, row.raw_text, known=known))
+    # Stray varianty (934, 439 2) nahraď tými s reálnymi produktmi (DIN 934, …).
+    if cache is not None:
+        for value in list(out):
+            add(cache.canonical_norma(value))
     return out
 
 
@@ -524,7 +579,7 @@ def _lookup_unique_internal_code(
     row: InquiryLineParsed,
     cache: CatalogSnapCache,
 ) -> str | None:
-    for norma in _row_norma_candidates(row, known=cache.norma_values):
+    for norma in _row_norma_candidates(row, known=cache.norma_values, cache=cache):
         candidate_row = row.model_copy(update={"norma": norma})
         products = session.exec(
             _product_query_from_row(candidate_row, known_norma=cache.norma_values).limit(20)
@@ -568,13 +623,23 @@ def _catalog_mismatch_warnings(
     required = [row.norma, row.diameter, row.quantity]
     if not all(x is not None and str(x).strip() for x in required[:2]):
         return warnings
-    if not _product_exists(session, row):
+    if not _product_exists(session, row, known_norma=cache.norma_values):
         warnings.append("Táto kombinácia parametrov v katalógu neexistuje")
     return warnings
 
 
-def _product_exists(session: Session, row: InquiryLineParsed) -> bool:
-    return session.exec(_product_query_from_row(row).limit(1)).first() is not None
+def _product_exists(
+    session: Session,
+    row: InquiryLineParsed,
+    *,
+    known_norma: list[str] | None = None,
+) -> bool:
+    return (
+        session.exec(
+            _product_query_from_row(row, known_norma=known_norma).limit(1)
+        ).first()
+        is not None
+    )
 
 
 def snap_inquiry_line_to_catalog(
@@ -611,6 +676,10 @@ def snap_inquiry_line_to_catalog(
     )
     if spaced:
         data["norma"] = spaced
+    # Zjednoť na variant normy s reálnymi produktmi (934 → DIN 934, 439 2 → DIN 439 2).
+    canonical = snap_cache.canonical_norma(str(data.get("norma") or ""))
+    if canonical:
+        data["norma"] = canonical
 
     if is_pin_norm(data.get("norma"), row.raw_text) or is_pin_norm(row.norma, row.raw_text):
         tol = extract_pin_tolerance_fit(row.raw_text)

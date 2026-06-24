@@ -58,7 +58,7 @@ def test_snap_pin_6325_m6_to_catalog(session) -> None:
     raw = "Valcový kolík (čapový kolík) kalený, tolerancia m6 DIN 6325 Oceľ 60±2HRC Nelegovaná 3x30MM"
     parsed = parse_inquiry_line(raw, row_index=13)
     snapped = snap_inquiry_line_to_catalog(session, parsed)
-    assert snapped.norma == "6325 M6"
+    assert snapped.norma == "DIN 6325 M6"
     assert snapped.v_class == "M6"
     assert snapped.diameter == "3"
     assert snapped.length == "30"

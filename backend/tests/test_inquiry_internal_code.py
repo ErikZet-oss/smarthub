@@ -96,7 +96,7 @@ def test_enrich_snaps_before_lookup(session: Session) -> None:
     )
     enriched = enrich_inquiry_rows_internal_codes(session, [row])
     assert enriched[0].internal_code == "311403250120"
-    assert enriched[0].norma == "439 2"
+    assert enriched[0].norma == "DIN 439 2"
 
 
 def test_enrich_rows_fills_missing_codes(session: Session) -> None:
