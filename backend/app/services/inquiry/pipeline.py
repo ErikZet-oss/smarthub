@@ -310,11 +310,17 @@ async def run_inquiry_batch_async(
     if not rows:
         raise ValueError("Dopyt neobsahuje žiadne riadky.")
 
-    rows = snap_inquiry_batch_to_catalog(
-        session,
-        rows,
-        progress_cb=snap_progress_cb,
-    )
+    try:
+        rows = snap_inquiry_batch_to_catalog(
+            session,
+            rows,
+            progress_cb=snap_progress_cb,
+        )
+    except Exception:
+        # Ak zlyhá zosúladenie s katalógom (napr. výpadok DB), nepadni celým behom —
+        # pokračuj s pôvodnými riadkami. Každý riadok si spraví vlastný lookup a
+        # prípadná chyba sa prejaví len pri tom riadku, nie na celom dopyte.
+        pass
 
     from app.db import engine
 
@@ -327,23 +333,35 @@ async def run_inquiry_batch_async(
 
     async def _process_row(idx: int, row: InquiryLineParsed) -> None:
         nonlocal done_count
-        async with row_semaphore:
-            with Session(engine) as row_session:
-                result = await _run_line_async(
-                    row_session,
-                    row=row,
-                    supplier_ids=supplier_ids,
-                    user_id=user_id,
-                    semaphore=supplier_semaphore,
-                    bulk_inquiry=True,
-                )
-            results[idx] = result
-        async with progress_lock:
-            done_count += 1
-            if progress_cb:
-                progress_cb(done_count, total)
+        try:
+            async with row_semaphore:
+                with Session(engine) as row_session:
+                    result = await _run_line_async(
+                        row_session,
+                        row=row,
+                        supplier_ids=supplier_ids,
+                        user_id=user_id,
+                        semaphore=supplier_semaphore,
+                        bulk_inquiry=True,
+                    )
+                results[idx] = result
+        except Exception as exc:
+            # Chyba pri jednom riadku (napr. výpadok DB pri lookupe) nesmie zhodiť
+            # celý dopyt — zaznač ju len pri tomto riadku, ostatné nech dobehnú.
+            msg = str(exc).strip() or type(exc).__name__
+            results[idx] = _line_from_parsed(row).model_copy(
+                update={"status": "error", "error": f"Chyba spracovania riadku: {msg}"}
+            )
+        finally:
+            async with progress_lock:
+                done_count += 1
+                if progress_cb:
+                    progress_cb(done_count, total)
 
-    await asyncio.gather(*(_process_row(i, row) for i, row in enumerate(rows)))
+    await asyncio.gather(
+        *(_process_row(i, row) for i, row in enumerate(rows)),
+        return_exceptions=True,
+    )
     return [r for r in results if r is not None]
 
 
